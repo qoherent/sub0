@@ -1,0 +1,19 @@
+# Reference clones (upstream sources, re-obtainable)
+/fx/
+/pi/
+
+# Docker build contexts that mirror clones
+docker/fx-src/fx/
+docker/fx-src/.dockerignore
+
+# Node / experiment artifacts
+node_modules/
+package-lock.json
+package.json
+*.log
+
+# fx/pi runtime state
+.fx/
+.pi/
+.zig-cache/
+zig-out/
