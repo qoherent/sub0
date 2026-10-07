@@ -1,0 +1,6 @@
+/fx/.git
+/fx/node_modules
+/fx/zig-out
+/fx/.zig-cache
+*.log
+**/node_modules

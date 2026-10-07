@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:subzero:protocol:0.1:operations",
+  "title": "Subzero v1 host operations",
+  "oneOf": [
+    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/get" },
+    { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/send" }, { "$ref": "#/$defs/stop" },
+    { "$ref": "#/$defs/resume" }, { "$ref": "#/$defs/output" }
+  ],
+  "$defs": {
+    "credentialModel": {
+      "type": "object", "additionalProperties": false, "required": ["url", "model", "credentialRef"],
+      "properties": {
+        "url": { "type": "string", "format": "uri", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "credentialRef": { "type": "string", "minLength": 1 },
+        "api": { "type": "string", "minLength": 1 }
+      }
+    },
+    "info": {
+      "type": "object", "additionalProperties": false, "required": ["operation"],
+      "properties": { "operation": { "const": "subzero_info" }, "arguments": { "type": "object", "maxProperties": 0 } }
+    },
+    "spawn": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_spawn" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["prompt", "templateId", "model"],
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1 }, "templateId": { "type": "string", "minLength": 1 },
+          "model": { "$ref": "#/$defs/credentialModel" }
+        }
+      } }
+    },
+    "get": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_get" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["childId"],
+        "properties": {
+          "childId": { "type": "string", "minLength": 1 }, "waitMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+          "cursor": { "type": "integer", "minimum": 0 }, "eventLimit": { "type": "integer", "minimum": 1, "maximum": 50 },
+          "previewLimit": { "type": "integer", "minimum": 0, "maximum": 2048 }
+        }
+      } }
+    },
+    "list": {
+      "type": "object", "additionalProperties": false, "required": ["operation"],
+      "properties": { "operation": { "const": "subzero_list" }, "arguments": {
+        "type": "object", "additionalProperties": false, "properties": { "workspaceRoot": { "type": "string", "minLength": 1 } }
+      } }
+    },
+    "send": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_send" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["childId", "mode", "message"],
+        "properties": {
+          "childId": { "type": "string", "minLength": 1 }, "mode": { "enum": ["steer", "followup"] },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      } }
+    },
+    "stop": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_stop" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["childId", "expectedRunId"],
+        "properties": { "childId": { "type": "string", "minLength": 1 }, "expectedRunId": { "type": "string", "minLength": 1 } }
+      } }
+    },
+    "resume": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_resume" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["childId", "model"],
+        "properties": {
+          "childId": { "type": "string", "minLength": 1 }, "model": { "$ref": "#/$defs/credentialModel" },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      } }
+    },
+    "output": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_output" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["artifactId"],
+        "properties": {
+          "artifactId": { "type": "string", "minLength": 1 }, "offset": { "type": "integer", "minimum": 0 },
+          "length": { "type": "integer", "minimum": 1, "maximum": 65536 }
+        }
+      } }
+    }
+  }
+}

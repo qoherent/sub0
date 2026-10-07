@@ -1,151 +1,160 @@
-# Subzero core design (implementation-ready; strategy in PLAN.md)
+# Subzero v0.1 reference design and implemented behavior
 
-> Adapters (Pi/CC/ACP) are deferred to the end — they are thin doors over this spec.
+Status: the selected v0.1 architecture has a working TypeScript implementation. Build, typecheck, 90 tests, real LongCat delegation through Pi 1.0.4, and local package/CLI/MCP checks passed on Node 24.21.0/Linux. Other host setups remain untested. Process exit evidence covers ordinary POSIX descendants on Linux; deliberately detached sessions and other operating systems are outside the tested guarantee. This shared-workspace design is not an OS sandbox. See [testing evidence](TESTING.md).
 
-## 1. Core API (harness-free, dependency-free ESM TS)
-`createCore({ engine, config, registry, clock? }) -> { spawn, send, stop, resume, list, subscribe, respond, info }`
-`respond { requestId, optionId }` — answers a pending `permission_request` (E12 round-trip).
+## 1. Responsibility boundaries
 
-- `spawn { prompt, template?, provider?, cwd? } -> { id }` **blocking**; resolves with final child
-  message. Details: `{ id, provider, model?, usage?, stopReason, durationMs }`. AbortSignal (from
-  host) cancels the child and rejects with `stopped`.
-- `send { id, message }` — running → park (emits `steer_queued`), drained as new prompt on
-  `end_turn`; idle → prompt now. CLI providers: park-until-exit is pointless → `busy` error unless
-  idle (capability-gated, see §5).
-- `stop { id }` — ACP: `session/cancel` (session kept for resume); CLI: SIGTERM → 5s → SIGKILL.
-  Idempotent. Registry entry kept.
-- `resume { id, message? }` — fresh engine attach to stored session (`session/load`); optional
-  prompt after load. Requires live registry ref (else `unknown_id`).
-- `list {}` — registry snapshot `{ id, provider, template?, state: idle|running|parked|stopped, startedAt }`.
-- `subscribe { id }` — async iterator of §2 events; multiple subscribers allowed; late joiners get
-  state snapshot event first.
-- `info {}` — catalog for the parent agent: providers + capability matrix + auth-state, templates +
-  behavior text, backend (native/wasm), versions (`subzero`, `fx`, `fxSdkApiVersion`).
+Subzero is a host-facing delegation layer. The parent agent calls Subzero tools through the host adapter. It is not a second host conversation, an external CLI provider catalog, or an ACP host facade.
 
-## 2. Event vocabulary (subscribe; stable, versioned `subzero.events.v1`)
-`spawned`, `turn_start`, `update` (text delta, truncated), `tool_start`/`tool_end` (name only), `permission_request` {requestId, tool, rawInput, options[]} — host MUST answer via `respond`,
-`steer_queued` {position}, `turn_end` {stopReason, usage?}, `parked_drained`, `stopped` {cause},
-`error` {code, message}, `exit` (cli only, {exitCode}). Adapters map these to their native surfaces
-(ACP updates, MCP notifications, Pi `onUpdate`) — never expose raw fx/CLI wire formats.
+Host session: parent conversation, transcript, model, and UI. Owned by Codex, Pi, Claude Code, OpenCode, or another host.
 
-## 3. Engine interface (the seam — fx stays replaceable, vision #4)
-```ts
-interface Engine {
-  capabilities: { steer: boolean; resume: boolean; stream: boolean };
-  spawn(req: { prompt, cwd, instructions, tools[], env? }, signal): ChildHandle;
-  // ChildHandle: { id, events: AsyncIterable<Event>, result: Promise<Result>, send?(text), stop() }
-}
-```
-`Result = { output: string; stopReason: end_turn|cancelled|failed|max_output_tokens|refused; usage? }`.
-Capabilities drive `send` behavior and `info`; unsupported ops fail with `unsupported_by_provider`.
+Child session: persistent child-agent conversation with a stable childId, template snapshot, workspace scope, model choice, and worker-owned transcript.
 
-## 4. Engines
-- **AcpEngine (default, llm providers)** — one `fx acp` process per child; `initialize` →
-  `session/new` → `session/prompt`; **tools = fx native builtins, projected per permission mode**
-  (E12-proven: `write_file` ran; under `ask`, `session/request_permission` arrives structured —
-  `{toolCall{name,rawInput}, options:[{optionId:"allow_once"...}]}` — core relays it as a
-  `permission_request` event; host answers via `respond {optionId}`; template sets the mode:
-  researcher=read-only, coder=ask). Provider/model per session via `session/set_config_option`
-  (E3-proven). Stop = `session/cancel`; resume = new process + `session/load` (history replays via
-  updates — adapters must not double-render). Version probe at first spawn: `fx --version` ≥
-  minimum floor (0.0.11), else `version_unsupported` with 'update fx' pointer. Wasm fallback: deferred to M4+ (16 `fx.*` host
-  imports — bounded but not worth it while binary works).
-- **CliEngine (declarative CLI backends, DESIGN §7 of old; now §6)** — one generic process driver;
-  prompt via arg/flag/stdin; stdout tail (bounded) as `update`s; session-id regex → resume flag;
-  exit code → stopReason map. No per-CLI code, ever.
-- **LibfxEngine (gateway-only)** — `createFxAgent` in-proc; steer-capable; kept because it is the
-  only engine with true mid-turn steer today; blocked from custom providers upstream (bug filed).
+Run: one attempt to process a prompt in a child session, with a stable runId, status, result, and events.
 
-## 5. Providers & capability matrix
-Provider = child backend (llm endpoint OR coding CLI). Matrix in `info`:
-| provider kind | steer | resume | stream | notes |
-|---|---|---|---|---|
-| llm (gateway/codex/custom) | queue-only* | yes | yes | *true steer only on LibfxEngine |
-| cli | no | if `resume` declared | tail | stop = SIGTERM→KILL |
-Unknown provider → `provider_unknown` with `info`-style suggestions. Fleet rule: custom base_url
-needs https off-loopback, no underscore hostnames (fx enforces).
+Architecture:
 
-## 6. Zero default, parent grants (non-negotiable)
-Children start with the LEAST capable mode. Templates grant via: `permissionMode`
-(read-only | ask | auto | yolo) — on AcpEngine this projects fx's builtin tool set (read-only
-projection vs full) and routes mutations through `session/request_permission`; nested spawn is
-impossible because fx's own `subagent` builtin is never in the child's projection (depth 1 by
-construction). `mcpServers[]` per template (B5: MCP SDK client in core, lazy, approval-brokered).
-LibfxEngine additionally supports explicit host-descriptor allowlists. Evidence: E12 (both modes).
+    Host agent
+      -> host registration adapter
+        -> Subzero MCP stdio process
+          -> @subzero/core: state, limits, queues, routing, events
+          -> @subzero/runtime: SQLite, MCP server, Pi SDK worker
+            -> one worker process per child while runs are active or queued
 
-## 7. Config (`subzero.json`; home > project > builtins; version + forward-only migration)
-```jsonc
-{ "version": 1,
-  "defaults": { "provider": "gateway", "maxChildren": 4 },
-  "providers": { /* llm: fx-shaped pass-through | cli: declarative (§4) */ },
-  "templates": { "researcher": { "extends": "builtin:researcher" },
-                 "coder": { "extends": "builtin:coder", "tools": ["read","bash","edit","write"],
-                            "instructionsFile": "./coder.md" } } }
-```
-Secrets via `apiKeyEnv` only. Merge: per-key, project wins; `extends` deep-merges builtin data files.
-CC-side `.claude/subzero.local.md` overrides merge OVER this (adapter-layer only).
+The host owns the parent conversation. Subzero owns child identity, run routing, queues, state, metadata, and event cursors. The worker owns its model loop, transcript/checkpoint, and child tool execution.
 
-## 8. Registry, persistence, GC
-Registry = `{ id, provider, template?, sessionId|cliSession?, state, startedAt }` persisted as tiny
-entries in the HOST's session store (Pi: `appendCustomEntry`; plain JSONL elsewhere). Blobs live in
-fx's own `~/.fx/sessions/<id>/` (AcpEngine) — never copied into host sessions. Restore on
-`session_start` from host branch; `session_shutdown` → stop all running (idempotent). GC at start:
-registry refs whose host session is gone, or mtime > 30d. CLI children: no blobs, registry only.
+## 2. Host transport and process ownership
 
-## 9. Ops
-- Version policy (owner: track latest; no host pins):
-  - Hosts (Pi, Claude Code): NO version constraints — `peerDependencies: "*"`; track latest
-    (pi@0.99.x today). Adapter Node floor = whatever the latest host declares (Pi: `>=22.19`
-    today); core itself needs only Node >=20 (fx native). Not our constraint to pin.
-  - fx-family (`libfx` dep, `fx` binary): track latest via **deliberate tested bumps** (bump gate:
-    rerun cancel-matrix + provider-switch + resume on each new version). Exact-pin the dep because
-    npm 0.0.x semver makes `^0.0.12` resolve to exactly 0.0.12 anyway — pinning is free and makes
-    intent explicit. Binary floor `>=0.0.11` (evidence base) + prompt users to latest.
-    Never ambient floats: fx broke API in 6 of 11 releases.
-  - `@modelcontextprotocol/sdk` / ACP TS SDK: latest at implementation start (M3 / M6).
-  Envelope `{subzeroVersion, fxSdkApiVersion, sessionId}`.
-- Resume across versions: same SDK → resume; newer → best-effort; older → refuse `update_subzero`.
-- Errors (codes, stable): `provider_unknown`, `provider_unavailable`, `unsupported_by_provider`,
-  `template_unknown`, `version_unsupported`, `busy`, `unknown_id`, `stopped`, `depth_exceeded`.
-- Limits: `maxChildren` (default 4, refuse `busy` beyond), instructions ≤64 KiB, update tail ≤8 KiB
-  per event, tool results spill to files (8 MiB fx frame / 50 KiB Pi / 25k tok CC walls).
+Use one local MCP stdio process per active host MCP client/process. Codex, Claude Code, and OpenCode configure the same executable. The Pi package uses the documented registerMcpServer API to register that executable for its session; it does not implement a second native tool set or registry.
 
-## 10. Hosts (deferred — build last, each maps §1–§2 onto native surface)
-Pi: `registerTool` + `/subagent` commands + `promptSnippet` catalog + `session_shutdown` hook.
-CC: plugin + MCP server (namespace automatic; `subscribe`→polling). ACP: stdio agent
-(`session/*` = §1; steer as `_subzero/steer` until upstream).
+No global daemon or HTTP listener in v1. The host starts/stops its MCP process. Each broker process owns the live child-worker process handles it created. A worker process exists only while that child has active or queued runs; after all runs settle it closes, releasing memory and the writer slot while the durable child session remains ready. Control-pipe EOF cancels the run and kills the worker/tool subprocess tree. Workers must not detach.
 
-## 11. Evidence appendix (Docker-verified 2026-09-28/30, repro in `docker/{fx-src,libfx-play,pi-proof}`)
-ACP: spawn/prompt/cancel/load work (`end_turn`, usage, `configOptions`); steer absent. libfx@0.0.11:
-custom providers broken (streams then `refused`; no upstream issue exists — file it, refs #160/#514
-near-misses). Credentials: `$HOME/.fx` profile files, inherited (parent token proven on codex
-transport). TLS: http loopback-only; no underscore hostnames. Runtimes: fx native Node≥20 + glibc
-2.34+; Pi needs Node ≥22.19.
+On clean broker shutdown, request stop for active runs, clear queued follow-ups, wait for worker termination, and persist stopped/interrupted state. On broker crash, the worker observes EOF and tears down its tool subtree. Another broker may claim the child only after exclusive ownership is released and worker termination is confirmed. If that cannot be confirmed, return busy/recovery_required; do not start a second transcript writer.
 
-Experiment round 2 (2026-09-30):
-- E3 provider switch mid-session: `session/set_config_option` (`configId:"provider"`, value=provider
-  id) WORKS — routing changed to second mock; per-session provider selection is ACP-native, so
-  subzero needs NO per-child settings.json (configOptions also enumerate gateway/codex/grok/custom).
-- E4 `fx --version`: bare semver `0.0.11`, exit 0 — parse-stdout gate is stable.
-- E5 concurrency: 4 parallel `fx acp` processes, one shared `$HOME/.fx` — 4/4 `end_turn`, zero lock
-  errors. `maxChildren` default 4 is safe.
-- E6 cancel matrix: mid-turn → `cancelled` (settles); double-cancel → no-op, process healthy;
-  cancel after `end_turn` → no-op; `session/load` while busy → fast typed `Session is busy`.
-  Upstream leaves these unspecified (E9) — our matrix IS the contract.
-- E10 limits: 512 KiB prompt accepted; 40 KiB deltas delivered untruncated → OUR clamps
-  (8 KiB/update tail, 64 KiB instructions) are policy, not transport necessity.
-- E1 wasm-direct: DEFERRED (M4+). fx-core.wasm needs 38 WASI fns + 16 `fx.*` host imports
-  (sessions, oauth, tools, steering, http) — bounded work (~200–400 LOC, reference in
-  `fx-sdk.js createRuntime`) but coupled to fx internals; binary mode already proven, so the
-  zero-install win does not justify the maintenance now. libfx-in-proc remains the steer-capable
-  wasm option (gateway-only).
-- E2 Pi lifecycle (pi@0.99.1, Docker): `session_start` fires only after `session.bindExtensions()`
-  (SDK does not auto-bind — M1 adapter must call it); `session_shutdown` fires on `/reload` and
-  session replacement (reason field) — exactly the stale-ctx risk; abrupt parent death is covered
-  by **stdin EOF self-exit** (fx acp exits ~10ms after pipe close, code 0) — no orphans. Real LLM
-  round-trip via `models.json` compatible endpoint (`api:"openai-completions"`, dummy apiKey)
-  works; drift check 0.87.1→0.99.1: registerTool/appendCustomEntry/models.json shapes unchanged.
-- E9 upstream sweep: no existing libfx+providers issue (ours to file); ACP `session/cancel`
-  core semantics specified, double/no-op/load cases UNSPECIFIED; PR #1261 (steer) still open;
-  **PR #1992 subagents RFD MERGED 2026-09-30 (unstable)** — M6 must adopt upstream subagent
-  schema when stable instead of inventing child-session conventions.
+Child IDs are persisted under a canonical OS-user/workspace scope, not a host-specific session ID. A restarted host can list and resume by childId. Hosts do not need to share their own conversation IDs.
+
+## 3. Package boundaries
+
+- @subzero/core: language-neutral JSON Schemas/conformance fixtures plus TypeScript reference orchestration, state transitions, limits, queues, event cursor logic. No Node, Pi, MCP SDK, SQLite, ACP, or worker package imports.
+- @subzero/runtime: MCP stdio server, Node 24.15+ SQLite storage adapter, per-child Pi SDK worker process, event/result normalization, host-secret-reference resolution.
+- @subzero/pi: thin Pi extension package. Registers @subzero/runtime with pi.registerMcpServer and optional command aliases. Imports neither SQLite nor the worker SDK.
+
+The worker dependency is exact-pinned to Pi SDK 1.0.4. No wildcard host or worker compatibility claim. Publish a tested-version table for each host adapter. Reject an incompatible worker transcript/session version; do not perform best-effort mutation across versions.
+
+## 4. Public JSON contract and reference API
+
+The normative contract is a versioned JSON Schema set plus documented state/capability semantics. It is independent of TypeScript and can be implemented by non-JavaScript hosts. The TypeScript reference API is illustrative. Ship conformance fixtures with the schemas.
+
+Core reference values:
+
+    type TemplateId = string;
+    type ModelArgs = { url: string; model: string; key: string; api?: string };
+    type SendMode = "steer" | "followup";
+    type Delivery = "steered" | "queued" | "started";
+
+    type SpawnInput = {
+      prompt: string;
+      templateId: TemplateId;
+      model: ModelArgs;
+      workspaceRoot: string; // host supplied execution context
+    };
+
+Core operations:
+
+    info()
+    spawn(input) -> { childId, runId }
+    get(childId, { waitMs?, cursor? }) -> ChildSnapshot
+    subscribe(childId, cursor?) -> AsyncIterable<ChildEvent>
+    list(workspaceRoot?) -> ChildSummary[]
+    send(childId, mode, message) -> { runId, delivery }
+    stop(childId, expectedRunId) -> StopRequest
+    resume(childId, modelArgs, message?) -> ready | new Run
+    readArtifact(artifactId, offset, length) -> ArtifactChunk
+
+The core receives the literal model key in memory. The MCP schema receives credentialRef and the runtime resolves it before calling core. The API protocol defaults to openai-completions, as qualified by the probe; other protocols must be explicitly selected from the engine's advertised supported protocols. Do not infer a protocol from the endpoint URL. Worker/session SDK types are private to the runtime adapter.
+
+## 5. Template and capability contract
+
+Built-in templates are researcher and coder. User templates are keyed by arbitrary string templateId and contain:
+
+- instructions;
+- exact tool descriptors and grants;
+- explicit skills[];
+- explicit MCP server configurations and allowed tool names.
+
+At spawn, resolve and persist an immutable template/grant snapshot. A resume reuses the same snapshot. If its required worker adapter/version is unavailable, return a typed incompatibility error. Never add new tools, skills, or MCP servers silently on resume.
+
+Researcher gets exact read-tool names and no write or shell tools. Coder gets its own exact read, write, and command tool names. User-defined string template IDs follow the same schema. No tools are inherited from the host or ambiently discovered. Subzero delegation tools are not registered in a child; nested delegation is outside the v1 contract.
+
+The runtime MCP client connects only to the MCP servers explicitly in the template. It maps only their declared tools to the worker's custom-tool surface. Skill files and tool catalogs are loaded only from the snapshot, not from ambient host folders.
+
+If the worker cannot enforce the exact requested grant set, fail spawn before model execution. No general permission-approval broker is part of v1; ungranted capabilities fail closed.
+
+## 6. Workspace and model inputs
+
+The host adapter supplies the canonical workspace root. It selects the working directory and metadata scope, not a filesystem boundary: Pi's native file tools accept paths outside cwd, and a granted shell runs with the launching user's OS authority. The prompt and template are explicit. Parent transcript/history is not copied implicitly.
+
+Children share the workspace. SQLite-backed admission serializes Subzero write-capable runs across broker processes sharing the workspace. Read-only children may run concurrently. This serialization does not prevent the parent host, another non-Subzero process, or external tools from editing files. It is not a sandbox.
+
+The core receives {url, model, key} for spawn and explicit resume in memory. Do not read ambient Pi, fx, Codex, or host-provider credentials. Do not store raw keys. The MCP-visible schema accepts credentialRef; the runtime resolves it against explicitly configured environment or secret references, then passes key material to core in memory. A missing reference returns credentials_required. Within a live broker, a later followup reopens the worker using the selected child model and its in-memory key. After broker restart, the host must call resume with a credential reference before sending more work.
+
+The caller selects model URL, model, API protocol, and credential reference on spawn and explicit resume. The credential resolver accepts only references configured for this runtime; it is not an arbitrary environment-variable lookup. No provider catalog or config default overrides the supplied model values.
+
+## 7. Session and run semantics
+
+Child state: ready, running, interrupted. A ready child has no worker process; it retains its transcript reference and template snapshot.
+
+Run state: queued, running, stop_requested, stopped, completed, failed, interrupted. Interrupted means execution ended without a confirmed terminal result.
+
+Each prompt is a distinct run. Spawn creates a child session and its initial run. Subzero owns the follow-up queue and dispatches each prompt after the preceding run settles; it does not duplicate that queue inside Pi. Persist each completed run's transcript leaf before dispatching the next queued run. A follow-up while idle reopens the child and starts a new run immediately.
+
+Send requires a mode:
+- steer modifies the current active run only. If the worker does not advertise steering, reject unsupported_steer. Never reinterpret it as followup.
+- followup adds a new run. When busy it queues; when idle it starts.
+
+Stop requires expectedRunId. If it does not match the active run, return stale_run without effect. A matching stop clears queued follow-ups and sets stop_requested. Set stopped only after the worker confirms cancellation and process-tree exit. The response distinguishes requested from confirmed.
+
+Resume without a message validates credentials and the exact checkpoint, then returns a ready child at its last completed transcript leaf; it starts no run or worker process. Resume with a message starts a fresh worker process and run from that leaf. Never retry or replay an interrupted prompt/effect automatically. For a partial Pi tool call, use SessionManager.branch(lastCompletedLeaf), preserve the interrupted branch, and append a recovery notice that the working tree may include interrupted changes. If the worker version cannot load the exact checkpoint, refuse resume and preserve stored state.
+
+## 8. Events, info, and MCP calls
+
+info returns Subzero protocol/core versions, selected worker name/version, worker capabilities, available templates with descriptions/grants, configured model/auth references without secrets, supported host adapter versions, and limits.
+
+Events have monotonically increasing per-child sequence numbers and include child/run lifecycle, text updates, tool activity names, stop request/confirmation, completion, and error. Omit raw tool arguments, secrets, and full worker transcripts.
+
+MCP tools: subzero_info, subzero_spawn, subzero_get, subzero_list, subzero_send, subzero_stop, subzero_resume, and subzero_output. There is no clear/delete tool in v1. subzero_get accepts bounded waitMs and cursor. The wait is bounded; the response includes the current state, bounded event batch, next cursor, oldest available cursor, and result/artifact reference. When a requested cursor is older than retained history, report an explicit cursor gap.
+
+The core exposes native subscribe for Pi or other adapters able to consume an async iterator. MCP callers poll with get; progress notifications may update a currently active tool call. Do not push an unsolicited model turn or assume the host will react to background notifications.
+
+## 9. Results, artifacts, and limits
+
+Full child output/result is stored as a local worker-owned artifact. MCP returns a bounded preview and opaque artifact reference; subzero_output reads chunks by offset/length. Event history is bounded and may be pruned, with cursor gaps explicit. Do not automatically delete child transcripts or full result artifacts in v1.
+
+Initial policy defaults:
+- maximum four active worker processes per workspace; idle child sessions do not retain worker processes.
+- maximum one write-capable Subzero run per workspace across brokers;
+- maximum 64 KiB UTF-8 prompt/instructions;
+- maximum 64 granted tools;
+- maximum 8 KiB per event payload, with larger output in artifacts.
+
+These are policy limits, not transport maxima. No automatic retry after worker or model failure.
+
+## 10. Persistence, ownership, recovery
+
+SQLite stores Subzero metadata and bounded event rows: child/run IDs, state, worker session reference/version, template and grant snapshot, model URL/model/API protocol, workspace scope, owner generation, stop request/confirmation, artifact refs, and event cursors. It does not store API keys or the full transcript.
+
+The worker owns the durable transcript. Workers exist only during active/queued runs; after a busy episode settles, persist the completed leaf/result and close the process to release memory and writer ownership. Record the last completed transcript leaf in SQLite so interrupted resumes can branch safely while preserving the interrupted branch. Use transactions plus an exclusive child ownership generation to prevent simultaneous resumes or transcript writers across MCP broker processes. All Subzero brokers use the same workspace database path.
+
+A DB transaction only protects a claim update; it cannot prove a live external worker is dead. The worker must be a supervised per-child process whose control-pipe EOF cancels work and terminates its tool subprocess tree. Broker startup cannot claim a child until the prior worker has confirmed exit. Ambiguous ownership remains busy/recovery_required; never use a PID/TTL-only lease to start a duplicate.
+
+The reference sidecar targets Node 24 LTS, minimum 24.15, where node:sqlite reached Release Candidate status; the API also exists in earlier Node versions. Pi itself requires Node 22.19+. The local probe verified WAL, BEGIN IMMEDIATE, and close/reopen persistence on Node 24.21. Keep the SQLite adapter isolated. Hosts launch the sidecar and need not use its runtime internally.
+
+## 11. Host adapters and evidence
+
+Pi 1.0.4 is the first host integration. It registers the shared MCP executable with Pi's documented registerMcpServer API; no second Pi-native tool set or registry. The @subzero/pi package is an installer/registration adapter only.
+
+Codex, Claude Code, and OpenCode configure the same local stdio executable through their own host settings. There is no common plugin package manager. Exact host tested versions belong in the compatibility table; no wildcard range is a compatibility promise.
+
+Pi worker process model is selected for bounded stop/fault containment. The tested package set is exact-pinned: Pi SDK 1.0.4 and pi-ai 1.0.4. Root measured 135 MB installed dependencies (121 packages), about 143 MB baseline RSS per loaded worker test process, and about 178 MB after multiple sessions in one process. Idle child sessions close their worker; a four active-process cap is an initial policy limit, not a performance guarantee. Record footprint in package docs.
+
+The September Docker experiments are historical evidence in [the archive](archive/research/2026-09-30-experiments.md). They are not current worker qualification.

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:subzero:protocol:0.1:responses",
+  "title": "Subzero v1 responses and events",
+  "oneOf": [
+    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/snapshot" },
+    { "$ref": "#/$defs/children" }, { "$ref": "#/$defs/send" }, { "$ref": "#/$defs/stop" },
+    { "$ref": "#/$defs/resume" }, { "$ref": "#/$defs/artifact" }, { "$ref": "#/$defs/error" },
+    { "$ref": "#/$defs/subscriptionItem" }
+  ],
+  "$defs": {
+    "modelMetadata": {
+      "type": "object", "additionalProperties": false, "required": ["url", "model"],
+      "properties": { "url": { "type": "string" }, "model": { "type": "string" }, "api": { "type": "string" } }
+    },
+    "artifactRef": {
+      "type": "object", "additionalProperties": false, "required": ["artifactId", "preview"],
+      "properties": { "artifactId": { "type": "string" }, "preview": { "type": "string", "maxLength": 2048 } }
+    },
+    "event": {
+      "oneOf": [
+        { "$ref": "#/$defs/baseEvent" }, { "$ref": "#/$defs/textEvent" }, { "$ref": "#/$defs/toolEvent" },
+        { "$ref": "#/$defs/errorEvent" }, { "$ref": "#/$defs/resultEvent" }, { "$ref": "#/$defs/stopEvent" }
+      ]
+    },
+    "subscriptionItem": { "oneOf": [
+      { "$ref": "#/$defs/event" },
+      { "type": "object", "additionalProperties": false, "required": ["type", "requestedCursor", "oldestCursor"], "properties": { "type": { "const": "cursor_gap" }, "requestedCursor": { "type": "integer", "minimum": 0 }, "oldestCursor": { "type": "integer", "minimum": 0 } } }
+    ] },
+    "baseEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "type"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" },
+        "type": { "enum": ["run_started", "run_queued"] }
+      }
+    },
+    "textEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "runId", "type", "text"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" }, "type": { "const": "text" }, "text": { "type": "string" }
+      }
+    },
+    "toolEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "runId", "type", "name", "state"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" }, "type": { "const": "tool" },
+        "name": { "type": "string", "maxLength": 256 }, "state": { "enum": ["started", "finished"] }
+      }
+    },
+    "errorEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "runId", "type", "code"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" }, "type": { "enum": ["failed", "interrupted"] },
+        "code": { "type": "string" }, "message": { "type": "string", "maxLength": 512 }
+      }
+    },
+    "resultEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "runId", "type", "artifactId", "preview"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" }, "type": { "const": "completed" },
+        "artifactId": { "type": "string" }, "preview": { "type": "string", "maxLength": 2048 }
+      }
+    },
+    "stopEvent": {
+      "type": "object", "additionalProperties": false, "required": ["seq", "at", "childId", "runId", "type"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 }, "at": { "type": "string", "format": "date-time" },
+        "childId": { "type": "string" }, "runId": { "type": "string" }, "type": { "enum": ["stop_requested", "stop_confirmed"] }
+      }
+    },
+    "info": {
+      "type": "object", "additionalProperties": false, "required": ["protocolVersion", "coreVersion", "worker", "templates", "configuredModelRefs", "limits"],
+      "properties": {
+        "protocolVersion": { "type": "string" }, "coreVersion": { "type": "string" },
+        "worker": { "type": "object", "required": ["name", "version", "capabilities"], "properties": { "name": { "type": "string" }, "version": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } } } },
+        "templates": { "type": "array", "items": { "type": "object", "required": ["id", "description", "tools", "skills", "mcpServers", "writeCapable"], "properties": { "id": { "type": "string" }, "description": { "type": "string" }, "tools": { "type": "array", "items": { "type": "string" } }, "skills": { "type": "array", "items": { "type": "string" } }, "mcpServers": { "type": "array", "items": { "type": "string" } }, "writeCapable": { "type": "boolean" } } } },
+        "configuredModelRefs": { "type": "array", "items": { "type": "string" } }, "limits": { "type": "object" }
+      }
+    },
+    "spawn": { "type": "object", "additionalProperties": false, "required": ["childId", "runId"], "properties": { "childId": { "type": "string" }, "runId": { "type": "string" } } },
+    "snapshot": {
+      "type": "object", "additionalProperties": false, "required": ["childId", "workspaceRoot", "state", "templateId", "model", "events", "cursor", "oldestCursor", "nextCursor", "cursorGap"],
+      "properties": {
+        "childId": { "type": "string" }, "workspaceRoot": { "type": "string" }, "state": { "enum": ["ready", "running", "interrupted"] },
+        "templateId": { "type": "string" }, "model": { "$ref": "#/$defs/modelMetadata" }, "activeRunId": { "type": "string" },
+        "lastCompletedLeaf": { "type": "string" }, "result": { "$ref": "#/$defs/artifactRef" }, "events": { "type": "array", "items": { "$ref": "#/$defs/event" } },
+        "cursor": { "type": "integer", "minimum": 0 }, "oldestCursor": { "type": "integer", "minimum": 0 }, "nextCursor": { "type": "integer", "minimum": 0 }, "cursorGap": { "type": "boolean" }
+      }
+    },
+    "children": { "type": "object", "additionalProperties": false, "required": ["children"], "properties": { "children": { "type": "array", "items": { "$ref": "#/$defs/summary" } } } },
+    "summary": {
+      "type": "object", "additionalProperties": false, "required": ["childId", "workspaceRoot", "state", "model", "templateId", "createdAt", "updatedAt"],
+      "properties": {
+        "childId": { "type": "string" }, "workspaceRoot": { "type": "string" }, "state": { "enum": ["ready", "running", "interrupted"] },
+        "model": { "$ref": "#/$defs/modelMetadata" }, "templateId": { "type": "string" }, "activeRunId": { "type": "string" },
+        "lastCompletedLeaf": { "type": "string" }, "lastResult": { "$ref": "#/$defs/artifactRef" },
+        "createdAt": { "type": "string", "format": "date-time" }, "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "send": { "type": "object", "additionalProperties": false, "required": ["runId", "delivery"], "properties": { "runId": { "type": "string" }, "delivery": { "enum": ["steered", "queued", "started"] } } },
+    "stop": { "type": "object", "additionalProperties": false, "required": ["requested", "confirmed"], "properties": { "requested": { "type": "boolean" }, "confirmed": { "type": "boolean" } } },
+    "resume": { "oneOf": [
+      { "type": "object", "additionalProperties": false, "required": ["state", "childId"], "properties": { "state": { "const": "ready" }, "childId": { "type": "string" } } },
+      { "type": "object", "additionalProperties": false, "required": ["state", "childId", "runId"], "properties": { "state": { "const": "running" }, "childId": { "type": "string" }, "runId": { "type": "string" } } }
+    ] },
+    "artifact": { "type": "object", "additionalProperties": false, "required": ["artifactId", "offset", "text", "nextOffset", "eof"], "properties": { "artifactId": { "type": "string" }, "offset": { "type": "integer" }, "text": { "type": "string" }, "nextOffset": { "type": "integer" }, "eof": { "type": "boolean" } } },
+    "error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": { "code": { "enum": ["invalid_request", "not_found", "credentials_required", "template_not_found", "limit_exceeded", "workspace_busy", "busy", "recovery_required", "stale_run", "unsupported_steer", "checkpoint_incompatible", "artifact_unavailable", "request_failed", "runtime_shutting_down"] }, "message": { "type": "string", "maxLength": 500 } } } } }
+  }
+}

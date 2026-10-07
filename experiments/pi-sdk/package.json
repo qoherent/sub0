@@ -1,0 +1,12 @@
+{
+  "name": "subzero-pi-sdk-qualification",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "node qualification.mjs"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "typebox": "1.3.27"
+  }
+}

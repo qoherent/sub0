@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:subzero:protocol:0.1:templates",
+  "title": "Subzero immutable template definition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "description", "instructions", "tools", "skills", "mcpServers", "writeCapable"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "instructions": { "type": "string" },
+    "tools": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/tool" } },
+    "skills": { "type": "array", "items": { "$ref": "#/$defs/skill" } },
+    "mcpServers": { "type": "array", "items": { "$ref": "#/$defs/mcpServer" } },
+    "writeCapable": { "type": "boolean" },
+    "workerAdapter": { "type": "string", "minLength": 1 },
+    "workerVersion": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object", "additionalProperties": false, "required": ["name", "writable"],
+      "properties": { "name": { "type": "string", "minLength": 1 }, "writable": { "type": "boolean" } }
+    },
+    "skill": {
+      "type": "object", "additionalProperties": false, "required": ["name", "content"],
+      "properties": { "name": { "type": "string", "minLength": 1 }, "content": { "type": "string" } }
+    },
+    "mcpServer": {
+      "type": "object", "additionalProperties": false, "required": ["name", "command", "tools", "writeCapable"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "args": { "type": "array", "items": { "type": "string" } },
+        "envRefs": { "type": "array", "items": { "type": "string", "pattern": "^(env|secret):[A-Za-z_][A-Za-z0-9_.-]*$" } },
+        "tools": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "writeCapable": { "type": "boolean" }
+      }
+    }
+  }
+}

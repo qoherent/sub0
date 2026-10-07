@@ -1,0 +1,18 @@
+{
+  "name": "@subzero/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./schemas/*": "./schemas/*"
+  },
+  "files": ["dist", "schemas", "conformance"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  }
+}

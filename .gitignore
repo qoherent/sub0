@@ -1,18 +1,26 @@
-# Reference clones (upstream sources, re-obtainable)
+# Local-only reference material
 /fx/
 /pi/
+/.agents/
+/.claude/
+/Pi-Technical-Manual.pdf
+/skills-lock.json
 
-# Docker build contexts that mirror clones
-docker/fx-src/fx/
-docker/fx-src/.dockerignore
-
-# Node / experiment artifacts
+# Node and generated build output
 node_modules/
-package-lock.json
-package.json
+dist/
 *.log
+*.tsbuildinfo
+coverage/
+.cache/
+.turbo/
 
-# fx/pi runtime state
+# Generated Docker repro context and build output
+docs/archive/docker/fx-src/fx/
+docs/archive/docker/**/node_modules/
+docs/archive/docker/**/*.log
+
+# fx/Pi runtime state and generated native build output
 .fx/
 .pi/
 .zig-cache/

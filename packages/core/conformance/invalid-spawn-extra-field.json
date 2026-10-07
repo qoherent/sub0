@@ -1,0 +1,14 @@
+{
+  "operation": "subzero_spawn",
+  "arguments": {
+    "prompt": "Summarize the latest changes.",
+    "templateId": "researcher",
+    "model": {
+      "url": "https://api.example/v1",
+      "model": "model-x",
+      "credentialRef": "env:SUBZERO_MODEL_KEY"
+    },
+    "ambientCredentials": true
+  },
+  "expectedValid": false
+}
