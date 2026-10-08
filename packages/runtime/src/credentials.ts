@@ -1,3 +1,5 @@
+import { SubzeroError } from '@subzero/core';
+
 export type CredentialReference = { env: string; origins: string[] };
 export type CredentialMap = Record<string, CredentialReference>;
 
@@ -5,7 +7,7 @@ export type CredentialMap = Record<string, CredentialReference>;
 export class CredentialResolver {
   private readonly refs: Readonly<Record<string, CredentialReference>>;
   constructor(refs: CredentialMap) {
-    const safe: Record<string, CredentialReference> = {};
+    const safe: Record<string, CredentialReference> = Object.create(null);
     for (const [name, ref] of Object.entries(refs)) {
       if (!name || !/^[A-Za-z0-9_.-]+$/.test(name) || !ref || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref.env) || !Array.isArray(ref.origins) || ref.origins.length === 0) throw new TypeError(`Invalid credential reference configuration: ${name}`);
       const origins = ref.origins.map(normalizeOrigin);
@@ -17,8 +19,8 @@ export class CredentialResolver {
   configuredRefs(): string[] { return Object.keys(this.refs).sort(); }
 
   resolve(refName: string, url: string, env: NodeJS.ProcessEnv = process.env): { key: string } {
-    const ref = this.refs[refName];
-    if (!ref) throw new Error(`Unknown credential reference: ${refName}`);
+    const ref = Object.hasOwn(this.refs, refName) ? this.refs[refName] : undefined;
+    if (!ref) throw new SubzeroError('credentials_required', `Unknown credential reference: ${refName}`);
     let origin: string;
     let target: URL;
     try {
@@ -28,7 +30,7 @@ export class CredentialResolver {
     } catch { throw new Error('Credential target must be a valid HTTP(S) URL.'); }
     if (!ref.origins.includes(origin)) throw new Error(`Credential reference is not allowed for origin ${origin}.`);
     const key = env[ref.env];
-    if (typeof key !== 'string' || key.length === 0) throw new Error(`Credential is not configured for reference: ${refName}`);
+    if (typeof key !== 'string' || key.length === 0) throw new SubzeroError('credentials_required', `Credential is not configured for reference: ${refName}`);
     if (urlContainsSecret(url, target, key)) throw new Error('Credential must not appear in the target URL.');
     return { key };
   }

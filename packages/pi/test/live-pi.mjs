@@ -24,6 +24,7 @@ const outputFile = join(workspace, 'subzero-live-child.txt');
 let pi;
 let stdout = '';
 let stderr = '';
+let preserveArtifacts = false;
 const secretValues = [parentKey, childKey];
 
 try {
@@ -93,7 +94,9 @@ try {
     return typeof payload.artifactId === 'string' && payload.artifactId.length > 0;
   }), 'the child should persist a completed event with an artifact.');
   assert.ok(childEvents.some(event => event.type === 'tool' && JSON.parse(event.payload).name === 'write' && JSON.parse(event.payload).state === 'finished'), 'the child should persist a successful write tool event.');
+  preserveArtifacts = process.env.SUBZERO_TEST_KEEP_ARTIFACTS === '1';
   process.stdout.write(`Live Pi delegation passed; child ${childRow.child_id} reached ready and wrote the expected file.\n`);
+  if (preserveArtifacts) process.stdout.write(`Live artifacts retained at: ${root}\n`);
 } catch (error) {
   const scan = await scanSecrets().catch(() => ({ fileLeaks: -1, outputLeaks: -1 }));
   const snapshot = await readLifecycleSnapshot().catch(() => ({ child: undefined, runs: [], events: [] }));
@@ -115,7 +118,7 @@ try {
     const owner = await readFile(join(dataDir, 'sessions', String(path)), 'utf8').then(JSON.parse).catch(() => undefined);
     if (owner?.pid > 1) await stopProcess(owner.pid, true);
   }
-  await rm(root, { recursive: true, force: true });
+  if (!preserveArtifacts) await rm(root, { recursive: true, force: true });
 }
 
 async function scanSecrets() {

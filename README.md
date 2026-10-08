@@ -4,7 +4,7 @@ Subzero is a local MCP service that lets coding agents spawn and control persist
 
 ## Status
 
-The v0.1 TypeScript implementation is in this checkout; its npm packages remain private and unpublished. Build, typecheck, and all 93 tests pass on Node 26.3.1/Linux; the original 90-test suite also passed on Node 24.21.0. Real LongCat delegation through Pi and MCP passed, as did package installation, the installed CLI, and MCP discovery. Pi 1.0.4 is the only host integration exercised; Codex, Claude Code, and OpenCode setup syntax is documented but not host-tested. See [testing evidence](docs/TESTING.md) for scope and [usage](docs/USAGE.md) for setup and tool examples.
+The v0.1 TypeScript implementation is local; its npm packages remain private and unpublished. The [2026-10-08 audit](docs/AUDIT-2026-10-08.md) records credential, shutdown, recovery, concurrency and packaging fixes, fresh-install evidence, official version sources, and unresolved risks. The worker remains pinned to Pi SDK 1.0.4. Pi 1.0.4 and 1.1.0 hosts have been exercised; Codex, Claude Code and OpenCode setup syntax and MCP wire compatibility were checked, but their host workflows remain untested. See [testing evidence](docs/TESTING.md) for scope and [usage](docs/USAGE.md) for setup and tool examples.
 
 ## Try it locally
 
@@ -37,7 +37,7 @@ The selected design and public contract are in [docs/DESIGN.md](docs/DESIGN.md);
 
 - `packages/` contains the core contract, runtime MCP server, worker, and Pi extension.
 - `experiments/pi-sdk/` contains the current Pi SDK and SQLite qualification sources and receipts.
-- `docs/` contains usage, test evidence, the reference design, implementation record, and research decisions. [Documentation index](docs/README.md).
+- `docs/` contains the audit/handoff report, usage, test evidence, the reference design, implementation record, and research decisions. [Documentation index](docs/README.md).
 - `docs/archive/` contains historical experiments and reproducible source inputs; they are not part of `npm run verify`.
 
 Reference clones, local agent skills, and the Pi technical manual are kept outside this checkout in the sibling `subzero-reference-material/` directory.

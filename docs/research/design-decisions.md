@@ -1,6 +1,6 @@
 # Design decisions and evidence - v0.1 draft
 
-This file separates current primary-source evidence, repository proposals, historical experiments, and decisions. Current-source checks were run on 2026-10-07. No Subzero code was changed. Historical experiments were not rerun in this scout.
+This is the dated pre-implementation decision record. It separates the primary-source evidence available on 2026-10-07, repository proposals, historical experiments, and decisions. No Subzero code was changed during that research checkpoint, and historical experiments were not rerun. Implementation-status statements below are preserved for provenance, not current qualification claims. See the [2026-10-08 audit](../AUDIT-2026-10-08.md) for the current implementation, verification and compatibility assessment.
 
 ## Decision inventory
 

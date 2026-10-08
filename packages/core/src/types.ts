@@ -97,6 +97,7 @@ export type Admission =
   | { kind: 'queued' }
   | { kind: 'workspace_busy' }
   | { kind: 'not_found' }
+  | { kind: 'busy' }
   | { kind: 'recovery_required' };
 export type Settled = { kind: 'idle' } | { kind: 'next'; run: RunRecord } | { kind: 'stale' } | { kind: 'recovery_required' };
 
@@ -108,9 +109,9 @@ export interface Store {
   putTemplate(template: TemplateDefinition): Promise<void>;
   getTemplate(templateId: TemplateId): Promise<TemplateDefinition | undefined>;
   listTemplates(): Promise<TemplateDefinition[]>;
-  admitRun(childId: ChildId, run: RunRecord, limits: CoreLimits): Promise<Admission>;
+  admitRun(childId: ChildId, run: RunRecord, limits: CoreLimits, expectedGeneration?: number): Promise<Admission>;
   settleRun(childId: ChildId, runId: RunId, ownerToken: string, terminal: WorkerTerminal, event: EventInput, limits: CoreLimits, workerExitConfirmed: boolean): Promise<Settled>;
-  requestStop(childId: ChildId, expectedRunId: RunId, ownerToken?: string): Promise<{ kind: 'requested' | 'already_terminal' | 'stale' | 'not_found' | 'busy' }>;
+  requestStop(childId: ChildId, expectedRunId: RunId, ownerToken?: string, at?: string): Promise<{ kind: 'requested' | 'already_terminal' | 'stale' | 'not_found' | 'busy' | 'recovery_required' }>;
   appendEvent(childId: ChildId, event: EventInput): Promise<ChildEvent>;
   readEvents(childId: ChildId, afterCursor: number, limit: number): Promise<{ events: ChildEvent[]; oldestCursor: number; nextCursor: number; cursorGap: boolean }>;
   subscribe(childId: ChildId, afterCursor: number, signal?: AbortSignal): Promise<AsyncIterable<ChildEvent>>;

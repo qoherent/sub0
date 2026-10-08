@@ -1,24 +1,32 @@
 # Verification and evidence
 
-## Local gate
+## Audit and hardening checkpoint: 2026-10-08
 
-The latest verification gate ran on Node 26.3.1/Linux on 2026-10-08, including the new live-credential tests. The original 90-test suite passed on Node 24.21.0/Linux on 2026-10-07 after implementation, simplification, review fixes, and the live-test diagnostic improvement:
+The [audit report](AUDIT-2026-10-08.md) records failing regressions, fixes, official-source compatibility checks, fresh setup, installed default/development consumers, Pi 1.1.0 host checks, and retained LongCat evidence. Run `npm run verify` for the current full gate. Run `npm run build` before a standalone `npm test`, because package exports resolve to compiled JavaScript even under the development condition.
+
+To retain a successful live run for inspection, set `SUBZERO_TEST_KEEP_ARTIFACTS=1` when running `npm run test:live`. Retention happens only after every existing assertion and literal-key scan passes; failures still clean up. Provider keys remain in the ignored `.env` and must never be printed or sourced.
+
+## Current verification gate
+
+The hardened verification gate runs on Node.js (24.15+ LTS or 26.x):
 
 ```sh
 npm run verify
 ```
 
-Build and workspace typecheck passed. The current test suite passed **93/93** with zero failures:
+Build and workspace typecheck pass with zero errors. The full offline test suite passes **128/128** tests with zero failures across all packages:
 
-| Area | Tests |
-| --- | ---: |
-| Core state machine and contracts | 30 |
-| SQLite storage | 14 |
-| Runtime configuration | 7 |
-| Worker lifecycle and Pi SDK behavior | 23 |
-| MCP server, CLI, recovery, and broker behavior | 11 |
-| Pi host extension, live-test diagnostics, and credentials | 8 |
-| **Total** | **93** |
+| Area | Test file | Tests |
+| --- | --- | ---: |
+| Core state machine, limits, queues, and contracts | `packages/core/test/core.test.ts` | 41 |
+| SQLite storage and generation-guarded state | `packages/runtime/test/storage.test.ts` | 18 |
+| Runtime configuration and credential resolution | `packages/runtime/test/config.test.ts` | 9 |
+| Worker lifecycle, redaction, and Pi SDK behavior | `packages/runtime/test/worker.test.ts` | 30 |
+| MCP server, CLI, recovery, and broker behavior | `packages/runtime/test/mcp.test.ts` | 17 |
+| Packaging, license parity, and entrypoints | `packages/runtime/test/packaging.test.ts` | 5 |
+| Pi host extension | `packages/pi/test/pi.test.ts` | 4 |
+| Live-test diagnostics and credential loading | `packages/pi/test/live-pi-*.test.mjs` | 4 |
+| **Total** | | **128** |
 
 The runtime and worker tests use loopback/fake provider and MCP fixtures unless a test is explicitly described below as live. Normal `npm test` makes no external model call. No separate lint command is configured. The local workspace remains private and unpublished.
 
@@ -68,7 +76,7 @@ Two opt-in checks used the actual LongCat model service. These were run separate
 
 An intermediate live run wrote the file but had no completed result; its exact cause could not be established after cleanup. This exposed a harness assumption: `ready` also covers idle failed/stopped runs. The harness now requires explicit completion, reports bounded sanitized failure diagnostics, and scans for key values before cleanup on failures as well. The improved final run passed.
 
-The `.env`-based `npm run test:live` command passed on Node 26.3.1/Linux on 2026-10-08 using the previously supplied testing key. The key itself is kept only in the ignored local `.env` and is absent from `.env.example`.
+The `.env`-based `npm run test:live` command passed on Node 26.3.1/Linux on 2026-10-08 using the testing key. The key itself is kept only in the ignored local `.env` and is absent from `.env.example`. The live check was re-verified on the final hardened code revision on 2026-10-08 (child `644b5f0d-6639-491c-9bff-c1ca85b0963a`), confirming ready state and that the expected file was written without secret leakage.
 
 The live script is opt-in and makes a real provider call. To reproduce the Pi-to-child check from a fresh clone on Linux:
 
@@ -88,10 +96,11 @@ Keep `.env` in the repository root. It is ignored by Git. Do not source it into 
 
 ## Tested versions and limits
 
-- Node.js 24.21.0/Linux qualified the original 90-test suite. Node.js 26.3.1/Linux passed the current 93-test suite and the `.env`-based live command. The runtime requires Node.js 24.15 or newer for `node:sqlite`.
-- The worker dependency is pinned to Pi SDK 1.0.4 (and `pi-ai` 1.0.4). Pi 1.0.4 is the only host integration exercised.
+- Node.js 26.3.1/Linux and a fresh Node.js 24.21.0/Linux setup each passed the final 128/128 audit gate, including build and typecheck. The runtime requires Node.js 24.15 or newer for `node:sqlite`.
+- The worker dependency is pinned to Pi SDK 1.0.4 (and `pi-ai` 1.0.4). Pi 1.0.4 and 1.1.0 hosts have been exercised; a host check does not qualify the pinned worker against a newer SDK.
 - Codex, Claude Code, and OpenCode examples in [USAGE.md](USAGE.md) were checked against official configuration documentation. They are syntax examples; no host runtime compatibility test was performed for them.
 - Linux process-group cleanup was verified for ordinary POSIX descendants. A descendant that deliberately starts a new session/process group is outside the guarantee. Other operating systems have not been tested.
 - Workspace scoping and writer admission do not sandbox file access or constrain other processes running as the same OS user.
+- The 93-test and 126-test counts from earlier iterations are historical; the 128-test suite covers all hardening and audit regressions.
 
 The detailed red/green receipts were temporary implementation artifacts and are not part of this checkout; representative observed failures and their fixes are summarized above. The runtime's persistent result artifacts are local files; there is no automatic artifact or transcript garbage collection.

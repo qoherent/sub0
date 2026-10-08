@@ -19,6 +19,9 @@ process.stdin.on('data', chunk => {
       send({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'subzero-fake', version: '1.0.0' } } });
     } else if (message.method === 'notifications/initialized') {
       continue;
+    } else if (message.method === 'tools/list' && process.argv[3] === 'paged') {
+      const tool = name => ({ name, description: `paged ${name}`, inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } });
+      send({ jsonrpc: '2.0', id: message.id, result: message.params?.cursor === 'page-2' ? { tools: [tool('allowed_echo')] } : { tools: [tool('unlisted_first_page')], nextCursor: 'page-2' } });
     } else if (message.method === 'tools/list') {
       send({ jsonrpc: '2.0', id: message.id, result: { tools: [
         ...(process.argv[3] === 'missing-grant' ? [] : [{ name: 'allowed_echo', description: 'Echo a short string', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } }]),

@@ -6,7 +6,7 @@
     "model": {
       "url": "https://api.example/v1",
       "model": "model-x",
-      "credentialRef": "env:SUBZERO_MODEL_KEY",
+      "credentialRef": "MODEL_KEY",
       "api": "openai-completions"
     }
   }

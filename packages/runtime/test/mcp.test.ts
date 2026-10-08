@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -73,6 +74,13 @@ async function hasLiveGroup(pid: number): Promise<boolean> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
 }
 
+async function isProcessLive(pid: number): Promise<boolean> {
+  const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
+  if (!stat) return false;
+  const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+  return state !== 'Z' && state !== 'X';
+}
+
 test('response schema accepts the actual structured list response', { timeout: 10_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-schema-list-'));
   const workspace = join(root, 'workspace');
@@ -84,6 +92,21 @@ test('response schema accepts the actual structured list response', { timeout: 1
     const schema = JSON.parse(await readFile(join(rootDir, 'packages/core/schemas/wire-responses.schema.json'), 'utf8'));
     const response = structured(await session.client.callTool({ name: 'subzero_list', arguments: {} }));
     assert.equal(Value.Check(schema.$defs, schema.$defs.children, response), true, JSON.stringify(response));
+  } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('subzero_list with invalid or nonexistent workspaceRoot returns invalid_request error', { timeout: 10_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-list-invalid-'));
+  const workspace = join(root, 'workspace');
+  const provider = await startFakeProvider();
+  let session: Session | undefined;
+  try {
+    await mkdir(workspace);
+    session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin);
+    const nonexistent = structured(await session.client.callTool({ name: 'subzero_list', arguments: { workspaceRoot: join(root, 'nonexistent') } }));
+    assert.deepEqual(nonexistent, { error: { code: 'invalid_request', message: 'List workspaceRoot must match the configured workspace.' } });
+    const wrong = structured(await session.client.callTool({ name: 'subzero_list', arguments: { workspaceRoot: root } }));
+    assert.deepEqual(wrong, { error: { code: 'invalid_request', message: 'List workspaceRoot must match the configured workspace.' } });
   } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -334,6 +357,7 @@ test('abrupt broker death refuses recovery while the recorded worker group is al
     else sendCompletion(response, 'second run finished');
   } });
   let first: Session | undefined; let restarted: Session | undefined;
+  let stoppedWorkerPid: number | undefined;
   try {
     await mkdir(workspace);
     const dataDir = join(root, 'data');
@@ -343,11 +367,13 @@ test('abrupt broker death refuses recovery while the recorded worker group is al
     const checkpoint = initial.lastCompletedLeaf;
     await first.client.callTool({ name: 'subzero_send', arguments: { childId: child.childId, mode: 'followup', message: 'start shell and wait' } });
     await waitFor(async () => readFile(pidFile, 'utf8').then(value => Number.isSafeInteger(Number(value.trim())) && Number(value.trim()) > 1, () => false), Boolean, 8_000);
+    const identityPath = join(dataDir, 'sessions', createHash('sha256').update(child.childId).digest('hex'), 'worker-owner.json');
+    stoppedWorkerPid = (JSON.parse(await readFile(identityPath, 'utf8')) as { pid: number }).pid;
+    process.kill(stoppedWorkerPid, 'SIGSTOP');
     const deadBroker = first; first = undefined;
     try { process.kill(deadBroker.pid, 'SIGKILL'); } catch { /* process exited between calls */ }
     await waitFor(async () => { try { process.kill(deadBroker.pid, 0); return false; } catch { return true; } }, value => value, 4_000);
     restarted = await launch(dataDir, workspace, new URL(provider.endpoint).origin);
-    const identityPath = join(dataDir, 'sessions', createHash('sha256').update(child.childId).digest('hex'), 'worker-owner.json');
     const identityBytes = await readFile(identityPath, 'utf8');
     const identity = JSON.parse(identityBytes) as { pid: number; ownerGeneration: number };
     assert.equal(await hasLiveGroup(identity.pid), true, 'the detached worker group remains live immediately after broker death');
@@ -359,6 +385,7 @@ test('abrupt broker death refuses recovery while the recorded worker group is al
     assert.equal(mismatched.isError, true);
     assert.match(JSON.stringify(mismatched), /recovery_required/i);
     await writeFile(identityPath, identityBytes);
+    process.kill(stoppedWorkerPid, 'SIGCONT');
     await waitFor(() => hasLiveGroup(identity.pid), value => !value, 8_000);
     const resumed = structured(await restarted.client.callTool({ name: 'subzero_resume', arguments: { childId: child.childId, model: model(provider.endpoint) } })) as { state: string; childId: string };
     assert.equal(resumed.state, 'ready', JSON.stringify(resumed));
@@ -366,6 +393,178 @@ test('abrupt broker death refuses recovery while the recorded worker group is al
     const recovered = structured(await restarted.client.callTool({ name: 'subzero_get', arguments: { childId: child.childId } })) as { lastCompletedLeaf?: string };
     assert.equal(recovered.lastCompletedLeaf, checkpoint);
   } finally {
+    if (stoppedWorkerPid !== undefined) { try { process.kill(stoppedWorkerPid, 'SIGCONT'); } catch { } }
     await restarted?.close(); await first?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: another workspace on the same data directory cannot list, inspect, control, or read a child it does not own', { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-audit-workspaces-'));
+  const workspaceA = join(root, 'workspace-a');
+  const workspaceB = join(root, 'workspace-b');
+  const provider = await startFakeProvider();
+  let brokerA: Session | undefined; let brokerB: Session | undefined;
+  try {
+    await mkdir(workspaceA); await mkdir(workspaceB);
+    const dataDir = join(root, 'data');
+    const origin = new URL(provider.endpoint).origin;
+    brokerA = await launch(dataDir, workspaceA, origin);
+    brokerB = await launch(dataDir, workspaceB, origin);
+    const started = structured(await brokerA.client.callTool({ name: 'subzero_spawn', arguments: { prompt: 'workspace A task', templateId: 'researcher', model: model(provider.endpoint) } })) as { childId: string; runId: string };
+    const done = await waitFor(async () => structured(await brokerA!.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, waitMs: 250 } })) as { state: string; result?: { artifactId: string } }, value => value.state === 'ready' && Boolean(value.result));
+    const artifactId = done.result!.artifactId;
+    const listedByA = structured(await brokerA.client.callTool({ name: 'subzero_list', arguments: {} })) as { children: Array<{ childId: string }> };
+    assert.ok(listedByA.children.some(child => child.childId === started.childId), 'positive control: the owning workspace lists the child');
+    const listedByB = structured(await brokerB.client.callTool({ name: 'subzero_list', arguments: {} })) as { children: Array<{ childId: string }> };
+    assert.equal(listedByB.children.some(child => child.childId === started.childId), false);
+
+    const before = JSON.stringify(structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } })));
+    const requestsBefore = provider.requests.length;
+    const foreign = {
+      get: await brokerB.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } }),
+      send: await brokerB.client.callTool({ name: 'subzero_send', arguments: { childId: started.childId, mode: 'followup', message: 'cross-workspace followup' } }),
+      stop: await brokerB.client.callTool({ name: 'subzero_stop', arguments: { childId: started.childId, expectedRunId: started.runId } }),
+      resume: await brokerB.client.callTool({ name: 'subzero_resume', arguments: { childId: started.childId, model: { ...model(provider.endpoint), model: 'other-model' } } }),
+      output: await brokerB.client.callTool({ name: 'subzero_output', arguments: { artifactId, offset: 0, length: 4096 } }),
+    };
+    const leaks = Object.entries(foreign).filter(([name, result]) => result.isError !== true || (name !== 'output' && !/not_found/.test(JSON.stringify(result)))).map(([name]) => name);
+    assert.deepEqual(leaks, [], 'foreign calls that did not fail with not_found');
+    const after = JSON.stringify(structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } })));
+    assert.equal(after, before, 'foreign calls leave child metadata, model, and events unchanged');
+    assert.equal(provider.requests.length, requestsBefore, 'foreign calls start no provider request');
+    const own = structured(await brokerA.client.callTool({ name: 'subzero_output', arguments: { artifactId, offset: 0, length: 4096 } })) as { text: string };
+    assert.match(own.text, /fake-provider-ok/);
+  } finally {
+    await brokerB?.close(); await brokerA?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function assertBrokerKillReapsWorkerGroup(variant: 'shell-descendant' | 'hanging-provider') {
+  const root = await mkdtemp(join(tmpdir(), `subzero-mcp-audit-kill-${variant}-`));
+  const workspace = join(root, 'workspace');
+  const pidFile = join(root, 'sleep.pid');
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (variant === 'shell-descendant') sendToolCall(response, 'bash', { command: `sleep 45 & echo $! > '${pidFile}'; wait` });
+    else {
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'pending' }, finish_reason: null }] })}\n\n`);
+    }
+  } });
+  let session: Session | undefined;
+  let workerPid: number | undefined;
+  let sleepPid: number | undefined;
+  try {
+    await mkdir(workspace);
+    const dataDir = join(root, 'data');
+    session = await launch(dataDir, workspace, new URL(provider.endpoint).origin);
+    const child = structured(await session.client.callTool({ name: 'subzero_spawn', arguments: { prompt: 'start a long operation', templateId: 'coder', model: model(provider.endpoint) } })) as { childId: string; runId: string };
+    const identityPath = join(dataDir, 'sessions', createHash('sha256').update(child.childId).digest('hex'), 'worker-owner.json');
+    workerPid = await waitFor(async () => readFile(identityPath, 'utf8').then(value => (JSON.parse(value) as { pid: number }).pid, () => undefined), value => value !== undefined, 8_000);
+    if (variant === 'shell-descendant') {
+      sleepPid = await waitFor(async () => readFile(pidFile, 'utf8').then(value => { const pid = Number(value.trim()); return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined; }, () => undefined), value => value !== undefined, 8_000);
+      assert.equal(await isProcessLive(sleepPid!), true, 'precondition: the shell descendant is running');
+    } else await waitFor(async () => provider.requests.length, value => value > 0, 8_000);
+    assert.equal(await hasLiveGroup(workerPid!), true, 'precondition: the worker process group is live with an active run');
+    const broker = session; session = undefined;
+    process.kill(broker.pid, 'SIGKILL');
+    await waitFor(async () => isProcessLive(broker.pid), value => !value, 4_000);
+    let state = { group: true, descendant: sleepPid !== undefined };
+    const reaped = await waitFor(async () => { state = { group: await hasLiveGroup(workerPid!), descendant: sleepPid === undefined ? false : await isProcessLive(sleepPid) }; return state; }, value => !value.group && !value.descendant, 5_000).then(() => true, () => false);
+    assert.equal(reaped, true, `worker group and descendant must exit within 5s of broker SIGKILL without a supervisor close: ${JSON.stringify(state)}`);
+  } finally {
+    if (workerPid !== undefined) { try { process.kill(-workerPid, 'SIGKILL'); } catch { } }
+    if (sleepPid !== undefined) { try { process.kill(sleepPid, 'SIGKILL'); } catch { } }
+    await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
+  }
+}
+
+test('audit: broker SIGKILL stops the worker group and its shell descendant within 5 seconds without a supervisor close', { timeout: 30_000 }, () => assertBrokerKillReapsWorkerGroup('shell-descendant'));
+
+test('audit: broker SIGKILL stops a worker waiting on a hanging provider within 5 seconds without a supervisor close', { timeout: 30_000 }, () => assertBrokerKillReapsWorkerGroup('hanging-provider'));
+
+test('audit: large valid tool results stay parseable JSON in the model-facing text content', { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-audit-large-result-'));
+  const workspace = join(root, 'workspace');
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (let index = 0; index < 120; index++) response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: index === 0 ? { role: 'assistant', content: 'a'.repeat(100) } : { content: 'a'.repeat(100) }, finish_reason: null }] })}\n\n`);
+    response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
+    response.end('data: [DONE]\n\n');
+  } });
+  let session: Session | undefined;
+  try {
+    await mkdir(workspace);
+    session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin);
+    const started = structured(await session.client.callTool({ name: 'subzero_spawn', arguments: { prompt: 'produce a large reply', templateId: 'researcher', model: model(provider.endpoint) } })) as { childId: string };
+    const done = await waitFor(async () => structured(await session!.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, waitMs: 250 } })) as { state: string; result?: { artifactId: string } }, value => value.state === 'ready' && Boolean(value.result));
+
+    const output = await session.client.callTool({ name: 'subzero_output', arguments: { artifactId: done.result!.artifactId, offset: 0, length: 12000 } });
+    const outputText = (output.content as Array<{ text: string }>)[0]!.text;
+    const parsedOutput = (() => { try { return JSON.parse(outputText); } catch (error) { assert.fail(`output text content is not valid JSON (length ${outputText.length}): ${(error as Error).message}`); } })();
+    assert.deepEqual(parsedOutput, output.structuredContent);
+    const chunk = structured(output) as { text: string; eof: boolean };
+    assert.equal(chunk.text.length, 12000);
+    assert.equal(chunk.eof, true);
+
+    const get = await session.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, cursor: 0 } });
+    const getText = (get.content as Array<{ text: string }>)[0]!.text;
+    const structuredGet = structured(get) as { nextCursor?: number };
+    assert.ok(JSON.stringify(structuredGet).length > 6000, 'precondition: the structured get result exceeds 6000 characters');
+    const parsedGet = (() => { try { return JSON.parse(getText) as { nextCursor?: number }; } catch (error) { assert.fail(`get text content is not valid JSON (length ${getText.length}): ${(error as Error).message}`); } })();
+    assert.deepEqual(parsedGet, get.structuredContent);
+    assert.equal(parsedGet.nextCursor, structuredGet.nextCursor);
+  } finally {
+    await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: raw stdin EOF with a pending long get stops the broker, worker group, and shell descendant within 5 seconds', { timeout: 30_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-audit-raw-eof-'));
+  const workspace = join(root, 'workspace');
+  const dataDir = join(root, 'data');
+  const pidFile = join(root, 'sleep.pid');
+  const provider = await startFakeProvider({ onRequest(_body, response) { sendToolCall(response, 'bash', { command: `sleep 45 & echo $! > '${pidFile}'; wait` }); } });
+  let broker: ReturnType<typeof spawn> | undefined;
+  let workerPid: number | undefined;
+  let sleepPid: number | undefined;
+  try {
+    await mkdir(workspace); await mkdir(dataDir);
+    const config = join(dataDir, 'config.json');
+    await writeFile(config, JSON.stringify({ credentialRefs: { TEST_MODEL: { env: 'SUBZERO_MCP_TEST_KEY', origins: [new URL(provider.endpoint).origin] } } }));
+    broker = spawn(process.execPath, ['--conditions=development', cliSource, '--data-dir', dataDir, '--workspace', workspace, '--config', config], { env: { ...process.env, SUBZERO_MCP_TEST_KEY: key }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const pending = new Map<number, (message: { result?: { structuredContent?: Record<string, unknown> } }) => void>();
+    let buffer = '';
+    broker.stdout!.setEncoding('utf8').on('data', chunk => {
+      buffer += chunk;
+      for (let end = buffer.indexOf('\n'); end >= 0; end = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
+        const message = JSON.parse(line) as { id?: number; result?: { structuredContent?: Record<string, unknown> } };
+        if (message.id !== undefined) pending.get(message.id)?.(message);
+      }
+    });
+    let nextId = 1;
+    const send = (method: string, params: unknown) => broker!.stdin!.write(`${JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })}\n`);
+    const request = (method: string, params: unknown) => new Promise<{ result?: { structuredContent?: Record<string, unknown> } }>(resolve => { pending.set(nextId, resolve); send(method, params); });
+    await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'raw-eof', version: '0' } });
+    broker.stdin!.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+    const spawned = await request('tools/call', { name: 'subzero_spawn', arguments: { prompt: 'run the background sleep command and wait', templateId: 'coder', model: model(provider.endpoint) } });
+    const childId = String(spawned.result?.structuredContent?.childId);
+    const identityPath = join(dataDir, 'sessions', createHash('sha256').update(childId).digest('hex'), 'worker-owner.json');
+    workerPid = await waitFor(async () => readFile(identityPath, 'utf8').then(value => (JSON.parse(value) as { pid: number }).pid, () => undefined), value => value !== undefined, 8_000);
+    sleepPid = await waitFor(async () => readFile(pidFile, 'utf8').then(value => { const pid = Number(value.trim()); return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined; }, () => undefined), value => value !== undefined, 8_000);
+    assert.equal(await hasLiveGroup(workerPid!), true, 'precondition: the worker group is live');
+    send('tools/call', { name: 'subzero_get', arguments: { childId, waitMs: 30_000, cursor: 100_000 } });
+    await delay(300);
+    assert.equal(await isProcessLive(sleepPid!), true, 'precondition: the run is active while the long get is pending');
+    const brokerPid = broker.pid!;
+    broker.stdin!.end();
+    let state = { broker: true, group: true, descendant: true };
+    const stopped = await waitFor(async () => { state = { broker: await isProcessLive(brokerPid), group: await hasLiveGroup(workerPid!), descendant: await isProcessLive(sleepPid!) }; return state; }, value => !value.broker && !value.group && !value.descendant, 5_000).then(() => true, () => false);
+    assert.equal(stopped, true, `broker, worker group, and descendant must exit within 5s of stdin EOF: ${JSON.stringify(state)}`);
+  } finally {
+    if (broker?.pid) { try { process.kill(broker.pid, 'SIGKILL'); } catch { } }
+    if (workerPid !== undefined) { try { process.kill(-workerPid, 'SIGKILL'); } catch { } }
+    if (sleepPid !== undefined) { try { process.kill(sleepPid, 'SIGKILL'); } catch { } }
+    await provider.close(); await rm(root, { recursive: true, force: true });
   }
 });

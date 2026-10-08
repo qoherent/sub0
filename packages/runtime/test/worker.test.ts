@@ -330,7 +330,7 @@ test('a provider echo of the synthetic API key is redacted before Pi persists it
 
 test('Pi exposes and executes only the exact granted write tool', async () => {
   let round = 0;
-  const provider = await startFakeProvider({ onRequest(body, response) {
+  const provider = await startFakeProvider({ onRequest(_body, response) {
     round++;
     if (round === 1) sendToolCall(response, 'write', { path: 'actual-effect.txt', content: 'created by the granted Pi tool' });
     else sendCompletion(response, 'write-finished');
@@ -626,7 +626,7 @@ test('first-turn interruption is retained on disk but excluded by the next root-
   let releaseFirst!: () => void;
   const release = new Promise<void>(resolve => { releaseFirst = resolve; });
   let calls = 0;
-  const provider = await startFakeProvider({ async onRequest(body, response) {
+  const provider = await startFakeProvider({ async onRequest(_body, response) {
     if (calls++ === 0) {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'partial first turn' }, finish_reason: null }] })}\n\n`);
@@ -672,7 +672,7 @@ test('first-turn interruption is retained on disk but excluded by the next root-
 
 test('MCP bridge launches only the declared stdio server and exposes only its selected tool', async () => {
   let round = 0;
-  const provider = await startFakeProvider({ onRequest(body, response) {
+  const provider = await startFakeProvider({ onRequest(_body, response) {
     round++;
     if (round === 1) sendToolCall(response, 'allowed_echo', { text: 'bridge-ok' });
     else sendCompletion(response, 'MCP tool returned bridge-ok');
@@ -737,7 +737,7 @@ test('steering is passed to the active Pi session without a second worker queue'
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let round = 0;
-  const provider = await startFakeProvider({ async onRequest(body, response) {
+  const provider = await startFakeProvider({ async onRequest(_body, response) {
     if (round++ === 0) {
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'working' }, finish_reason: null }] })}\n\n`);
@@ -803,6 +803,229 @@ test('broker EOF aborts a pending provider stream and confirms worker process ex
     await run.catch(() => undefined);
     await Promise.race([streamClosed, new Promise((_, reject) => setTimeout(() => reject(new Error('provider did not observe EOF abort')), 2_000))]);
     assert.equal(await procState(pid), 'gone');
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: provider HTTP 401 ends the run as failed with no completion, checkpoint, or artifact', { timeout: 30_000 }, async () => {
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    response.writeHead(401, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } }));
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-401-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-401-child', workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'audit-401-run', prompt: 'hello' })) events.push(event);
+    assert.equal(events.at(-1)?.type, 'failed', JSON.stringify(events));
+    assert.equal(events.some(event => event.type === 'completed'), false, 'a rejected request never completes');
+    assert.equal(events.some(event => 'checkpointId' in event || 'artifactId' in event), false);
+    assert.equal(provider.requests.length, 1);
+    const artifacts = (await readdir(join(root, 'artifacts')).catch(() => [] as string[])).filter(file => file.endsWith('.artifact'));
+    assert.deepEqual(artifacts, []);
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a first provider HTTP 503 fails the run without an automatic retry', { timeout: 40_000 }, async () => {
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (provider.requests.length === 1) {
+      response.writeHead(503, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: { message: 'service unavailable', type: 'server_error' } }));
+    } else sendCompletion(response, 'retry succeeded');
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-503-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-503-child', workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    const running = (async () => { for await (const event of worker!.run({ runId: 'audit-503-run', prompt: 'hello' })) events.push(event); })();
+    let guard: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([running, new Promise<never>((_resolve, reject) => { guard = setTimeout(() => reject(new Error('run did not reach a terminal event within 30s')), 30_000); })]);
+    } finally { clearTimeout(guard); }
+    assert.equal(provider.requests.length, 1, `the worker does not automatically retry the request (terminal: ${events.at(-1)?.type})`);
+    assert.equal(events.at(-1)?.type, 'failed', JSON.stringify(events));
+    assert.equal(events.some(event => event.type === 'completed'), false);
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a model key split across two streamed deltas never reaches worker text events', { timeout: 15_000 }, async () => {
+  const split = 11;
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    const chunk = (delta: object) => `data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`;
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(chunk({ role: 'assistant' }));
+    response.write(chunk({ content: `before ${key.slice(0, split)}` }));
+    response.write(chunk({ content: `${key.slice(split)} after` }));
+    finishStream(response, '');
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-split-key-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-split-key-child', workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'audit-split-key-run', prompt: 'hello' })) events.push(event);
+    assert.equal(events.at(-1)?.type, 'completed');
+    const text = events.flatMap(event => event.type === 'text' ? [event.text] : []).join('');
+    assert.equal(text.includes(key), false, `joined worker text exposed the key: ${text}`);
+    assert.match(text, /before/);
+    assert.match(text, /after/);
+    assert.match(text, /\[REDACTED\]/);
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a key in write-tool input is redacted from the written file, live history, events, and persisted state', { timeout: 15_000 }, async () => {
+  let round = 0;
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (round++ === 0) sendToolCall(response, 'write', { path: 'tool-input-secret.txt', content: `credential ${key} end` });
+    else sendCompletion(response, 'write finished');
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-write-secret-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-write-secret-child', workspaceRoot: root,
+      templateSnapshot: { id: 'writer', description: '', instructions: 'Use the granted write tool.', tools: [{ name: 'write', writable: true }], skills: [], mcpServers: [], writeCapable: true },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'audit-write-secret-run', prompt: 'Write the credential file.' })) events.push(event);
+    assert.equal(events.at(-1)?.type, 'completed');
+    assert.equal(provider.requests.length, 2);
+    const written = await readFile(join(root, 'tool-input-secret.txt'), 'utf8');
+    assert.equal(written.includes(key), false, 'the file written by the tool contains the literal key');
+    assert.match(written, /\[REDACTED\]/);
+    assert.equal(JSON.stringify(provider.requests[1]?.body.messages).includes(key), false, 'live model history contains the literal key');
+    assert.equal(JSON.stringify(events).includes(key), false);
+    for (const dir of ['sessions', 'artifacts']) {
+      for (const file of await readdir(join(root, dir), { recursive: true })) {
+        assert.equal((await readFile(join(root, dir, file), 'utf8').catch(() => '')).includes(key), false, `key leaked into ${dir}/${file}`);
+      }
+    }
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a granted MCP tool that appears only on a later tools/list page is exposed and executed', { timeout: 15_000 }, async () => {
+  let round = 0;
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (round++ === 0) sendToolCall(response, 'allowed_echo', { text: 'second-page' });
+    else sendCompletion(response, 'paged tool finished');
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-mcp-pages-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-mcp-pages-child', workspaceRoot: root,
+      templateSnapshot: { id: 'mcp-reader', description: '', instructions: 'Use the granted MCP tool.', tools: [], skills: [], mcpServers: [{ name: 'local', command: process.execPath, args: [fileURLToPath(new URL('./fixtures/fake-mcp.mjs', import.meta.url)), join(root, 'mcp-starts.txt'), 'paged'], tools: ['allowed_echo'], writeCapable: false }], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'audit-mcp-pages-run', prompt: 'Call the granted MCP tool.' })) events.push(event);
+    assert.equal(events.at(-1)?.type, 'completed');
+    assert.deepEqual(provider.requests[0]?.body.tools?.map(tool => tool.function.name) ?? [], ['allowed_echo']);
+    const results = provider.requests[1]?.body.messages.filter(message => message.role === 'tool').map(message => message.content).join(' ');
+    assert.match(results ?? '', /mcp:second-page/);
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a worker killed mid-stream releases the held redaction suffix before the interrupted terminal', { timeout: 15_000 }, async () => {
+  let held!: () => void;
+  const providerHeld = new Promise<void>(resolve => { held = resolve; });
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: { role: 'assistant', content: `partial ${key.slice(0, 9)}` }, finish_reason: null }] })}\n\n`);
+    held();
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-stream-error-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-stream-error-child', workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const pid = (worker as unknown as { pid: number }).pid;
+    const events: WorkerEvent[] = [];
+    const running = (async () => { for await (const event of worker!.run({ runId: 'audit-stream-error-run', prompt: 'hello' })) events.push(event); })();
+    await providerHeld;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    process.kill(pid, 'SIGKILL');
+    await running;
+    assert.deepEqual(events.at(-1), { type: 'interrupted', code: 'worker_eof' });
+    const text = events.flatMap(event => event.type === 'text' ? [event.text] : []).join('');
+    assert.equal(text, `partial ${key.slice(0, 9)}`);
+  } finally {
+    if (worker) await worker.close();
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: a model key used as a tool-argument property name is redacted from live history and persisted sessions', { timeout: 15_000 }, async () => {
+  let round = 0;
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (round++ === 0) sendToolCall(response, 'write', { path: 'safe.txt', content: 'ordinary', [key]: 'extra' });
+    else sendCompletion(response, 'write finished');
+  } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-audit-key-name-'));
+  let worker: Worker | undefined;
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')) });
+    worker = await factory.open({
+      childId: 'audit-key-name-child', workspaceRoot: root,
+      templateSnapshot: { id: 'writer', description: '', instructions: 'Use the granted write tool.', tools: [{ name: 'write', writable: true }], skills: [], mcpServers: [], writeCapable: true },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'audit-key-name-run', prompt: 'Write the file.' })) events.push(event);
+    assert.equal(provider.requests.length, 2);
+    assert.equal(JSON.stringify(provider.requests[1]?.body.messages).includes(key), false, 'live model history contains the literal key');
+    assert.equal(JSON.stringify(events).includes(key), false);
+    for (const file of await readdir(join(root, 'sessions'), { recursive: true })) {
+      assert.equal((await readFile(join(root, 'sessions', file), 'utf8').catch(() => '')).includes(key), false, `key leaked into sessions/${file}`);
+    }
   } finally {
     if (worker) await worker.close();
     await provider.close();

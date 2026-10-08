@@ -104,10 +104,11 @@ export class SQLiteStore implements Store {
     return (this.db.prepare('SELECT definition FROM templates ORDER BY template_id').all() as { definition: string }[]).map(row => parse<TemplateDefinition>(row.definition));
   }
 
-  async admitRun(childId: ChildId, run: RunRecord, limits: CoreLimits): Promise<Admission> {
+  async admitRun(childId: ChildId, run: RunRecord, limits: CoreLimits, expectedGeneration?: number): Promise<Admission> {
     return this.transaction(() => {
       const row = this.childRow(childId);
       if (!row) return { kind: 'not_found' };
+      if (expectedGeneration !== undefined && row.owner_generation !== expectedGeneration) return { kind: 'busy' };
       if (row.ownership_state === 'recovery_required') return { kind: 'recovery_required' };
       if (row.ownership_state === 'owned') {
         if (row.owner_broker !== this.brokerId) return { kind: 'recovery_required' };
@@ -169,16 +170,20 @@ export class SQLiteStore implements Store {
     });
   }
 
-  async requestStop(childId: ChildId, expectedRunId: RunId, ownerToken?: string) {
+  async requestStop(childId: ChildId, expectedRunId: RunId, ownerToken?: string, at: string = new Date().toISOString()) {
     return this.transaction(() => {
       const child = this.childRow(childId);
       if (!child) return { kind: 'not_found' as const };
       const run = this.db.prepare('SELECT status FROM runs WHERE child_id = ? AND run_id = ?').get(childId, expectedRunId) as { status: RunRecord['status'] } | undefined;
       if (!run) return { kind: 'stale' as const };
+      if (child.ownership_state === 'recovery_required') return { kind: 'recovery_required' as const };
       if (child.active_run_id !== expectedRunId) return terminalStatus(run.status) ? { kind: 'already_terminal' as const } : { kind: 'stale' as const };
       if (!ownerToken || child.owner_token !== ownerToken || child.ownership_state !== 'owned') return { kind: 'busy' as const };
-      this.cancelQueuedRuns(childId, 'stopped', new Date().toISOString());
-      if (run.status !== 'stop_requested') this.db.prepare("UPDATE runs SET status = 'stop_requested' WHERE run_id = ?").run(expectedRunId);
+      this.cancelQueuedRuns(childId, 'stopped', at);
+      if (run.status !== 'stop_requested') {
+        this.db.prepare("UPDATE runs SET status = 'stop_requested' WHERE run_id = ?").run(expectedRunId);
+        this.insertEvent({ at, childId, runId: expectedRunId, type: 'stop_requested' });
+      }
       return { kind: 'requested' as const };
     });
   }
@@ -221,6 +226,11 @@ export class SQLiteStore implements Store {
     } };
   }
 
+  async hasArtifactInWorkspace(workspaceRoot: string, artifactId: string): Promise<boolean> {
+    return this.db.prepare("SELECT 1 AS found FROM runs JOIN children ON runs.child_id = children.child_id WHERE children.workspace_root = ? AND json_extract(runs.result, '$.artifactId') = ? LIMIT 1")
+      .get(workspaceRoot, artifactId) !== undefined;
+  }
+
   async validateResume(childId: ChildId) {
     const row = this.childRow(childId);
     if (!row) return { kind: 'not_found' as const };
@@ -241,6 +251,7 @@ export class SQLiteStore implements Store {
         this.db.prepare("UPDATE runs SET status = 'interrupted', error_code = 'worker_interrupted' WHERE run_id = ? AND status IN ('running', 'stop_requested')").run(row.active_run_id);
         this.insertEvent({ at, childId, runId: row.active_run_id, type: 'interrupted', code: 'worker_interrupted' });
       }
+      this.cancelQueuedRuns(childId, 'interrupted', at);
       this.db.prepare(`UPDATE children SET state = 'interrupted', active_run_id = NULL, owner_broker = NULL,
         owner_token = NULL, ownership_state = 'none', updated_at = ? WHERE child_id = ? AND owner_generation = ?`)
         .run(at, childId, expectedGeneration);

@@ -1,6 +1,7 @@
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { McpServer, fromJsonSchema, type JsonSchemaType } from '@modelcontextprotocol/server';
+import { SubzeroError } from '@subzero/core';
 import type { RuntimeApplication } from './application.ts';
 import { safeToolError } from './application.ts';
 import operations from '@subzero/core/schemas/wire-operations.schema.json' with { type: 'json' };
@@ -30,14 +31,14 @@ export function createMcpServer(application: RuntimeApplication): ManagedMcpServ
     server.registerTool(`subzero_${name}`, {
       description: descriptions[name],
       inputSchema: fromJsonSchema<ToolInput>(schema as JsonSchemaType),
-    }, async (input: ToolInput) => {
+    }, async (input: ToolInput, context) => {
       if (closing) return errorResult({ code: 'runtime_shutting_down', message: 'The runtime is shutting down.' });
       inFlight++;
       try {
-        const result = await invoke(application, name, input);
+        const result = await invoke(application, name, input, context.mcpReq.signal);
         const structuredContent = isPlainRecord(result) ? result : { value: result };
         const text = JSON.stringify(structuredContent);
-        return { content: [{ type: 'text', text: text.length <= 6000 ? text : `${text.slice(0, 5997)}...` }], structuredContent };
+        return { content: [{ type: 'text', text }], structuredContent };
       } catch (error) {
         return errorResult(safeToolError(error));
       } finally {
@@ -50,7 +51,7 @@ export function createMcpServer(application: RuntimeApplication): ManagedMcpServ
   return Object.assign(server, { shutdown: finishClose });
 }
 
-async function invoke(application: RuntimeApplication, operation: OperationName, input: ToolInput): Promise<unknown> {
+async function invoke(application: RuntimeApplication, operation: OperationName, input: ToolInput, signal?: AbortSignal): Promise<unknown> {
   switch (operation) {
     case 'info': return application.info();
     case 'spawn': {
@@ -59,28 +60,43 @@ async function invoke(application: RuntimeApplication, operation: OperationName,
     }
     case 'get': {
       const args = input as unknown as { childId: string; waitMs?: number; cursor?: number; eventLimit?: number; previewLimit?: number };
-      return application.get(args.childId, { waitMs: args.waitMs, cursor: args.cursor, eventLimit: args.eventLimit, previewLimit: args.previewLimit });
+      await application.assertChildWorkspace(args.childId);
+      return application.get(args.childId, { waitMs: args.waitMs, cursor: args.cursor, eventLimit: args.eventLimit, previewLimit: args.previewLimit }, signal);
     }
     case 'list': {
       const args = input as unknown as { workspaceRoot?: string };
-      if (args.workspaceRoot !== undefined && await realpath(resolve(args.workspaceRoot)) !== application.workspaceRoot) throw new Error('List workspaceRoot must match the configured workspace.');
+      if (args.workspaceRoot !== undefined) {
+        let resolved: string | undefined;
+        try {
+          resolved = await realpath(resolve(application.workspaceRoot, args.workspaceRoot));
+        } catch {
+          throw new SubzeroError('invalid_request', 'List workspaceRoot must match the configured workspace.');
+        }
+        if (resolved !== application.workspaceRoot) {
+          throw new SubzeroError('invalid_request', 'List workspaceRoot must match the configured workspace.');
+        }
+      }
       return { children: await application.list(application.workspaceRoot) };
     }
     case 'send': {
       const args = input as unknown as { childId: string; mode: 'steer' | 'followup'; message: string };
+      await application.assertChildWorkspace(args.childId);
       return application.send(args.childId, { mode: args.mode, message: args.message });
     }
     case 'stop': {
       const args = input as unknown as { childId: string; expectedRunId: string };
+      await application.assertChildWorkspace(args.childId);
       return application.stop(args.childId, args.expectedRunId);
     }
     case 'resume': {
       const args = input as unknown as { childId: string; model: WireModel; message?: string };
+      await application.assertChildWorkspace(args.childId);
       await application.recoverChild(args.childId);
       return application.resume(args.childId, await resolveModel(application, args.model), args.message);
     }
     case 'output': {
       const args = input as unknown as { artifactId: string; offset?: number; length?: number };
+      await application.assertArtifactWorkspace(args.artifactId);
       return application.readArtifact(args.artifactId, args.offset ?? 0, args.length ?? 4096);
     }
   }

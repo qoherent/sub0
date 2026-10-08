@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 type Json = Record<string, unknown>;
 type Envelope = Json & { type: string; id?: number };
@@ -54,7 +55,7 @@ async function initialize(message: Envelope, id: number) {
   }
   if (!model) throw new Error('model_metadata_unavailable');
   await runtime.setRuntimeApiKey(providerId, key);
-  const settingsManager = SettingsManager.inMemory({ defaultTools: [] });
+  const settingsManager = SettingsManager.inMemory({ defaultTools: [], retry: { enabled: false, provider: { maxRetries: 0 } }, compaction: { enabled: false }, cacheWarming: 'off' });
   const resourceLoader = new DefaultResourceLoader({
     cwd, agentDir: String(process.env.PI_CODING_AGENT_DIR), settingsManager,
     noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
@@ -80,6 +81,8 @@ async function initialize(message: Envelope, id: number) {
   });
   session = created.session;
   await session.bindExtensions({ mode: 'json' });
+  const previousTransform = session.agent.transformContext;
+  session.agent.transformContext = async (messages, signal) => redactStructured(previousTransform ? await previousTransform(messages, signal) : messages, redactionSecrets);
   const currentFile = manager.getSessionFile();
   if (currentFile) await writeFile(join(childDir, 'session-meta.json'), JSON.stringify({ sessionFile: currentFile, workspaceRoot: cwd, engineVersion: String(message.engineVersion) }), { mode: 0o600 });
   response(id, { initialized: true, providerId, sessionFile: currentFile });
@@ -112,7 +115,7 @@ function createBuiltinTools(cwd: string, snapshot: any, secrets: string[]): any[
     if (!execute) return tool;
     return {
       ...tool,
-      execute: async (...args: unknown[]) => redactStructured(await execute(...args), secrets),
+      execute: async (callId: unknown, params: unknown, ...rest: unknown[]) => redactStructured(await execute(callId, redactStructured(params, secrets), ...rest), secrets),
     };
   });
 }
@@ -145,7 +148,7 @@ async function createMcpTools(snapshot: any, envMap: Record<string, string>) {
         name, label: name, description: tool.description ?? `MCP tool from ${server.name}`,
         parameters,
         execute: async (_callId: string, args: unknown, context: { signal?: AbortSignal }) => {
-          const result = await client.callTool({ name: tool.name, arguments: (args ?? {}) as Record<string, unknown> }, { signal: context.signal });
+          const result = await client.callTool({ name: tool.name, arguments: redactStructured(args ?? {}, redactionSecrets) as Record<string, unknown> }, { signal: context.signal });
           const content = (result.content ?? []).map((part: any) => ({ type: 'text' as const, text: redactSecrets(typeof part.text === 'string' ? part.text : JSON.stringify(part)) }));
           return { content, details: undefined, isError: result.isError === true };
         },
@@ -195,8 +198,10 @@ async function runPrompt(message: Envelope, id: number) {
   } else if (manager.getLeafId()) manager.resetLeaf();
   const controller = new AbortController();
   running = { id, runId: String(message.runId ?? ''), controller, promise: Promise.resolve() };
+  let finalAssistant: any;
   const listener = (value: any) => {
-    if (value.type === 'message_update' && value.assistantMessageEvent?.type === 'text_delta') {
+    if (value.type === 'message_end' && value.message?.role === 'assistant') finalAssistant = value.message;
+    else if (value.type === 'message_update' && value.assistantMessageEvent?.type === 'text_delta') {
       const delta = String(value.assistantMessageEvent.delta ?? '');
       event(id, { type: 'text', text: delta });
     } else if (value.type === 'tool_execution_start') event(id, { type: 'tool', name: String(value.toolName ?? ''), state: 'started' });
@@ -207,7 +212,10 @@ async function runPrompt(message: Envelope, id: number) {
     const prompt = String(message.prompt ?? '');
     const notice = checkpointId ? 'You are continuing from a saved checkpoint. Inspect the current workspace before acting.\n\n' : '';
     await session.prompt(`${notice}${prompt}`);
-    if (controller.signal.aborted) { event(id, { type: 'stopped' }); return; }
+    if (controller.signal.aborted || finalAssistant?.stopReason === 'aborted') { event(id, { type: 'stopped' }); return; }
+    if (!finalAssistant) { event(id, { type: 'interrupted', code: 'pi_no_assistant_response' }); return; }
+    if (finalAssistant.stopReason === 'error') { event(id, { type: 'failed', code: 'provider_error', message: redactSecrets(String(finalAssistant.errorMessage ?? 'Provider request failed.')) }); return; }
+    if (finalAssistant.stopReason !== 'stop') { event(id, { type: 'failed', code: 'pi_incomplete_response', message: redactSecrets(`Assistant ended with stop reason ${String(finalAssistant.stopReason)}.`) }); return; }
     const output = session.getLastAssistantText();
     const leaf = manager.getLeafId();
     if (!leaf) throw new Error('checkpoint_missing');
@@ -252,11 +260,31 @@ async function handle(message: Envelope) {
   } catch (error) { failure(id, error); }
 }
 
-async function shutdown() {
-  running?.controller.abort();
-  await running?.promise.catch(() => undefined);
-  session?.dispose(); session = undefined;
-  for (const client of mcpClients.splice(0)) await client.close().catch(() => undefined);
+let shuttingDown: Promise<void> | undefined;
+function shutdown(): Promise<void> {
+  return shuttingDown ??= (async () => {
+    running?.controller.abort();
+    await session?.abort().catch(() => undefined);
+    await running?.promise.catch(() => undefined);
+    session?.dispose(); session = undefined;
+    for (const client of mcpClients.splice(0)) await client.close().catch(() => undefined);
+  })();
+}
+
+function ownsProcessGroup(): boolean {
+  if (process.platform === 'win32') return false;
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = readFileSync('/proc/self/stat', 'utf8');
+    return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]) === process.pid;
+  } catch { return false; }
+}
+
+function terminateOwnGroup() {
+  if (ownsProcessGroup()) {
+    try { process.kill(-process.pid, 'SIGKILL'); } catch { }
+  }
+  process.exit(0);
 }
 
 function canonicalUrl(url: string | undefined): string { return (url ?? '').replace(/\/+$/, ''); }
@@ -270,9 +298,7 @@ function redactStructured<T>(value: T, secrets: string[]): T {
   if (typeof value === 'string') return secrets.reduce((text, secret) => text.split(secret).join('[REDACTED]'), value) as T;
   if (Array.isArray(value)) return value.map(item => redactStructured(item, secrets)) as T;
   if (value && typeof value === 'object') {
-    const output: Record<string, unknown> = {};
-    for (const [name, child] of Object.entries(value)) output[name] = redactStructured(child, secrets);
-    return output as T;
+    return Object.fromEntries(Object.entries(value).map(([name, child]) => [redactStructured(name, secrets), redactStructured(child, secrets)])) as T;
   }
   return value;
 }
@@ -288,7 +314,10 @@ process.stdin.on('data', chunk => {
   inputBuffer += chunk;
   for (;;) { const end = inputBuffer.indexOf('\n'); if (end < 0) break; const line = inputBuffer.slice(0, end); inputBuffer = inputBuffer.slice(end + 1); if (line) void handle(JSON.parse(line) as Envelope); }
 });
-process.stdin.on('end', () => { void shutdown().finally(() => process.exit(0)); });
+process.stdin.on('end', () => {
+  setTimeout(terminateOwnGroup, 1_200);
+  void shutdown().finally(terminateOwnGroup);
+});
 process.on('uncaughtException', error => { process.stderr.write(`${safeError(error)}\n`); void shutdown().finally(() => process.exit(1)); });
 process.on('unhandledRejection', error => { process.stderr.write(`${safeError(error)}\n`); void shutdown().finally(() => process.exit(1)); });
 send({ type: 'ready' });

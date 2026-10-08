@@ -16,6 +16,7 @@ test('credential references resolve only configured environment variables and al
   assert.deepEqual(resolver.resolve('MODEL_A', 'https://api.example.com/v1', env), { key: 'secret-value' });
   assert.throws(() => resolver.resolve('MODEL_A', 'https://attacker.example/path', env), /origin/i);
   assert.throws(() => resolver.resolve('OPENAI_API_KEY', 'https://api.example.com', env), /unknown/i);
+  assert.throws(() => resolver.resolve('toString', 'https://api.example.com', env), { name: 'SubzeroError', code: 'credentials_required' });
   assert.throws(() => resolver.resolve('MODEL_A', 'file:///tmp/x', env), /https?/i);
   assert.throws(() => resolver.resolve('MODEL_A', 'https://api.example.com', {}), /credential/i);
 });
@@ -100,4 +101,18 @@ test('CLI runs when invoked through a symlinked executable path', async () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, '0.1.0\n');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('audit: the conformance spawn fixture credential alias resolves through a configured reference', async () => {
+  const fixture = JSON.parse(await readFile(fileURLToPath(new URL('../../core/conformance/valid-spawn.json', import.meta.url)), 'utf8')) as { arguments: { model: { url: string; credentialRef: string } } };
+  const { url, credentialRef } = fixture.arguments.model;
+  const resolver = new CredentialResolver({ [credentialRef]: { env: 'SUBZERO_MODEL_KEY', origins: [new URL(url).origin] } });
+  assert.deepEqual(resolver.resolve(credentialRef, url, { SUBZERO_MODEL_KEY: 'synthetic-conformance-key' }), { key: 'synthetic-conformance-key' });
+});
+
+test('audit: missing credential reference or environment key fails with the documented credentials_required code', () => {
+  const resolver = new CredentialResolver({ MODEL_A: { env: 'SUBZERO_MODEL_A_KEY', origins: ['https://api.example.com'] } });
+  assert.throws(() => resolver.resolve('UNKNOWN', 'https://api.example.com/v1', {}), { code: 'credentials_required', message: /Unknown credential reference/ });
+  assert.throws(() => resolver.resolve('MODEL_A', 'https://api.example.com/v1', {}), { code: 'credentials_required', message: /Credential is not configured/ });
+  assert.throws(() => resolver.resolve('MODEL_A', 'https://api.example.com/v1', { SUBZERO_MODEL_A_KEY: '' }), { code: 'credentials_required' });
 });

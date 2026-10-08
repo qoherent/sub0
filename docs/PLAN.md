@@ -1,6 +1,6 @@
 # Subzero v0.1 reference specification and implementation record
 
-Status: v0.1 TypeScript implementation and local M1–M3 gates are complete. The original 90 tests passed on Node 24.21.0/Linux; the current 93 tests and `.env`-based live LongCat command passed on Node 26.3.1/Linux. Build, typecheck, local archive installation, the installed CLI, and MCP discovery also passed. Packages remain unpublished to npm; other hosts remain untested. See [testing evidence](TESTING.md) for verified scope and limits.
+Status: v0.1 TypeScript implementation and local M1–M3 gates have audit hardening. The [2026-10-08 audit](AUDIT-2026-10-08.md) is the current record of regression fixes, fresh setup, package/CLI/MCP checks, real LongCat evidence and unresolved risks. Packages remain private and unpublished. Pi 1.0.4 and 1.1.0 hosts have been exercised with the worker pinned to SDK 1.0.4; other host workflows remain untested. See [testing evidence](TESTING.md) for verified scope and limits.
 
 ## Goal
 

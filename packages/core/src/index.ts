@@ -1,5 +1,5 @@
 import type {
-  Admission, ArtifactChunk, ChildEvent, ChildId, ChildRecord, ChildSnapshot, ChildSummary, CoreLimits, EventInput,
+  Admission, ArtifactChunk, ChildId, ChildRecord, ChildSnapshot, ChildSummary, CoreLimits, EventInput,
   GetInput, ModelArgs, ModelMetadata, OwnerLease, ResumeResult, RunId, RunRecord, SubscriptionItem,
   SendInput, SpawnInput, StopResult, SubzeroOptions, TemplateDefinition, Worker, WorkerEvent, WorkerTerminal,
 } from './types.ts';
@@ -58,9 +58,11 @@ export function createSubzero(options: SubzeroOptions) {
   };
   const modelMetadata = ({ url, model, api }: ModelArgs): ModelMetadata => ({ url, model, ...(api ? { api } : {}) });
   const now = () => options.clock().toISOString();
-  const makeRun = (childId: ChildId, prompt: string, status: RunRecord['status'] = 'running'): RunRecord => ({
-    runId: options.ids.run(), childId, prompt, status, createdAt: now(),
-  });
+  const makeRun = (childId: ChildId, prompt: string, status: RunRecord['status'] = 'running', key?: string): RunRecord => {
+    const safePrompt = redact(prompt, key);
+    if (utf8Length(safePrompt) > limits.promptBytes) throw new SubzeroError('limit_exceeded', `Prompt exceeds ${limits.promptBytes} UTF-8 bytes.`);
+    return { runId: options.ids.run(), childId, prompt: safePrompt, status, createdAt: now() };
+  };
   const validatePrompt = (prompt: unknown) => {
     if (typeof prompt !== 'string' || !prompt.trim()) throw new SubzeroError('invalid_request', 'Prompt/message must be a non-empty string.');
     if (utf8Length(prompt) > limits.promptBytes) throw new SubzeroError('limit_exceeded', `Prompt exceeds ${limits.promptBytes} UTF-8 bytes.`);
@@ -74,6 +76,7 @@ export function createSubzero(options: SubzeroOptions) {
     if (result.kind === 'workspace_busy') throw new SubzeroError('workspace_busy', 'Workspace worker or writer limit is currently reached.');
     if (result.kind === 'recovery_required') throw new SubzeroError('recovery_required', 'The prior worker exit is unconfirmed; child ownership cannot be acquired.');
     if (result.kind === 'not_found') throw new SubzeroError('not_found', 'Child session was not found.');
+    if (result.kind === 'busy') throw new SubzeroError('busy', 'Child ownership changed before the run was admitted.');
     if (result.kind === 'queued') return undefined;
     return result.lease;
   };
@@ -117,13 +120,18 @@ export function createSubzero(options: SubzeroOptions) {
   };
   const pump = async (entry: LocalWorker, child: ChildRecord, run: RunRecord, model: ModelArgs) => {
     let terminal: WorkerTerminal | undefined;
+    const redactor = createTextRedactor([model.key]);
+    const emitText = async (text: string) => { if (text) await emitWorkerEvent(child.childId, run.runId, { type: 'text', text }, model.key); };
     try {
       for await (const event of entry.worker.run({ runId: run.runId, prompt: run.prompt, fromCheckpointId: child.lastCompletedLeaf })) {
         if (event.type === 'completed' || event.type === 'stopped' || event.type === 'failed' || event.type === 'interrupted') terminal = event;
+        else if (event.type === 'text') await emitText(redactor.push(event.text));
         else await emitWorkerEvent(child.childId, run.runId, event, model.key);
       }
+      await emitText(redactor.flush());
       if (!terminal) terminal = { type: 'interrupted', code: 'worker_stream_ended' };
     } catch (error) {
+      await emitText(redactor.flush()).catch(() => undefined);
       terminal = { type: 'interrupted', code: 'worker_stream_failed', message: safeMessage(error, model.key) };
     }
     const closed = await closeEntry(entry);
@@ -160,7 +168,8 @@ export function createSubzero(options: SubzeroOptions) {
     if (localWorkers.get(entry.childId) === entry) localWorkers.delete(entry.childId);
     entry.finish(exitConfirmed);
   };
-  const readSnapshot = async (childId: ChildId, input: GetInput = {}): Promise<ChildSnapshot> => {
+  const readSnapshot = async (childId: ChildId, input: GetInput = {}, signal?: AbortSignal): Promise<ChildSnapshot> => {
+    signal?.throwIfAborted();
     let child = await requiredChild(childId);
     const after = nonnegativeInteger(input.cursor, 0, 'cursor');
     const eventLimit = clampInt(input.eventLimit, 1, limits.eventBatch, limits.eventBatch);
@@ -169,11 +178,22 @@ export function createSubzero(options: SubzeroOptions) {
     const waitMs = clampInt(input.waitMs, 0, limits.maxWaitMs, 0);
     if (waitMs && page.events.length === 0) {
       const abort = new AbortController();
-      const stream = await options.store.subscribe(childId, after, abort.signal);
-      const iterator = stream[Symbol.asyncIterator]();
-      await Promise.race([iterator.next(), new Promise(resolve => setTimeout(resolve, waitMs))]);
-      abort.abort();
-      await iterator.return?.();
+      const forward = () => abort.abort();
+      signal?.addEventListener('abort', forward, { once: true });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let iterator: AsyncIterator<unknown> | undefined;
+      try {
+        const stream = await options.store.subscribe(childId, after, abort.signal);
+        iterator = stream[Symbol.asyncIterator]();
+        signal?.throwIfAborted();
+        await Promise.race([iterator.next(), new Promise(resolve => { timer = setTimeout(resolve, waitMs); })]);
+        signal?.throwIfAborted();
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', forward);
+        abort.abort();
+        await iterator?.return?.();
+      }
       page = await options.store.readEvents(childId, after, eventLimit);
       child = await requiredChild(childId);
     }
@@ -211,7 +231,7 @@ export function createSubzero(options: SubzeroOptions) {
       const snapshot = await templateById(input.templateId);
       await options.store.putTemplate(snapshot);
       const childId = options.ids.child();
-      const run = makeRun(childId, input.prompt);
+      const run = makeRun(childId, input.prompt, 'running', input.model.key);
       const child: ChildRecord = {
         childId, workspaceRoot: input.workspaceRoot, state: 'running', templateSnapshot: snapshot,
         model: modelMetadata(input.model), activeRunId: run.runId, ownerGeneration: 0,
@@ -224,9 +244,9 @@ export function createSubzero(options: SubzeroOptions) {
       await dispatch(child, run, lease, input.model);
       return { childId, runId: run.runId };
     },
-    async get(childId: ChildId, input: GetInput = {}) {
+    async get(childId: ChildId, input: GetInput = {}, signal?: AbortSignal) {
       strictObject(input, ['waitMs', 'cursor', 'eventLimit', 'previewLimit'], 'get input');
-      return readSnapshot(childId, input);
+      return readSnapshot(childId, input, signal);
     },
     async list(workspaceRoot?: string): Promise<ChildSummary[]> {
       return (await options.store.listChildren(workspaceRoot)).map(child => ({
@@ -251,17 +271,20 @@ export function createSubzero(options: SubzeroOptions) {
         if (!child.activeRunId || child.state !== 'running') throw new SubzeroError('busy', 'There is no active run to steer.');
         if (!active || active.closed) throw new SubzeroError('busy', 'The active child worker is not available for steering.');
         if (!active.worker.capabilities.steer) throw new SubzeroError('unsupported_steer', 'The active worker does not support steering.');
-        await active.worker.steer(input.message);
+        const key = active.key ?? credentials.get(childId)?.key;
+        const safeMessage = redact(input.message, key);
+        if (utf8Length(safeMessage) > limits.promptBytes) throw new SubzeroError('limit_exceeded', `Prompt exceeds ${limits.promptBytes} UTF-8 bytes.`);
+        await active.worker.steer(safeMessage);
         return { runId: child.activeRunId, delivery: 'steered' };
       }
       if (child.state === 'running' && !active) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
       const model = credentials.get(childId);
       if (child.state !== 'running' && !model) throw new SubzeroError('credentials_required', 'Call resume with credentials before sending work after broker restart.');
       if (child.state !== 'running' && model && !sameModelMetadata(child.model, modelMetadata(model))) throw new SubzeroError('credentials_required', 'Saved model settings changed; resume with credentials for the current model before sending work.');
-      const run = makeRun(childId, input.message, 'queued');
-      const admission = await options.store.admitRun(childId, run, limits);
+      const run = makeRun(childId, input.message, 'queued', model?.key);
+      const admission = await options.store.admitRun(childId, run, limits, child.ownerGeneration);
       if (admission.kind === 'not_found') throw new SubzeroError('not_found', 'Child session was not found.');
-      if (admission.kind === 'workspace_busy' || admission.kind === 'recovery_required') ensureNoAdmissionError(admission);
+      if (admission.kind === 'workspace_busy' || admission.kind === 'recovery_required' || admission.kind === 'busy') ensureNoAdmissionError(admission);
       if (admission.kind === 'queued') {
         return { runId: run.runId, delivery: 'queued' };
       }
@@ -276,12 +299,12 @@ export function createSubzero(options: SubzeroOptions) {
       const entry = localWorkers.get(childId);
       if (child.activeRunId && child.activeRunId !== expectedRunId) throw new SubzeroError('stale_run', 'expectedRunId does not identify the active run.');
       if (child.activeRunId === expectedRunId && (!entry || entry.closed)) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
-      const outcome = await options.store.requestStop(childId, expectedRunId, entry?.lease.ownerToken);
+      const outcome = await options.store.requestStop(childId, expectedRunId, entry?.lease.ownerToken, now());
       if (outcome.kind === 'stale') throw new SubzeroError('stale_run', 'expectedRunId does not identify the active run.');
       if (outcome.kind === 'busy') throw new SubzeroError('busy', 'Child worker ownership changed before stop admission.');
       if (outcome.kind === 'not_found') throw new SubzeroError('not_found', 'Child session was not found.');
+      if (outcome.kind === 'recovery_required') throw new SubzeroError('recovery_required', 'Prior worker termination is unconfirmed.');
       if (outcome.kind === 'already_terminal') return { requested: false, confirmed: true };
-      await options.store.appendEvent(childId, { at: now(), childId, runId: expectedRunId, type: 'stop_requested' });
       const stopped = await entry!.worker.stop(expectedRunId);
       if (stopped.confirmed) {
         const exitConfirmed = await entry!.done;
@@ -310,8 +333,8 @@ export function createSubzero(options: SubzeroOptions) {
       const committedChild = commit.child;
       credentials.set(childId, model);
       if (message === undefined) return { state: 'ready', childId };
-      const run = makeRun(childId, message);
-      const admission = await options.store.admitRun(childId, run, limits);
+      const run = makeRun(childId, message, 'running', model.key);
+      const admission = await options.store.admitRun(childId, run, limits, committedChild.ownerGeneration);
       if (admission.kind !== 'started') { ensureNoAdmissionError(admission); throw new SubzeroError('busy', 'Child could not be claimed for resume.'); }
       const lease = admission.lease;
       await dispatch({ ...committedChild, state: 'running', activeRunId: run.runId }, run, lease, model);
@@ -338,8 +361,7 @@ export function createSubzero(options: SubzeroOptions) {
           const child = await options.store.getChild(childId);
           if (!child?.activeRunId) continue;
           const runId = child.activeRunId;
-          const requested = await options.store.requestStop(childId, runId, entry.lease.ownerToken);
-          if (requested.kind === 'requested') await options.store.appendEvent(childId, { at: now(), childId, runId, type: 'stop_requested' });
+          const requested = await options.store.requestStop(childId, runId, entry.lease.ownerToken, now());
           if (requested.kind !== 'requested') continue;
           const stopped = await entry.worker.stop(runId);
           if (!stopped.confirmed) continue;
@@ -368,6 +390,7 @@ function validateTemplate(template: TemplateDefinition, limits: CoreLimits) {
   if (toolNames.size + mcpNames.length > limits.grantedTools) throw new SubzeroError('limit_exceeded', `Template grants more than ${limits.grantedTools} tools.`);
   if ([...toolNames].some(name => !name) || mcpNames.some(name => !name)) throw new SubzeroError('invalid_request', 'Tool grants must have explicit names.');
   if (template.skills.some(skill => !skill.name || typeof skill.content !== 'string')) throw new SubzeroError('invalid_request', 'Skill snapshots require a name and resolved content.');
+  if (utf8Length(template.instructions) + template.skills.reduce((total, skill) => total + utf8Length(skill.content), 0) > limits.instructionBytes) throw new SubzeroError('limit_exceeded', 'Template instructions and skill contents exceed the configured UTF-8 byte limit.');
   if ((template.workerAdapter !== undefined && (typeof template.workerAdapter !== 'string' || !template.workerAdapter)) || (template.workerVersion !== undefined && (typeof template.workerVersion !== 'string' || !template.workerVersion))) throw new SubzeroError('invalid_request', 'Worker adapter and version must be non-empty strings when supplied.');
   if (template.mcpServers.some(server => typeof server.writeCapable !== 'boolean' || (server.args !== undefined && !Array.isArray(server.args)) || (server.envRefs !== undefined && !Array.isArray(server.envRefs)) || server.tools.some(tool => typeof tool !== 'string' || !tool) || server.args?.some(arg => typeof arg !== 'string') || server.envRefs?.some(ref => typeof ref !== 'string' || !/^(env|secret):[A-Za-z_][A-Za-z0-9_.-]*$/.test(ref)))) throw new SubzeroError('invalid_request', 'MCP grants require write capability, explicit tools, and valid secret references.');
   const hasWriteGrant = template.tools.some(tool => tool.writable) || template.mcpServers.some(server => server.writeCapable);
@@ -420,4 +443,31 @@ function terminalToEvent(childId: ChildId, runId: RunId, terminal: WorkerTermina
   if (terminal.type === 'completed') return { at, childId, runId, type: 'completed', artifactId: terminal.artifactId, preview: truncateUtf8(terminal.preview, previewLimit) };
   if (terminal.type === 'stopped') return { at, childId, runId, type: 'stop_confirmed' };
   return { at, childId, runId, type: terminal.type, code: terminal.code, ...(terminal.message ? { message: truncateUtf8(terminal.message, 512) } : {}) };
+}
+
+export function createTextRedactor(secrets: string[]): { push(text: string): string; flush(): string } {
+  const known = [...new Set(secrets.filter(secret => typeof secret === 'string' && secret.length > 0))].sort((a, b) => b.length - a.length);
+  const longest = Math.max(known[0]?.length ?? 0, 1);
+  let pending = '';
+  const scan = (input: string, final: boolean): string => {
+    let output = '';
+    let index = 0;
+    while (index < input.length) {
+      if (!final && input.length - index <= longest) {
+        const rest = input.slice(index);
+        if (known.some(secret => secret.length > rest.length && secret.startsWith(rest)) || /^[\uD800-\uDBFF]$/.test(rest)) { pending = rest; return output; }
+      }
+      const match = known.find(secret => input.startsWith(secret, index));
+      if (match) { output += '[REDACTED]'; index += match.length; continue; }
+      const point = String.fromCodePoint(input.codePointAt(index)!);
+      output += point;
+      index += point.length;
+    }
+    pending = '';
+    return output;
+  };
+  return {
+    push: text => scan(pending + text, false),
+    flush: () => { const rest = pending; pending = ''; return scan(rest, true); },
+  };
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { createSubzero } from '../src/index.ts';
+import { createSubzero, createTextRedactor } from '../src/index.ts';
 import { FakeStore, ControlledEngineFactory, ids, template, coder, tooManyTools } from './support.ts';
 
 const args = { url: 'https://model.example/v1', model: 'model-x', key: 'secret-key' };
@@ -64,7 +64,7 @@ test('wire schemas parse and use credential references rather than raw keys', as
   assert.equal(schema.$id, 'urn:subzero:protocol:0.1:operations');
   assert.equal(responseSchema.$id, 'urn:subzero:protocol:0.1:responses');
   assert.equal(templateSchema.$id, 'urn:subzero:protocol:0.1:templates');
-  assert.equal(fixture.arguments.model.credentialRef, 'env:SUBZERO_MODEL_KEY');
+  assert.equal(fixture.arguments.model.credentialRef, 'MODEL_KEY');
   assert.equal('key' in fixture.arguments.model, false);
   const { core } = setup();
   await assert.rejects(core.spawn({ prompt: 'host injects root', templateId: 'researcher', model: args } as never), { code: 'invalid_request' });
@@ -445,6 +445,188 @@ test('provider failure text containing the in-memory model key is redacted', asy
   const persisted = JSON.stringify(await store.dump());
   assert.equal(persisted.includes(args.key), false);
   assert.equal(persisted.includes('[REDACTED]'), true);
+});
+
+test('audit: a model key split across two text events is redacted from persisted and returned text', async () => {
+  const { core, store, engine } = setup();
+  const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  const split = 6;
+  engine.runs[0]!.emit({ type: 'text', text: `before ${args.key.slice(0, split)}` });
+  engine.runs[0]!.emit({ type: 'text', text: `${args.key.slice(split)} after` });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'done' });
+  await eventuallyAsync(async () => (await core.get(child.childId)).state === 'ready');
+  const persisted = (await store.dump()).flatMap(row => row.events).flatMap(event => event.type === 'text' ? [event.text] : []).join('');
+  assert.equal(persisted.includes(args.key), false, `persisted text exposed the key: ${persisted}`);
+  assert.match(persisted, /\[REDACTED\]/);
+  assert.match(persisted, /before/);
+  assert.match(persisted, /after/);
+  const read = (await core.get(child.childId, { cursor: 0 })).events.flatMap(event => event.type === 'text' ? [event.text] : []).join('');
+  assert.equal(read.includes(args.key), false, `returned text exposed the key: ${read}`);
+  assert.match(read, /\[REDACTED\]/);
+  assert.match(read, /before/);
+  assert.match(read, /after/);
+});
+
+test('audit: template instructions plus resolved skill contents are bounded by instructionBytes in UTF-8', () => {
+  const build = (skillEmoji: number) => ({
+    ...structuredClone(template), instructions: '\u{1F642}'.repeat(8000),
+    skills: [{ name: 'large-skill', content: '\u{1F642}'.repeat(skillEmoji) }],
+  });
+  assert.doesNotThrow(() => setup({}, [build(8000)]), 'combined 64000 bytes is within 65536');
+  assert.throws(() => setup({}, [build(9000)]), { code: 'limit_exceeded' });
+});
+
+test('audit: streaming redactor replaces a secret split at every boundary and emits no fragment', () => {
+  const secret = 'sk-synthetic-redactor-4821';
+  for (let split = 0; split <= secret.length; split++) {
+    const redactor = createTextRedactor([secret]);
+    const first = redactor.push(`before ${secret.slice(0, split)}`);
+    assert.equal(first.includes(secret.slice(0, Math.max(split, 1))) && split > 0, false, `split ${split} emitted a secret fragment: ${first}`);
+    const joined = first + redactor.push(`${secret.slice(split)} after`) + redactor.flush();
+    assert.equal(joined, 'before [REDACTED] after', `split ${split}`);
+  }
+});
+
+test('audit: streaming redactor handles overlapping prefixes, adjacent repeats, and several chunks', () => {
+  const overlapping = createTextRedactor(['abc', 'abcd']);
+  assert.equal(overlapping.push('xabcd') + overlapping.flush(), 'x[REDACTED]');
+  const shorter = createTextRedactor(['abc', 'abcd']);
+  assert.equal(shorter.push('abc') + shorter.push('z') + shorter.flush(), '[REDACTED]z');
+  const trailing = createTextRedactor(['abc', 'abcd']);
+  assert.equal(trailing.push('abc') + trailing.flush(), '[REDACTED]');
+  const repeats = createTextRedactor(['secret']);
+  assert.equal(repeats.push('sec') + repeats.push('retsec') + repeats.push('ret') + repeats.flush(), '[REDACTED][REDACTED]');
+  const pieces = createTextRedactor(['secret']);
+  assert.equal([...'secret!'].map(character => pieces.push(character)).join('') + pieces.flush(), '[REDACTED]!');
+});
+
+test('audit: streaming redactor preserves Unicode and non-secret text and releases incomplete suffixes on flush', () => {
+  const redactor = createTextRedactor(['', 'secret\u{1F642}key']);
+  assert.equal(redactor.push('héllo \u{1F642} wörld sec') + redactor.push('ret\u{1F642}') + redactor.push('key done'), 'héllo \u{1F642} wörld [REDACTED] done');
+  const partial = createTextRedactor(['secret']);
+  assert.equal(partial.push('a sec') + partial.push('ond') + partial.flush(), 'a second');
+  const unfinished = createTextRedactor(['secret']);
+  assert.equal(unfinished.push('end sec'), 'end ');
+  assert.equal(unfinished.flush(), 'sec');
+  assert.equal(unfinished.flush(), '');
+  const marker = createTextRedactor(['ACTED']);
+  assert.equal(marker.push('ACTED') + marker.push('x') + marker.flush(), '[REDACTED]x');
+  assert.equal(createTextRedactor([]).push('plain'), 'plain');
+});
+
+test('audit: send fails busy when another broker commits a different model between observation and admission', async () => {
+  const { core, store, engine } = setup();
+  const peer = createSubzero({
+    store, engineFactory: new ControlledEngineFactory(), templates: [template, coder], ids: ids(),
+    clock: () => new Date('2026-10-07T12:00:00.000Z'), worker: { name: 'fake', version: '1', capabilities: [] },
+  });
+  const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'done' });
+  await eventuallyAsync(async () => (await core.get(child.childId)).state === 'ready');
+  const getChild = store.getChild.bind(store);
+  store.getChild = async id => { const row = await getChild(id); return row && structuredClone(row); };
+  const admitRun = store.admitRun.bind(store);
+  const modelB = { ...args, model: 'model-b' };
+  (store as any).admitRun = async (...admitArgs: Parameters<typeof admitRun>) => {
+    await peer.resume(child.childId, modelB);
+    return admitRun(...admitArgs);
+  };
+  const runsBefore = (await store.dumpRuns(child.childId)).length;
+  await assert.rejects(core.send(child.childId, { mode: 'followup', message: 'stale model dispatch' }), { code: 'busy' });
+  assert.equal(engine.opened.length, 1);
+  assert.equal((await getChild(child.childId))?.model.model, 'model-b');
+  assert.equal((await store.dumpRuns(child.childId)).length, runsBefore);
+});
+
+test('audit: a second stop after an unconfirmed worker exit reports recovery_required, not confirmation', async () => {
+  const { core, engine } = setup();
+  engine.failClose = true;
+  const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  assert.deepEqual(await core.stop(child.childId, child.runId), { requested: true, confirmed: false });
+  const before = await core.get(child.childId);
+  assert.equal(before.state, 'interrupted');
+  await assert.rejects(core.stop(child.childId, child.runId), { code: 'recovery_required' });
+  const after = await core.get(child.childId);
+  assert.equal(after.state, 'interrupted');
+  assert.equal(after.lastCompletedLeaf, before.lastCompletedLeaf);
+});
+
+test('audit: a model key embedded in spawn, followup, and resume prompts is never persisted or dispatched', async () => {
+  const { core, store, engine } = setup();
+  const child = await core.spawn({ prompt: `spawn before ${args.key} after`, templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'done' });
+  await eventuallyAsync(async () => (await core.get(child.childId)).state === 'ready');
+  const followup = await core.send(child.childId, { mode: 'followup', message: `followup before ${args.key} after` });
+  assert.equal(followup.delivery, 'started');
+  engine.runs[1]!.complete({ checkpointId: 'leaf-2', artifactId: 'artifact-2', preview: 'done' });
+  await eventuallyAsync(async () => (await core.get(child.childId)).state === 'ready');
+  const resumed = await core.resume(child.childId, args, `resume before ${args.key} after`);
+  assert.equal(resumed.state, 'running');
+  assert.equal(JSON.stringify(await store.dump()).includes(args.key), false, 'persisted state contains the model key');
+  for (const [index, label] of ['spawn', 'followup', 'resume'].entries()) {
+    const prompt = engine.runs[index]!.input.prompt;
+    assert.equal(prompt, `${label} before [REDACTED] after`);
+  }
+});
+
+test('audit: a model key in steer messages is redacted before worker dispatch', async () => {
+  const { core, engine } = setup();
+  engine.steerable = true;
+  const child = await core.spawn({ prompt: 'initial prompt', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  const steered = await core.send(child.childId, { mode: 'steer', message: `steer before ${args.key} after` });
+  assert.equal(steered.delivery, 'steered');
+  assert.deepEqual(engine.steered, ['steer before [REDACTED] after']);
+  await assert.rejects(core.send(child.childId, { mode: 'steer', message: 'x'.repeat(64 * 1024 + 1) }), { code: 'limit_exceeded' });
+});
+
+async function withCapturedWaitTimeouts<T>(fn: (activeTimeouts: () => number) => Promise<T>): Promise<T> {
+  const original = globalThis.setTimeout;
+  const captured: Array<ReturnType<typeof setTimeout>> = [];
+  globalThis.setTimeout = ((handler: TimerHandler, delay?: number, ...rest: unknown[]) => {
+    const handle = (original as (...input: unknown[]) => ReturnType<typeof setTimeout>)(handler, delay, ...rest);
+    if (delay === 30_000) captured.push(handle);
+    return handle;
+  }) as unknown as typeof setTimeout;
+  try { return await fn(() => process.getActiveResourcesInfo().filter(name => name === 'Timeout').length); }
+  finally { globalThis.setTimeout = original; for (const handle of captured) clearTimeout(handle); }
+}
+
+test('audit: get cancellation rejects promptly without stopping the child', async () => {
+  const { core, engine } = setup();
+  const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  const abort = new AbortController();
+  await withCapturedWaitTimeouts(async () => {
+    const waiting = core.get(child.childId, { waitMs: 30_000, cursor: 1 }, abort.signal);
+    const outcome = waiting.then(() => 'resolved', () => 'rejected');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    abort.abort();
+    try {
+      const raced = await Promise.race([outcome, new Promise(resolve => setTimeout(() => resolve('hung'), 500))]);
+      assert.equal(raced, 'rejected');
+      assert.equal(engine.runs[0]!.stopCalls, 0);
+      assert.equal((await core.get(child.childId)).state, 'running');
+    } finally {
+      engine.runs[0]!.emit({ type: 'text', text: 'wake' });
+      await outcome;
+      await core.stop(child.childId, child.runId);
+    }
+  });
+});
+
+test('audit: a get that wakes early leaves no pending wait timeout', async () => {
+  const { core, engine } = setup();
+  const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  await withCapturedWaitTimeouts(async activeTimeouts => {
+    const baseline = activeTimeouts();
+    const waiting = core.get(child.childId, { waitMs: 30_000, cursor: 1 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    engine.runs[0]!.emit({ type: 'text', text: 'wake' });
+    const snapshot = await waiting;
+    assert.ok(snapshot.events.length > 0);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(activeTimeouts() <= baseline, 'the 30 second wait timer is cleared after an early wake');
+    await core.stop(child.childId, child.runId);
+  });
 });
 
 async function eventually(predicate: () => boolean) {

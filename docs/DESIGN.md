@@ -1,6 +1,6 @@
 # Subzero v0.1 reference design and implemented behavior
 
-Status: the selected v0.1 architecture has a working TypeScript implementation. Build, typecheck, 93 tests, and the `.env`-based LongCat delegation check passed on Node 26.3.1/Linux. The original 90 tests and local package/CLI/MCP checks passed on Node 24.21.0/Linux. Pi 1.0.4 is the tested host; other host setups remain untested. Process exit evidence covers ordinary POSIX descendants on Linux; deliberately detached sessions and other operating systems are outside the tested guarantee. This shared-workspace design is not an OS sandbox. See [testing evidence](TESTING.md).
+Status: the selected v0.1 architecture has a working TypeScript implementation with audit hardening. Current regressions, verification receipts, official version sources and unresolved design risks are in the [2026-10-08 audit](AUDIT-2026-10-08.md). The worker remains Pi SDK 1.0.4; Pi 1.0.4 and 1.1.0 hosts have been exercised. Other host workflows and operating systems remain untested. Process exit evidence covers ordinary descendants in the worker process group on Linux; detached or daemonized new sessions are outside that guarantee. This shared-workspace design is not an OS sandbox. See [testing evidence](TESTING.md).
 
 ## 1. Responsibility boundaries
 

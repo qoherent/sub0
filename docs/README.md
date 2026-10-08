@@ -2,6 +2,7 @@
 
 ## Current v0.1 documentation
 
+- [Audit and handoff (2026-10-08)](AUDIT-2026-10-08.md): confirmed regressions and fixes, compatibility sources, workflow evidence, unresolved risks, and the handoff/next-actions record for the current working tree.
 - [Usage](USAGE.md): local setup, host configuration, and tool examples.
 - [Testing and evidence](TESTING.md): local gates, live checks, review closeout, and limits.
 - [Reference design](DESIGN.md): architecture, contract, and implemented behavior.

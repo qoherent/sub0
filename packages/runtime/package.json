@@ -2,23 +2,26 @@
   "name": "@subzero/runtime",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=24.15.0" },
   "type": "module",
   "bin": { "subzero-runtime": "./dist/cli.js" },
   "exports": {
     ".": {
-      "development": "./src/index.ts",
+      "development": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     "./cli": {
-      "development": "./src/cli.ts",
+      "development": "./dist/cli.js",
       "types": "./dist/cli.d.ts",
       "default": "./dist/cli.js"
     }
   },
   "files": ["dist"],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "prepack": "node -e \"Promise.all(process.argv.slice(1).map(p=>require('node:fs/promises').access(p))).catch(()=>{console.error('Build output is missing; run npm run build before packing.');process.exit(1)})\" dist/index.js dist/index.d.ts dist/cli.js dist/engine/worker-child.js"
   },
   "dependencies": {
     "@subzero/core": "0.1.0",

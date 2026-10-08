@@ -367,3 +367,126 @@ test('resume commits use an atomic generation guard across connections', async (
   assert.equal(outcomes.filter(value => value.kind === 'busy').length, 1);
   await a.close(); await b.close();
 }));
+
+test('audit: recovering an exited owner stops queued runs and never lets them start after a fresh admission', async () => tempDb(async dbPath => {
+  const store = new SQLiteStore(dbPath, { brokerId: 'audit-owner' });
+  const inspect = new DatabaseSync(dbPath);
+  try {
+    const { child, run, event } = records('audit-recover');
+    const first = await store.createChild(child, run, event, limits);
+    assert.equal(first.kind, 'started');
+    if (first.kind !== 'started') return;
+    const settledFirst = await store.settleRun(child.childId, run.runId, first.lease.ownerToken,
+      { type: 'completed', checkpointId: 'audit-leaf', artifactId: 'audit-artifact', preview: 'done' },
+      { childId: child.childId, runId: run.runId, at: '2026-10-07T00:00:02Z', type: 'completed', artifactId: 'audit-artifact', preview: 'done' }, limits, true);
+    assert.deepEqual(settledFirst, { kind: 'idle' });
+
+    const active = await store.admitRun(child.childId, queuedRun(child.childId, 'audit-active'), limits);
+    assert.equal(active.kind, 'started');
+    if (active.kind !== 'started') return;
+    assert.equal((await store.admitRun(child.childId, queuedRun(child.childId, 'audit-queued-1'), limits)).kind, 'queued');
+    assert.equal((await store.admitRun(child.childId, queuedRun(child.childId, 'audit-queued-2'), limits)).kind, 'queued');
+
+    assert.equal(await store.recoverExitedOwner(child.childId, active.lease.generation, 'audit-active'), true);
+    assert.equal((await store.getChild(child.childId))?.lastCompletedLeaf, 'audit-leaf');
+
+    const statuses = inspect.prepare("SELECT run_id, status, error_code FROM runs WHERE run_id LIKE 'audit-queued-%' ORDER BY run_id").all() as { run_id: string; status: string; error_code: string | null }[];
+    assert.deepEqual(statuses.map(row => ({ ...row })), [
+      { run_id: 'audit-queued-1', status: 'stopped', error_code: 'previous_run_interrupted' },
+      { run_id: 'audit-queued-2', status: 'stopped', error_code: 'previous_run_interrupted' },
+    ]);
+    const events = await store.readEvents(child.childId, 0, 100);
+    for (const runId of ['audit-queued-1', 'audit-queued-2']) {
+      const terminal = events.events.filter(item => item.runId === runId && item.type !== 'run_queued');
+      assert.deepEqual(terminal.map(item => ({ type: item.type, code: 'code' in item ? item.code : undefined })), [{ type: 'interrupted', code: 'previous_run_interrupted' }], runId);
+    }
+
+    const validation = await store.validateResume(child.childId);
+    assert.equal(validation.kind, 'ready');
+    if (validation.kind !== 'ready') return;
+    const committed = await store.commitResume(child.childId, validation.generation, child.model);
+    assert.equal(committed.kind, 'committed');
+    assert.equal((await store.getChild(child.childId))?.activeRunId, undefined);
+
+    const fresh = await store.admitRun(child.childId, queuedRun(child.childId, 'audit-fresh'), limits);
+    assert.equal(fresh.kind, 'started');
+    if (fresh.kind !== 'started') return;
+    const settled = await store.settleRun(child.childId, 'audit-fresh', fresh.lease.ownerToken,
+      { type: 'completed', checkpointId: 'audit-leaf-2', artifactId: 'audit-artifact-2', preview: 'fresh' },
+      { childId: child.childId, runId: 'audit-fresh', at: '2026-10-07T00:00:05Z', type: 'completed', artifactId: 'audit-artifact-2', preview: 'fresh' }, limits, true);
+    assert.deepEqual(settled, { kind: 'idle' });
+    assert.equal((await store.getChild(child.childId))?.activeRunId, undefined);
+    const after = inspect.prepare("SELECT run_id, status FROM runs WHERE run_id LIKE 'audit-queued-%' ORDER BY run_id").all() as { run_id: string; status: string }[];
+    assert.deepEqual(after.map(row => ({ ...row })), [{ run_id: 'audit-queued-1', status: 'stopped' }, { run_id: 'audit-queued-2', status: 'stopped' }]);
+  } finally { inspect.close(); await store.close(); }
+}));
+
+test('audit: stop request state, queue cancellation, and stop_requested event commit atomically', async () => tempDb(async dbPath => {
+  const store = new SQLiteStore(dbPath, { brokerId: 'audit-stop' });
+  const inspect = new DatabaseSync(dbPath);
+  try {
+    const { child, run, event } = records('audit-stop');
+    const admission = await store.createChild(child, run, event, limits);
+    assert.equal(admission.kind, 'started');
+    if (admission.kind !== 'started') return;
+    await store.admitRun(child.childId, queuedRun(child.childId, 'audit-stop-queued'), limits);
+    const count = (type: string) => (inspect.prepare('SELECT COUNT(*) AS count FROM events WHERE child_id = ? AND type = ?').get(child.childId, type) as { count: number }).count;
+    const status = (runId: string) => (inspect.prepare('SELECT status FROM runs WHERE run_id = ?').get(runId) as { status: string }).status;
+
+    inspect.exec(`CREATE TRIGGER reject_stop_requested BEFORE INSERT ON events WHEN NEW.type = 'stop_requested' BEGIN SELECT RAISE(ABORT, 'blocked stop event'); END`);
+    await assert.rejects(store.requestStop(child.childId, run.runId, admission.lease.ownerToken), /blocked stop event/);
+    assert.equal(status(run.runId), 'running');
+    assert.equal(status('audit-stop-queued'), 'queued');
+    assert.equal(count('stop_requested'), 0);
+
+    inspect.exec('DROP TRIGGER reject_stop_requested');
+    assert.deepEqual(await store.requestStop(child.childId, run.runId, admission.lease.ownerToken), { kind: 'requested' });
+    assert.equal(status(run.runId), 'stop_requested');
+    assert.equal(status('audit-stop-queued'), 'stopped');
+    assert.equal(count('stop_requested'), 1);
+    assert.deepEqual(await store.requestStop(child.childId, run.runId, admission.lease.ownerToken), { kind: 'requested' });
+    assert.equal(count('stop_requested'), 1, 'a repeated stop does not duplicate the event');
+  } finally { inspect.close(); await store.close(); }
+}));
+
+test('audit: admission with a stale owner generation is rejected without inserting a run or event', async () => tempDb(async dbPath => {
+  const a = new SQLiteStore(dbPath, { brokerId: 'audit-gen-a' });
+  const b = new SQLiteStore(dbPath, { brokerId: 'audit-gen-b' });
+  const inspect = new DatabaseSync(dbPath);
+  try {
+    const { child, run, event } = records('audit-generation');
+    const first = await a.createChild(child, run, event, limits);
+    assert.equal(first.kind, 'started');
+    if (first.kind !== 'started') return;
+    await a.settleRun(child.childId, run.runId, first.lease.ownerToken,
+      { type: 'completed', checkpointId: 'gen-leaf', artifactId: 'gen-artifact', preview: 'done' },
+      { childId: child.childId, runId: run.runId, at: '2026-10-07T00:00:02Z', type: 'completed', artifactId: 'gen-artifact', preview: 'done' }, limits, true);
+    const observed = (await a.getChild(child.childId))!.ownerGeneration;
+    const claim = await b.validateResume(child.childId);
+    assert.equal(claim.kind, 'ready');
+    if (claim.kind !== 'ready') return;
+    assert.equal((await b.commitResume(child.childId, claim.generation, { ...child.model, model: 'model-b' })).kind, 'committed');
+
+    const runCount = () => (inspect.prepare('SELECT COUNT(*) AS count FROM runs WHERE run_id = ?').get('audit-generation-stale') as { count: number }).count;
+    const eventCount = () => (inspect.prepare('SELECT COUNT(*) AS count FROM events WHERE run_id = ?').get('audit-generation-stale') as { count: number }).count;
+    assert.deepEqual(await a.admitRun(child.childId, queuedRun(child.childId, 'audit-generation-stale'), limits, observed), { kind: 'busy' });
+    assert.equal(runCount(), 0);
+    assert.equal(eventCount(), 0);
+
+    const current = (await a.getChild(child.childId))!.ownerGeneration;
+    assert.equal((await a.admitRun(child.childId, queuedRun(child.childId, 'audit-generation-fresh'), limits, current)).kind, 'started');
+  } finally { inspect.close(); await a.close(); await b.close(); }
+}));
+
+test('audit: stopping a run whose worker exit was unconfirmed reports recovery_required', async () => tempDb(async dbPath => {
+  const store = new SQLiteStore(dbPath, { brokerId: 'audit-unconfirmed-stop' });
+  try {
+    const { child, run, event } = records('audit-unconfirmed-stop');
+    const admission = await store.createChild(child, run, event, limits);
+    assert.equal(admission.kind, 'started');
+    if (admission.kind !== 'started') return;
+    assert.deepEqual(await store.settleRun(child.childId, run.runId, admission.lease.ownerToken,
+      { type: 'interrupted', code: 'exit_unknown' }, { childId: child.childId, runId: run.runId, at: '2026-10-07T00:00:02Z', type: 'interrupted', code: 'exit_unknown' }, limits, false), { kind: 'recovery_required' });
+    assert.deepEqual(await store.requestStop(child.childId, run.runId, admission.lease.ownerToken), { kind: 'recovery_required' });
+  } finally { await store.close(); }
+}));

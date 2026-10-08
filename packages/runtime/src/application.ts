@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { createSubzero, type SubzeroError } from '@subzero/core';
+import { createSubzero, SubzeroError } from '@subzero/core';
 import { LocalArtifactStore } from './artifacts.ts';
 import { loadRuntimeConfig } from './config.ts';
 import type { CredentialMap, CredentialResolver } from './credentials.ts';
@@ -13,6 +13,7 @@ import { writeBrokerReceipt } from './broker-receipt.ts';
 export type RuntimeApplicationOptions = { dataRoot: string; workspaceRoot: string; configFile?: string; brokerId?: string };
 export type RuntimeApplication = ReturnType<typeof createSubzero> & {
   close(): Promise<void>; beginShutdown(): Promise<void>; recoverChild(childId: string): Promise<boolean>;
+  assertChildWorkspace(childId: string): Promise<void>; assertArtifactWorkspace(artifactId: string): Promise<void>;
   workspaceRoot: string; dataRoot: string; credentials: CredentialResolver;
 };
 type RuntimeFile = { credentialRefs?: CredentialMap; templatesFile?: string };
@@ -49,17 +50,27 @@ export async function createRuntimeApplication(options: RuntimeApplicationOption
     if (!await engineFactory.proveWorkerExited(childId, child.activeRunId, child.ownerGeneration)) return false;
     return store.recoverExitedOwner(childId, child.ownerGeneration, child.activeRunId);
   };
-  try { for (const child of await store.listChildren()) await recoverChild(child.childId); }
+  const assertChildWorkspace = async (childId: string): Promise<void> => {
+    const child = await store.getChild(childId);
+    if (!child || child.workspaceRoot !== workspaceRoot) throw new SubzeroError('not_found', 'Child session was not found.');
+  };
+  const assertArtifactWorkspace = async (artifactId: string): Promise<void> => {
+    if (!await store.hasArtifactInWorkspace(workspaceRoot, artifactId)) throw new SubzeroError('not_found', 'Artifact was not found.');
+  };
+  try { for (const child of await store.listChildren(workspaceRoot)) await recoverChild(child.childId); }
   catch (error) { await store.close(); await writeBrokerReceipt(brokerReceiptDir, brokerId, 'closed', brokerIncarnation); throw error; }
   let closing: Promise<void> | undefined;
   let beginningShutdown: Promise<void> | undefined;
+  const beginShutdown = (): Promise<void> => beginningShutdown ??= (async () => {
+    await engineFactory.beginShutdown();
+    await subzero.shutdown();
+  })();
   return Object.assign(subzero, {
-    workspaceRoot, dataRoot, credentials: config.credentials, recoverChild,
-    beginShutdown(): Promise<void> { return beginningShutdown ??= engineFactory.beginShutdown(); },
+    workspaceRoot, dataRoot, credentials: config.credentials, recoverChild, assertChildWorkspace, assertArtifactWorkspace,
+    beginShutdown,
     close(): Promise<void> {
       if (!closing) closing = (async () => {
-        await engineFactory.beginShutdown();
-        await subzero.shutdown();
+        await beginShutdown();
         await store.close();
         await writeBrokerReceipt(brokerReceiptDir, brokerId, 'closed', brokerIncarnation);
       })();

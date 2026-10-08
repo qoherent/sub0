@@ -1,4 +1,4 @@
-import type { ChildRecord, ChildEvent, EngineFactory, EventInput, ModelArgs, ModelMetadata, RunRecord, Store, TemplateDefinition, Worker, WorkerEvent, WorkerTerminal } from '../src/types.ts';
+import type { ChildRecord, ChildEvent, EngineFactory, EventInput, ModelMetadata, RunRecord, Store, TemplateDefinition, Worker, WorkerEvent, WorkerTerminal } from '../src/types.ts';
 
 export const template: TemplateDefinition = {
   id: 'researcher', description: 'Read only research assistant', instructions: 'Read and summarize.',
@@ -89,16 +89,21 @@ export class ControlledEngineFactory implements EngineFactory {
     this.closeStarted = new Promise(resolve => { this.signalCloseStarted = resolve; });
   }
   finishClose() { this.releaseCloseGate?.(); }
+  steerable = false;
+  steered: string[] = [];
   async open(input: Parameters<EngineFactory['open']>[0]): Promise<Worker> {
     this.opened.push({ templateSnapshot: input.templateSnapshot, model: input.model });
     return {
-      capabilities: { steer: false },
+      capabilities: { steer: this.steerable },
       run: (runInput) => {
         const controlled = new ControlledRun(runInput);
         this.runs.push(controlled);
         return controlled.events;
       },
-      steer: async () => { throw new Error('not supported'); },
+      steer: async (message) => {
+        if (!this.steerable) throw new Error('not supported');
+        this.steered.push(message);
+      },
       stop: async () => {
         const running = this.runs.at(-1);
         running?.stop();
@@ -142,9 +147,10 @@ export class FakeStore implements Store {
   async putTemplate(template: TemplateDefinition) { this.templates.set(template.id, structuredClone(template)); }
   async getTemplate(id: string) { const template = this.templates.get(id); return template && structuredClone(template); }
   async listTemplates() { return [...this.templates.values()].map(template => structuredClone(template)); }
-  async admitRun(id: string, run: RunRecord, limits: Parameters<Store['admitRun']>[2]) {
+  async admitRun(id: string, run: RunRecord, limits: Parameters<Store['admitRun']>[2], expectedGeneration?: number) {
     const row = this.rows.get(id);
     if (!row) return { kind: 'not_found' as const };
+    if (expectedGeneration !== undefined && row.child.ownerGeneration !== expectedGeneration) return { kind: 'busy' as const };
     if (row.child.state === 'running') {
       row.queue.push(run);
       row.runs.push(run);
@@ -204,15 +210,24 @@ export class FakeStore implements Store {
     row.ownerToken = undefined;
     return { kind: 'idle' as const };
   }
-  async requestStop(id: string, expectedRunId: string, ownerToken?: string) {
+  async requestStop(id: string, expectedRunId: string, ownerToken?: string, at: string = new Date().toISOString()) {
     const row = this.rows.get(id);
     if (!row) return { kind: 'not_found' as const };
     const run = row.runs.find(item => item.runId === expectedRunId);
     if (!run) return { kind: 'stale' as const };
+    if (row.ownerToken && row.child.state === 'interrupted') return { kind: 'recovery_required' as const };
     if (row.child.activeRunId !== expectedRunId) return ['completed', 'failed', 'interrupted', 'stopped'].includes(run.status) ? { kind: 'already_terminal' as const } : { kind: 'stale' as const };
     if (!ownerToken || row.ownerToken !== ownerToken) return { kind: 'busy' as const };
     const active = row.runs.find(run => run.runId === expectedRunId)!;
-    active.status = 'stop_requested';
+    if (active.status !== 'stop_requested') {
+      for (const queued of row.queue.splice(0)) {
+        queued.status = 'stopped';
+        queued.errorCode = 'previous_run_stopped';
+        this.push(id, row, { at, childId: id, runId: queued.runId, type: 'failed', code: 'previous_run_stopped' });
+      }
+      active.status = 'stop_requested';
+      this.push(id, row, { at, childId: id, runId: expectedRunId, type: 'stop_requested' });
+    }
     return { kind: 'requested' as const };
   }
   async appendEvent(id: string, event: EventInput) {

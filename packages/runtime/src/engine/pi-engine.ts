@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
-import type { ChildId, EngineFactory, ModelMetadata, TemplateSnapshot, Worker } from '@subzero/core';
+import { createTextRedactor, type ChildId, type EngineFactory, type ModelMetadata, type TemplateSnapshot, type Worker } from '@subzero/core';
 import type { LocalArtifactStore } from '../artifacts.ts';
 import { isBrokerIncarnationLive } from '../broker-receipt.ts';
 
@@ -69,7 +69,7 @@ export class PiEngineFactory implements EngineFactory {
     if (session && session.engineVersion !== PI_WORKER_VERSION) throw new Error('session metadata has an incompatible worker version.');
     const ipc = await this.launch(input.childId, input.runId ?? 'opening', input.ownerGeneration, childDir, input.workspaceRoot, input.templateSnapshot, input.model, input.credential.key, session?.sessionFile);
     return new PiWorker({
-      childId: input.childId, childDir, ipc, key: input.credential.key,
+      childDir, ipc,
       ownerGeneration: input.ownerGeneration, artifactStore: this.artifactStore, shutdownGraceMs: this.shutdownGraceMs,
       brokerId: this.brokerId, brokerIncarnation: this.brokerIncarnation,
     });
@@ -152,10 +152,8 @@ export class PiEngineFactory implements EngineFactory {
 class PiWorker implements Worker {
   readonly capabilities = { steer: true };
   readonly pid: number;
-  private readonly childId: ChildId;
   private readonly childDir: string;
   private readonly ipc: WorkerIpc;
-  private readonly key: string;
   private readonly ownerGeneration?: number;
   private readonly brokerId: string;
   private readonly brokerIncarnation: string;
@@ -163,13 +161,10 @@ class PiWorker implements Worker {
   private readonly shutdownGraceMs: number;
   private activeRun?: string;
   private closed = false;
-  constructor(options: { childId: ChildId; childDir: string; ipc: WorkerIpc; key: string; ownerGeneration?: number; artifactStore: LocalArtifactStore; shutdownGraceMs: number; brokerId: string; brokerIncarnation: string }) {
-    Object.assign(this, options);
-    this.childId = options.childId;
+  constructor(options: { childDir: string; ipc: WorkerIpc; ownerGeneration?: number; artifactStore: LocalArtifactStore; shutdownGraceMs: number; brokerId: string; brokerIncarnation: string }) {
     this.pid = options.ipc.pid;
     this.childDir = options.childDir;
     this.ipc = options.ipc;
-    this.key = options.key;
     this.ownerGeneration = options.ownerGeneration;
     this.brokerId = options.brokerId;
     this.brokerIncarnation = options.brokerIncarnation;
@@ -185,21 +180,37 @@ class PiWorker implements Worker {
       if (this.ipc.initializationError) { yield { type: 'failed' as const, code: this.ipc.initializationError }; return; }
       const stream = this.ipc.eventsFor({ type: 'run', ...input });
       let finalOutput = '';
-      for await (const message of stream) {
-        if (message.type === 'text') {
-          const text = redactMany(String(message.text ?? ''), this.ipc.redactionSecrets);
-          finalOutput += text;
-          yield { type: 'text' as const, text };
-        } else if (message.type === 'tool') {
-          yield { type: 'tool' as const, name: String(message.name ?? ''), state: message.state as 'started' | 'finished' };
-        } else if (message.type === 'completed') {
-          const artifact = await this.artifactStore.write(input.runId, redactMany(String(message.output ?? finalOutput), this.ipc.redactionSecrets));
-          yield { type: 'completed' as const, checkpointId: String(message.checkpointId), artifactId: artifact.artifactId, preview: redactMany(artifact.preview, this.ipc.redactionSecrets) };
-          return;
-        } else if (message.type === 'stopped') { yield { type: 'stopped' as const }; return; }
-        else if (message.type === 'failed') { yield { type: 'failed' as const, code: String(message.code ?? 'worker_failed'), message: redactMany(String(message.message ?? ''), this.ipc.redactionSecrets) }; return; }
-        else if (message.type === 'interrupted') { yield { type: 'interrupted' as const, code: String(message.code ?? 'worker_interrupted'), message: redactMany(String(message.message ?? ''), this.ipc.redactionSecrets) }; return; }
+      const redactor = createTextRedactor(this.ipc.redactionSecrets);
+      try {
+        for await (const message of stream) {
+          if (message.type === 'text') {
+            const text = redactor.push(String(message.text ?? ''));
+            if (!text) continue;
+            finalOutput += text;
+            yield { type: 'text' as const, text };
+            continue;
+          }
+          if (message.type === 'completed' || message.type === 'stopped' || message.type === 'failed' || message.type === 'interrupted') {
+            const tail = redactor.flush();
+            if (tail) { finalOutput += tail; yield { type: 'text' as const, text: tail }; }
+          }
+          if (message.type === 'tool') {
+            yield { type: 'tool' as const, name: String(message.name ?? ''), state: message.state as 'started' | 'finished' };
+          } else if (message.type === 'completed') {
+            const artifact = await this.artifactStore.write(input.runId, redactMany(String(message.output ?? finalOutput), this.ipc.redactionSecrets));
+            yield { type: 'completed' as const, checkpointId: String(message.checkpointId), artifactId: artifact.artifactId, preview: redactMany(artifact.preview, this.ipc.redactionSecrets) };
+            return;
+          } else if (message.type === 'stopped') { yield { type: 'stopped' as const }; return; }
+          else if (message.type === 'failed') { yield { type: 'failed' as const, code: String(message.code ?? 'worker_failed'), message: redactMany(String(message.message ?? ''), this.ipc.redactionSecrets) }; return; }
+          else if (message.type === 'interrupted') { yield { type: 'interrupted' as const, code: String(message.code ?? 'worker_interrupted'), message: redactMany(String(message.message ?? ''), this.ipc.redactionSecrets) }; return; }
+        }
+      } catch (error) {
+        const tail = redactor.flush();
+        if (tail) yield { type: 'text' as const, text: tail };
+        throw error;
       }
+      const tail = redactor.flush();
+      if (tail) yield { type: 'text' as const, text: tail };
       yield { type: 'interrupted' as const, code: 'worker_eof' };
     } finally { this.activeRun = undefined; }
   }
