@@ -1,6 +1,6 @@
 # Subzero v0.1 implementation record
 
-Status: v0.1 TypeScript implementation, local M1–M3 milestones, and audit hardening are complete with all 128 tests passing. The [2026-10-08 audit](AUDIT-2026-10-08.md) records regression fixes, package/CLI/MCP checks, and handoff details. See [reference design](DESIGN.md) for the architecture and [testing evidence](TESTING.md) for test breakdown.
+Status: v0.1 TypeScript implementation, local M1–M3 milestones, and security hardening are complete with all 128 tests passing. See [reference design](DESIGN.md) for the architecture and [testing evidence](TESTING.md) for test breakdown and regression fixes.
 
 ## Completed milestones
 

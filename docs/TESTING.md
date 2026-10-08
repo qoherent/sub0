@@ -1,8 +1,8 @@
 # Verification and evidence
 
-## Audit and hardening checkpoint: 2026-10-08
+## Verification and hardening checkpoint
 
-The [audit report](AUDIT-2026-10-08.md) records failing regressions, fixes, official-source compatibility checks, fresh setup, installed default/development consumers, Pi 1.1.0 host checks, and retained LongCat evidence. Run `npm run verify` for the current full gate. Run `npm run build` before a standalone `npm test`, because package exports resolve to compiled JavaScript even under the development condition.
+This document records verified gates, test suite breakdown, review closeout, and live LongCat reproduction. Run `npm run verify` for the current full gate. Run `npm run build` before a standalone `npm test`, because package exports resolve to compiled JavaScript even under the development condition.
 
 To retain a successful live run for inspection, set `SUBZERO_TEST_KEEP_ARTIFACTS=1` when running `npm run test:live`. Retention happens only after every existing assertion and literal-key scan passes; failures still clean up. Provider keys remain in the ignored `.env` and must never be printed or sourced.
 

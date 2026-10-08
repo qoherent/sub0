@@ -4,74 +4,52 @@ Subzero is a local MCP service that lets coding agents spawn and control persist
 
 ```mermaid
 flowchart TB
-  subgraph HOSTS["1. Host Coding Agents (Parent Sessions)"]
-    Pi["Pi Coding Agent<br/><code>@subzero/pi</code> extension"]
-    Codex["Codex CLI / IDE<br/>MCP stdio client"]
-    Claude["Claude Code<br/>MCP stdio client"]
-    OpenCode["OpenCode<br/>MCP stdio client"]
+  subgraph HOSTS["1. Host Layer (Parent Sessions)"]
+    Hosts["<b>Parent Coding Agents</b>: Pi Agent &bull; Codex CLI &bull; Claude Code &bull; OpenCode<br/><i>Parent conversation & context window retained</i>"]
   end
 
-  subgraph TRANSPORT["2. MCP Stdio Transport"]
-    Broker["Local MCP Stdio Server<br/><code>@subzero/runtime (cli.js)</code>"]
+  subgraph TRANSPORT["2. Transport Layer (Local MCP Stdio)"]
+    Broker["<code>@subzero/runtime</code> CLI Broker<br/><i>Single local stdio process per active host session</i>"]
   end
 
   subgraph METHODS["Subagent Lifecycle Methods (MCP Tools)"]
     direction TB
-    M_Spawn["<code>subzero_spawn</code><br/>Spawn child & start initial run"]
-    M_Get["<code>subzero_get</code><br/>Bounded poll & cursor event stream"]
-    M_Send["<code>subzero_send</code><br/>Steer active run or queue followup"]
-    M_Stop["<code>subzero_stop</code><br/>Idempotent stop & process cleanup"]
-    M_Resume["<code>subzero_resume</code><br/>Branch from last completed leaf"]
-    M_Output["<code>subzero_output</code><br/>Read full result artifact chunks"]
-    M_List["<code>subzero_list</code><br/>Discover children across restarts"]
+    M_Info["<b>Discovery</b>: <code>subzero_info</code> (metadata) &bull; <code>subzero_list</code> (sessions)"]
+    M_Spawn["<b>1. Spawn</b>: <code>subzero_spawn</code> (initialize child session & prompt run)"]
+    M_Loop["<b>2. Interact & Observe</b>: <code>subzero_send</code> (steer/followup) &bull; <code>subzero_get</code> (poll/cursor)"]
+    M_Result["<b>3. Results & Control</b>: <code>subzero_output</code> (artifacts) &bull; <code>subzero_stop</code> (cancel/reap)"]
+    M_Recover["<b>4. Recovery</b>: <code>subzero_resume</code> (branch completed leaf from checkpoint)"]
+    M_Info --> M_Spawn --> M_Loop --> M_Result --> M_Recover
   end
 
   subgraph CORE["3. Core Orchestration Layer (@subzero/core)"]
-    direction TB
-    StateMachine["State Machine & Admission<br/>Ready | Running | Interrupted"]
-    QueueMgr["Followup Queue & Event Cursors"]
-    Templates["Template Snapshots<br/>researcher | coder (Immutable)"]
+    CoreEngine["State Machine & Admission Guard <i>(Ready / Running / Interrupted)</i><br/>Followup Queues & Monotonic Event Cursors<br/>Immutable Templates <i>(researcher / coder)</i>"]
   end
 
   subgraph RUNTIME["4. Runtime & Persistence Layer (@subzero/runtime)"]
-    direction TB
-    SQLiteDB[("SQLite Database (node:sqlite)<br/>Metadata, Run State & Monotonic Generations")]
-    CredResolver["In-Memory Credential Resolver<br/>Maps alias to key (never persisted)"]
-    ArtifactStore["Local Artifact Storage<br/>Full results stored on disk"]
+    RuntimeEngine["SQLite Storage (node:sqlite) — Atomic Txns & Monotonic Generations<br/>In-Memory Credential Resolver <i>(RAM only, never on disk)</i><br/>Local Disk Artifact Storage <i>(Bounded result files)</i>"]
   end
 
-  subgraph WORKER["5. Isolated Worker Process (Pi SDK 1.0.4)"]
-    direction TB
-    PiWorker["Child Agent Worker Loop<br/>Runs ONLY during active/queued work"]
-    PrivateTranscript["Private Child Transcript<br/>Never pollutes parent context"]
-    ExactTools["Exact Granted Tools<br/>Read / Write / Shell (No ambient host tools)"]
+  subgraph WORKER["5. Execution Layer (Isolated Pi SDK 1.0.4 Worker)"]
+    WorkerProc["Supervised Worker Process Group <i>(Runs ONLY during active work)</i><br/>Private Child Transcript <i>(Never leaks to parent context)</i><br/>Least-Privilege Tools <i>(Exact grants; zero ambient host tools)</i>"]
   end
 
-  subgraph EDGES["⚡ What Edges Us (Architectural & Security Advantages)"]
+  subgraph EDGES["⚡ What Edges Us (Security & Architectural Boundaries)"]
     direction TB
-    Edge1["<b>Clean Separate Conversations</b><br/>Parent context stays clean; child runs private loop in isolated process"]
-    Edge2["<b>Stateful Stream Redaction</b><br/>Keys split across tokens, tool arguments, or property keys redacted"]
-    Edge3["<b>SQLite Generation Guarding</b><br/>Atomic transactions + monotonic generations prevent race & split-brain"]
-    Edge4["<b>Process Group Confinement</b><br/>EOF/SIGKILL reaps worker & all POSIX shell descendants within 5s"]
-    Edge5["<b>Zero Ambient Grants</b><br/>No host secrets or tools leaked; immutable least-privilege templates"]
+    E1["🛡️ <b>Clean Separate Conversations</b>: Parent context never polluted; private child transcript"]
+    E2["🔒 <b>Stateful Stream Redaction</b>: Intercepts keys across tokens, args, & property keys"]
+    E3["⚡ <b>SQLite Generation Guarding</b>: Monotonic generations prevent multi-broker split-brain"]
+    E4["🛑 <b>Process Group Confinement</b>: Stdio EOF / SIGKILL reaps worker & shell children within 5s"]
+    E5["🎯 <b>Zero Ambient Grants</b>: No host tools, skills, or environment secrets leaked to child"]
+    E1 ~~~ E2 ~~~ E3 ~~~ E4 ~~~ E5
   end
 
-  Pi -->|MCP stdio| Broker
-  Codex -->|MCP stdio| Broker
-  Claude -->|MCP stdio| Broker
-  OpenCode -->|MCP stdio| Broker
-
-  Broker --> METHODS
-  METHODS --> StateMachine
-  StateMachine --> QueueMgr
-  QueueMgr --> Templates
-
-  CORE --> RUNTIME
-  RUNTIME -->|Supervised Process Fork| PiWorker
-  RUNTIME <--> SQLiteDB
-
-  PiWorker -.->|Protected by| EDGES
-  CORE -.->|Enforces| EDGES
+  Hosts -->|MCP Stdio| Broker
+  Broker --> M_Info
+  M_Recover --> CoreEngine
+  CoreEngine --> RuntimeEngine
+  RuntimeEngine -->|Supervised Process Fork| WorkerProc
+  WorkerProc -.->|Guarded by| EDGES
 ```
 
 ---
@@ -142,6 +120,5 @@ For real LongCat provider verification, copy `.env.example` to `.env`, add `OPEN
   - [Reference design](docs/DESIGN.md): System architecture, capability contract, and state machine.
   - [Usage](docs/USAGE.md): Local setup, credential references, tool schemas, and host configs (Codex, Claude, OpenCode).
   - [Testing](docs/TESTING.md): Verification gates, test suite details, and live test reproduction.
-  - [Audit (2026-10-08)](docs/AUDIT-2026-10-08.md): Hardening findings, regression fixes, and handoff record.
   - [Plan](docs/PLAN.md): Completed milestone record.
 - `experiments/pi-sdk/`: Pi SDK 1.0.4 and Node SQLite qualification probes.
