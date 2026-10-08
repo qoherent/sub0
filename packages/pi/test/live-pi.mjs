@@ -6,10 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { requireCompletionResult, sanitizeOutput, summarizeLiveFailure } from './live-pi-diagnostics.mjs';
+import { resolveLiveCredentials } from './live-pi-credentials.mjs';
 
-const parentKey = process.env.OPENCODE_API_KEY;
-const childKey = process.env.SUBZERO_TEST_KEY;
-if (!parentKey || !childKey) throw new Error('Set OPENCODE_API_KEY and SUBZERO_TEST_KEY to run the live Pi delegation check.');
+const { parentKey, childKey } = resolveLiveCredentials(process.env);
 
 const repoRoot = fileURLToPath(new URL('../../..', import.meta.url));
 const extension = join(repoRoot, 'packages/pi/dist/index.js');
@@ -43,6 +42,7 @@ try {
     cwd: workspace,
     env: {
       ...process.env,
+      SUBZERO_TEST_KEY: childKey,
       PI_CODING_AGENT_DIR: agentDir,
       SUBZERO_NODE: nodeWrapper,
       SUBZERO_RUNTIME_PID_FILE: runtimePidFile,

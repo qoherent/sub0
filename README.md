@@ -4,7 +4,7 @@ Subzero is a local MCP service that lets coding agents spawn and control persist
 
 ## Status
 
-The v0.1 TypeScript implementation is in this checkout; its npm packages remain private and unpublished. Build, typecheck, and all 90 tests pass on Node 24.21.0/Linux. Real LongCat delegation through Pi and MCP passed, as did package installation, the installed CLI, and MCP discovery. Pi 1.0.4 is the only host integration exercised; Codex, Claude Code, and OpenCode setup syntax is documented but not host-tested. See [testing evidence](docs/TESTING.md) for scope and [usage](docs/USAGE.md) for setup and tool examples.
+The v0.1 TypeScript implementation is in this checkout; its npm packages remain private and unpublished. Build, typecheck, and all 93 tests pass on Node 26.3.1/Linux; the original 90-test suite also passed on Node 24.21.0. Real LongCat delegation through Pi and MCP passed, as did package installation, the installed CLI, and MCP discovery. Pi 1.0.4 is the only host integration exercised; Codex, Claude Code, and OpenCode setup syntax is documented but not host-tested. See [testing evidence](docs/TESTING.md) for scope and [usage](docs/USAGE.md) for setup and tool examples.
 
 ## Try it locally
 
@@ -17,6 +17,8 @@ pi -e /absolute/path/to/subzero/packages/pi/dist/index.js
 ```
 
 `npm run verify` builds all packages, typechecks the workspace, and runs the local test suite. The final command starts Pi with the Subzero extension; configure a model credential reference before spawning a child. The packages are not yet published to npm. See [docs/USAGE.md](docs/USAGE.md).
+
+To repeat the optional real LongCat delegation check, run `cp -n .env.example .env`, add an `OPENCODE_API_KEY` to `.env` if needed, then run `npm run test:live`. See the [live test instructions](docs/TESTING.md#live-longcat-check) for setup and platform limits. This command makes a real provider call; `npm test` and `npm run verify` stay offline.
 
 ## What it does
 

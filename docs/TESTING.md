@@ -2,13 +2,13 @@
 
 ## Local gate
 
-The final verification gate ran on Node 24.21.0/Linux after implementation, simplification, review fixes, and the live-test diagnostic improvement:
+The latest verification gate ran on Node 26.3.1/Linux on 2026-10-08, including the new live-credential tests. The original 90-test suite passed on Node 24.21.0/Linux on 2026-10-07 after implementation, simplification, review fixes, and the live-test diagnostic improvement:
 
 ```sh
 npm run verify
 ```
 
-Build and workspace typecheck passed. The test suite passed **90/90** with zero failures:
+Build and workspace typecheck passed. The current test suite passed **93/93** with zero failures:
 
 | Area | Tests |
 | --- | ---: |
@@ -17,8 +17,8 @@ Build and workspace typecheck passed. The test suite passed **90/90** with zero 
 | Runtime configuration | 7 |
 | Worker lifecycle and Pi SDK behavior | 23 |
 | MCP server, CLI, recovery, and broker behavior | 11 |
-| Pi host extension and live-test diagnostics | 5 |
-| **Total** | **90** |
+| Pi host extension, live-test diagnostics, and credentials | 8 |
+| **Total** | **93** |
 
 The runtime and worker tests use loopback/fake provider and MCP fixtures unless a test is explicitly described below as live. Normal `npm test` makes no external model call. No separate lint command is configured. The local workspace remains private and unpublished.
 
@@ -59,7 +59,7 @@ The control-timeout test's initial RED was a missing controlled-worker entrypoin
 
 Three Luna implementation units applied the boundary findings (#1, #5, #8 and the CLI regression), atomic admission (#2), and worker findings (#3, #4, #6, #9). No retained finding remains unresolved.
 
-## Live LongCat checks
+## Live LongCat check
 
 Two opt-in checks used the actual LongCat model service. These were run separately from the normal test suite:
 
@@ -68,11 +68,27 @@ Two opt-in checks used the actual LongCat model service. These were run separate
 
 An intermediate live run wrote the file but had no completed result; its exact cause could not be established after cleanup. This exposed a harness assumption: `ready` also covers idle failed/stopped runs. The harness now requires explicit completion, reports bounded sanitized failure diagnostics, and scans for key values before cleanup on failures as well. The improved final run passed.
 
-The live script is opt-in and makes a real provider call. With the required `OPENCODE_API_KEY` and `SUBZERO_TEST_KEY` variables set in the environment, run `node packages/pi/test/live-pi.mjs`. It is not part of `npm test`.
+The `.env`-based `npm run test:live` command passed on Node 26.3.1/Linux on 2026-10-08 using the previously supplied testing key. The key itself is kept only in the ignored local `.env` and is absent from `.env.example`.
+
+The live script is opt-in and makes a real provider call. To reproduce the Pi-to-child check from a fresh clone on Linux:
+
+```sh
+npm ci
+cp -n .env.example .env
+# Edit .env and set OPENCODE_API_KEY to the provider key.
+npm run verify
+npm run test:live
+```
+
+Use Node.js 24.15 or newer. Dependencies are pinned by `package-lock.json`. `cp -n` preserves an existing local `.env`; on a fresh clone, edit the new file and set `OPENCODE_API_KEY`. The live test uses provider `opencode-go`, model `longcat-2.5-preview-free`, and URL `https://opencode.ai/zen/go/v1`. The same key is passed to the child by default. Set `SUBZERO_TEST_KEY` in `.env` only when the child needs a separate key; an explicit non-empty value overrides the parent key.
+
+The test makes a real model request and has a 180 second timeout. Success prints the child ID after confirming that the child completed, emitted a completion artifact, and wrote `subzero-live-child.txt` with exactly `subzero-live-ok`. Captured output and generated files are scanned for either configured key; failure diagnostics are bounded and redact configured keys, and temporary files and processes are cleaned up. Provider availability and model responses can change, so identical model output is not guaranteed. The harness depends on Linux `/proc` process inspection and shell process cleanup; other operating systems have not been verified.
+
+Keep `.env` in the repository root. It is ignored by Git. Do not source it into a shell or print its contents; `npm run test:live` asks Node to load it directly. `.env.example` contains variable names only. Normal `npm test` and `npm run verify` never load `.env` and make no external model call.
 
 ## Tested versions and limits
 
-- Node.js 24.21.0 on Linux ran the final build, typecheck, and suite. The runtime requires Node.js 24.15 or newer for `node:sqlite`.
+- Node.js 24.21.0/Linux qualified the original 90-test suite. Node.js 26.3.1/Linux passed the current 93-test suite and the `.env`-based live command. The runtime requires Node.js 24.15 or newer for `node:sqlite`.
 - The worker dependency is pinned to Pi SDK 1.0.4 (and `pi-ai` 1.0.4). Pi 1.0.4 is the only host integration exercised.
 - Codex, Claude Code, and OpenCode examples in [USAGE.md](USAGE.md) were checked against official configuration documentation. They are syntax examples; no host runtime compatibility test was performed for them.
 - Linux process-group cleanup was verified for ordinary POSIX descendants. A descendant that deliberately starts a new session/process group is outside the guarantee. Other operating systems have not been tested.

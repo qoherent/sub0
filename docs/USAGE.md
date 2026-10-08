@@ -17,6 +17,8 @@ To start Pi with the built extension, use an absolute path:
 pi -e /absolute/path/to/subzero/packages/pi/dist/index.js
 ```
 
+To run the optional real Pi-to-child LongCat check, put `OPENCODE_API_KEY` in the repository-root `.env` file and run `npm run test:live`. Node loads the ignored file for this command; the ordinary `npm test` and `npm run verify` commands remain offline. The live check defaults the child credential to the parent key and accepts `SUBZERO_TEST_KEY` as an optional override. See [TESTING.md](TESTING.md#live-longcat-check) for the complete reproducible setup and platform limits.
+
 Pi uses its own Node executable by default. Set `SUBZERO_NODE` to a Node 24.15+ executable if Pi runs under an older Node version. `SUBZERO_DATA_DIR` selects the runtime data directory and `SUBZERO_CONFIG` selects the JSON config file. Without overrides, the runtime uses its platform data directory and `<data-dir>/config.json`.
 
 The runtime can also be registered directly with another MCP host. Run `node packages/runtime/dist/cli.js --help` for the CLI defaults. The supported options are `--workspace PATH`, `--data-dir PATH`, and `--config PATH`; workspace defaults to the current directory.

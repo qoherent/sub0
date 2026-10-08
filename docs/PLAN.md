@@ -1,6 +1,6 @@
 # Subzero v0.1 reference specification and implementation record
 
-Status: v0.1 TypeScript implementation and local M1–M3 gates are complete. On Node 24.21.0/Linux, `npm run verify` passed build, typecheck, and 90 tests. Real LongCat delegation through Pi 1.0.4, local archive installation, the installed CLI, and MCP discovery also passed. Packages remain private and unpublished; other hosts remain untested. See [testing evidence](TESTING.md) for verified scope and limits.
+Status: v0.1 TypeScript implementation and local M1–M3 gates are complete. The original 90 tests passed on Node 24.21.0/Linux; the current 93 tests and `.env`-based live LongCat command passed on Node 26.3.1/Linux. Build, typecheck, local archive installation, the installed CLI, and MCP discovery also passed. Packages remain unpublished to npm; other hosts remain untested. See [testing evidence](TESTING.md) for verified scope and limits.
 
 ## Goal
 

@@ -6,6 +6,11 @@
 /Pi-Technical-Manual.pdf
 /skills-lock.json
 
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+
 # Node and generated build output
 node_modules/
 dist/

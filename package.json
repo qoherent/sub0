@@ -8,6 +8,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "node --conditions=development --test packages/*/test/*.test.ts packages/*/test/*.test.mjs",
+    "test:live": "npm run build && node --env-file=.env packages/pi/test/live-pi.mjs",
     "typecheck": "tsc --noEmit",
     "verify": "npm run build && npm run typecheck && npm test"
   },
