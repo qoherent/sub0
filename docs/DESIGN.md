@@ -14,12 +14,77 @@ Run: one attempt to process a prompt in a child session, with a stable runId, st
 
 Architecture:
 
-    Host agent
-      -> host registration adapter
-        -> Subzero MCP stdio process
-          -> @subzero/core: state, limits, queues, routing, events
-          -> @subzero/runtime: SQLite, MCP server, Pi SDK worker
-            -> one worker process per child while runs are active or queued
+```mermaid
+flowchart TB
+  subgraph HOSTS["1. Host Coding Agents (Parent Sessions)"]
+    Pi["Pi Coding Agent<br/><code>@subzero/pi</code> extension"]
+    Codex["Codex CLI / IDE<br/>MCP stdio client"]
+    Claude["Claude Code<br/>MCP stdio client"]
+    OpenCode["OpenCode<br/>MCP stdio client"]
+  end
+
+  subgraph TRANSPORT["2. MCP Stdio Transport"]
+    Broker["Local MCP Stdio Server<br/><code>@subzero/runtime (cli.js)</code>"]
+  end
+
+  subgraph METHODS["Subagent Lifecycle Methods (MCP Tools)"]
+    direction TB
+    M_Spawn["<code>subzero_spawn</code><br/>Spawn child & start initial run"]
+    M_Get["<code>subzero_get</code><br/>Bounded poll & cursor event stream"]
+    M_Send["<code>subzero_send</code><br/>Steer active run or queue followup"]
+    M_Stop["<code>subzero_stop</code><br/>Idempotent stop & process cleanup"]
+    M_Resume["<code>subzero_resume</code><br/>Branch from last completed leaf"]
+    M_Output["<code>subzero_output</code><br/>Read full result artifact chunks"]
+    M_List["<code>subzero_list</code><br/>Discover children across restarts"]
+  end
+
+  subgraph CORE["3. Core Orchestration Layer (@subzero/core)"]
+    direction TB
+    StateMachine["State Machine & Admission<br/>Ready | Running | Interrupted"]
+    QueueMgr["Followup Queue & Event Cursors"]
+    Templates["Template Snapshots<br/>researcher | coder (Immutable)"]
+  end
+
+  subgraph RUNTIME["4. Runtime & Persistence Layer (@subzero/runtime)"]
+    direction TB
+    SQLiteDB[("SQLite Database (node:sqlite)<br/>Metadata, Run State & Monotonic Generations")]
+    CredResolver["In-Memory Credential Resolver<br/>Maps alias to key (never persisted)"]
+    ArtifactStore["Local Artifact Storage<br/>Full results stored on disk"]
+  end
+
+  subgraph WORKER["5. Isolated Worker Process (Pi SDK 1.0.4)"]
+    direction TB
+    PiWorker["Child Agent Worker Loop<br/>Runs ONLY during active/queued work"]
+    PrivateTranscript["Private Child Transcript<br/>Never pollutes parent context"]
+    ExactTools["Exact Granted Tools<br/>Read / Write / Shell (No ambient host tools)"]
+  end
+
+  subgraph EDGES["⚡ What Edges Us (Architectural & Security Advantages)"]
+    direction TB
+    Edge1["<b>Clean Separate Conversations</b><br/>Parent context stays clean; child runs private loop in isolated process"]
+    Edge2["<b>Stateful Stream Redaction</b><br/>Keys split across tokens, tool arguments, or property keys redacted"]
+    Edge3["<b>SQLite Generation Guarding</b><br/>Atomic transactions + monotonic generations prevent race & split-brain"]
+    Edge4["<b>Process Group Confinement</b><br/>EOF/SIGKILL reaps worker & all POSIX shell descendants within 5s"]
+    Edge5["<b>Zero Ambient Grants</b><br/>No host secrets or tools leaked; immutable least-privilege templates"]
+  end
+
+  Pi -->|MCP stdio| Broker
+  Codex -->|MCP stdio| Broker
+  Claude -->|MCP stdio| Broker
+  OpenCode -->|MCP stdio| Broker
+
+  Broker --> METHODS
+  METHODS --> StateMachine
+  StateMachine --> QueueMgr
+  QueueMgr --> Templates
+
+  CORE --> RUNTIME
+  RUNTIME -->|Supervised Process Fork| PiWorker
+  RUNTIME <--> SQLiteDB
+
+  PiWorker -.->|Protected by| EDGES
+  CORE -.->|Enforces| EDGES
+```
 
 The host owns the parent conversation. Subzero owns child identity, run routing, queues, state, metadata, and event cursors. The worker owns its model loop, transcript/checkpoint, and child tool execution.
 
@@ -157,4 +222,4 @@ Codex, Claude Code, and OpenCode configure the same local stdio executable throu
 
 Pi worker process model is selected for bounded stop/fault containment. The tested package set is exact-pinned: Pi SDK 1.0.4 and pi-ai 1.0.4. Root measured 135 MB installed dependencies (121 packages), about 143 MB baseline RSS per loaded worker test process, and about 178 MB after multiple sessions in one process. Idle child sessions close their worker; a four active-process cap is an initial policy limit, not a performance guarantee. Record footprint in package docs.
 
-The September Docker experiments are historical evidence in [the archive](archive/research/2026-09-30-experiments.md). They are not current worker qualification.
+Historical exploration notes are superseded by the current local test suite and qualification probes in [experiments/pi-sdk/](../experiments/pi-sdk/README.md).
