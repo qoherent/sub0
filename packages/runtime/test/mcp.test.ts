@@ -141,6 +141,9 @@ test('separate CLI process advertises canonical tools and rejects invalid wire a
     const spawnTool = discovered.tools.find(tool => tool.name === 'subzero_spawn');
     assert.ok(spawnTool);
     assert.deepEqual(spawnTool.inputSchema.required, ['prompt', 'templateId', 'model']);
+    assert.equal(spawnTool.annotations?.readOnlyHint, false);
+    assert.equal(discovered.tools.find(tool => tool.name === 'subzero_info')?.annotations?.readOnlyHint, true);
+    assert.equal(discovered.tools.find(tool => tool.name === 'subzero_stop')?.annotations?.idempotentHint, true);
     assert.equal(JSON.stringify(spawnTool.inputSchema).includes('workspaceRoot'), false);
     assert.equal(JSON.stringify(spawnTool.inputSchema).includes('"key"'), false);
     const info = structured(await session.client.callTool({ name: 'subzero_info', arguments: {} })) as { worker: { name: string; version: string } };

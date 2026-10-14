@@ -66,19 +66,25 @@ async function initialize(message: Envelope, id: number) {
   if (sessionPath) manager = SessionManager.open(sessionPath, sessionDir, cwd);
   else manager = SessionManager.create(cwd, sessionDir);
   protectSessionPersistence(manager, redactionSecrets);
-  const mcpTools = await createMcpTools(message.templateSnapshot as any, message.mcpEnv as Record<string, string> ?? {});
-  const builtinTools = createBuiltinTools(cwd, message.templateSnapshot as any, redactionSecrets);
-  const customTools = [...builtinTools, ...mcpTools];
-  const localNames = (message.templateSnapshot as any)?.tools?.map((grant: any) => grant.name) ?? [];
-  const allowedNames = [...localNames, ...mcpTools.map((tool: any) => tool.name)];
-  const customNames = new Set(customTools.map((tool: any) => tool.name));
-  if (customNames.size !== customTools.length || new Set(allowedNames).size !== allowedNames.length) throw new Error('tool_name_collision');
-  for (const name of allowedNames) if (!customNames.has(name)) throw new Error(`unsupported_grant:${name}`);
-  const created = await createAgentSession({
-    cwd, agentDir: String(process.env.PI_CODING_AGENT_DIR), modelRuntime: runtime, model,
-    settingsManager, resourceLoader, sessionManager: manager, noTools: 'all', tools: allowedNames,
-    customTools,
-  });
+  let created: Awaited<ReturnType<typeof createAgentSession>>;
+  try {
+    const mcpTools = await createMcpTools(message.templateSnapshot as any, message.mcpEnv as Record<string, string> ?? {});
+    const builtinTools = createBuiltinTools(cwd, message.templateSnapshot as any, redactionSecrets);
+    const customTools = [...builtinTools, ...mcpTools];
+    const localNames = (message.templateSnapshot as any)?.tools?.map((grant: any) => grant.name) ?? [];
+    const allowedNames = [...localNames, ...mcpTools.map((tool: any) => tool.name)];
+    const customNames = new Set(customTools.map((tool: any) => tool.name));
+    if (customNames.size !== customTools.length || new Set(allowedNames).size !== allowedNames.length) throw new Error('tool_name_collision');
+    for (const name of allowedNames) if (!customNames.has(name)) throw new Error(`unsupported_grant:${name}`);
+    created = await createAgentSession({
+      cwd, agentDir: String(process.env.PI_CODING_AGENT_DIR), modelRuntime: runtime, model,
+      settingsManager, resourceLoader, sessionManager: manager, noTools: 'all', tools: allowedNames,
+      customTools,
+    });
+  } catch (error) {
+    for (const client of mcpClients.splice(0)) await client.close().catch(() => undefined);
+    throw error;
+  }
   session = created.session;
   await session.bindExtensions({ mode: 'json' });
   const previousTransform = session.agent.transformContext;
@@ -161,7 +167,7 @@ async function createMcpTools(snapshot: any, envMap: Record<string, string>) {
 function safeObjectSchema(schema: unknown): unknown {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) throw new Error('mcp_tool_schema_invalid');
   const value = schema as Record<string, unknown>;
-  if (value.type !== 'object' || '$ref' in value || 'definitions' in value) throw new Error('mcp_tool_schema_unsupported');
+  if (value.type !== 'object' || '$ref' in value) throw new Error('mcp_tool_schema_unsupported');
   const bytes = JSON.stringify(value);
   if (Buffer.byteLength(bytes, 'utf8') > 32 * 1024) throw new Error('mcp_tool_schema_too_large');
   return Type.Unsafe(value as any);
@@ -199,8 +205,10 @@ async function runPrompt(message: Envelope, id: number) {
   const controller = new AbortController();
   running = { id, runId: String(message.runId ?? ''), controller, promise: Promise.resolve() };
   let finalAssistant: any;
+  let settledAborted = false;
   const listener = (value: any) => {
     if (value.type === 'message_end' && value.message?.role === 'assistant') finalAssistant = value.message;
+    else if (value.type === 'agent_settled' && value.aborted === true) settledAborted = true;
     else if (value.type === 'message_update' && value.assistantMessageEvent?.type === 'text_delta') {
       const delta = String(value.assistantMessageEvent.delta ?? '');
       event(id, { type: 'text', text: delta });
@@ -212,7 +220,7 @@ async function runPrompt(message: Envelope, id: number) {
     const prompt = String(message.prompt ?? '');
     const notice = checkpointId ? 'You are continuing from a saved checkpoint. Inspect the current workspace before acting.\n\n' : '';
     await session.prompt(`${notice}${prompt}`);
-    if (controller.signal.aborted || finalAssistant?.stopReason === 'aborted') { event(id, { type: 'stopped' }); return; }
+    if (controller.signal.aborted || settledAborted || finalAssistant?.stopReason === 'aborted') { event(id, { type: 'stopped' }); return; }
     if (!finalAssistant) { event(id, { type: 'interrupted', code: 'pi_no_assistant_response' }); return; }
     if (finalAssistant.stopReason === 'error') { event(id, { type: 'failed', code: 'provider_error', message: redactSecrets(String(finalAssistant.errorMessage ?? 'Provider request failed.')) }); return; }
     if (finalAssistant.stopReason !== 'stop') { event(id, { type: 'failed', code: 'pi_incomplete_response', message: redactSecrets(`Assistant ended with stop reason ${String(finalAssistant.stopReason)}.`) }); return; }
@@ -233,11 +241,7 @@ async function handle(message: Envelope) {
   const id = Number(message.id);
   try {
     if (message.type === 'initialize') await initialize(message, id);
-    else if (message.type === 'validate') {
-      if (!manager) throw new Error('worker_not_initialized');
-      const entries = manager.getEntries();
-      response(id, { valid: entries.some(entry => entry.id === String(message.checkpointId)) });
-    } else if (message.type === 'run') {
+    else if (message.type === 'run') {
       if (running) throw new Error('worker_run_already_active');
       const promise = runPrompt(message, id);
       setRunPromise(promise);

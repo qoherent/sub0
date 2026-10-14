@@ -9,6 +9,12 @@ import operations from '@subzero/core/schemas/wire-operations.schema.json' with 
 type OperationName = 'info' | 'spawn' | 'run' | 'get' | 'list' | 'send' | 'stop' | 'resume' | 'output';
 type ToolInput = Record<string, unknown>;
 type ToolOutput = Record<string, unknown>;
+type ToolAnnotations = {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+};
 export type ManagedMcpServer = McpServer & { shutdown(): Promise<void> };
 const operationNames: OperationName[] = ['info', 'spawn', 'run', 'get', 'list', 'send', 'stop', 'resume', 'output'];
 
@@ -31,6 +37,7 @@ export function createMcpServer(application: RuntimeApplication): ManagedMcpServ
     server.registerTool(`subzero_${name}`, {
       description: descriptions[name],
       inputSchema: fromJsonSchema<ToolInput>(schema as JsonSchemaType),
+      annotations: annotations[name],
     }, async (input: ToolInput, context) => {
       if (closing) return errorResult({ code: 'runtime_shutting_down', message: 'The runtime is shutting down.' });
       inFlight++;
@@ -150,6 +157,18 @@ const descriptions: Record<OperationName, string> = {
   stop: 'Stop the run identified by childId and expectedRunId.',
   resume: 'Validate a ready child and update its model using an explicitly configured credential reference. Include a message to start the next run.',
   output: 'Read a bounded UTF-8 chunk from a child artifact.',
+};
+
+const annotations: Record<OperationName, ToolAnnotations> = {
+  info: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  spawn: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  run: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  get: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  list: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  send: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  stop: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  resume: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  output: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
 
 type ProgressRequest = { _meta?: { progressToken?: string | number }; notify?: (message: { method: string; params: Record<string, unknown> }) => Promise<unknown> | unknown };

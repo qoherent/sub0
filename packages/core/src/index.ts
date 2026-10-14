@@ -515,15 +515,16 @@ function immutableSnapshot(template: TemplateDefinition): TemplateDefinition {
 function sameModelMetadata(left: ModelMetadata, right: ModelMetadata) {
   return left.url === right.url && left.model === right.model && left.api === right.api;
 }
-function utf8Length(value: string) { return new TextEncoder().encode(value).byteLength; }
+const utf8Encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder();
+function utf8Length(value: string) { return utf8Encoder.encode(value).byteLength; }
 function truncateUtf8(value: string, maxBytes: number): string {
-  if (utf8Length(value) <= maxBytes) return value;
-  let result = '';
-  for (const character of value) {
-    if (utf8Length(result + character) > maxBytes) break;
-    result += character;
-  }
-  return result;
+  if (maxBytes <= 0) return '';
+  const bytes = utf8Encoder.encode(value);
+  if (bytes.byteLength <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
+  return utf8Decoder.decode(bytes.subarray(0, end));
 }
 function clampInt(value: number | undefined, min: number, max: number, fallback: number) {
   if (value === undefined) return fallback;

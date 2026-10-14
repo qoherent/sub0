@@ -11,22 +11,22 @@ When calling these tools from codemode, check the MCP response isError before re
 
 /** Register the local Subzero runtime as a direct stdio MCP server for this Pi session. */
 export default function registerSubzeroExtension(pi: ExtensionAPI): void {
-  let registered = false;
+  let registeredCwd: string | undefined;
 
   const register = (cwd: string) => {
-    if (registered) return;
+    if (registeredCwd === cwd) return;
     pi.registerMcpServer(serverName, createSubzeroServerConfig(cwd));
-    registered = true;
+    registeredCwd = cwd;
   };
 
   pi.on('session_start', (_event, context) => register(context.cwd));
   pi.on('before_agent_start', event => {
-    if (registered) event.systemPromptOptions.sections[delegationSection] = delegationGuide;
+    if (registeredCwd !== undefined) event.systemPromptOptions.sections[delegationSection] = delegationGuide;
   });
   pi.on('session_shutdown', () => {
-    if (!registered) return;
+    if (registeredCwd === undefined) return;
     pi.unregisterMcpServer(serverName);
-    registered = false;
+    registeredCwd = undefined;
   });
 }
 

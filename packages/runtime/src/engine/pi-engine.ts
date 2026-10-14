@@ -4,7 +4,6 @@ import { createReadStream } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import { createTextRedactor, type ChildId, type EngineFactory, type ModelMetadata, type TemplateSnapshot, type Worker } from '@subzero/core';
@@ -112,7 +111,7 @@ export class PiEngineFactory implements EngineFactory {
     const entry = this.workerEntrypointForTesting ?? fileURLToPath(new URL(import.meta.url.endsWith('.ts') ? './worker-child.ts' : './worker-child.js', import.meta.url));
     const child = spawn(process.execPath, [entry, ...this.workerArgumentsForTesting], {
       cwd: workspaceRoot,
-      env: minimalWorkerEnvironment(),
+      env: minimalWorkerEnvironment(childDir),
       stdio: ['pipe', 'pipe', 'ignore'],
       detached: process.platform !== 'win32',
     });
@@ -356,10 +355,10 @@ class AsyncMessageQueue<T> implements AsyncIterable<T> {
   }
 }
 
-function minimalWorkerEnvironment(): NodeJS.ProcessEnv {
+function minimalWorkerEnvironment(childDir: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const name of ['PATH', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TMPDIR', 'TEMP', 'SYSTEMROOT', 'WINDIR']) if (process.env[name] !== undefined) env[name] = process.env[name];
-  env.PI_CODING_AGENT_DIR = join(tmpdir(), `subzero-pi-${process.pid}`);
+  env.PI_CODING_AGENT_DIR = join(childDir, 'agent');
   return env;
 }
 async function persistIdentity(childDir: string, identity: Identity) {

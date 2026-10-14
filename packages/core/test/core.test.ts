@@ -633,6 +633,13 @@ test('get reports a cursor gap and bounds its event batch and output preview', a
   const subscription = core.subscribe(child.childId, 0)[Symbol.asyncIterator]();
   assert.deepEqual(await subscription.next(), { value: { type: 'cursor_gap', requestedCursor: 0, oldestCursor: snapshot.oldestCursor }, done: false });
   await subscription.return?.();
+
+  const unicodeChild = await core.spawn({ prompt: 'unicode preview', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  engine.runs[1]!.complete({ checkpointId: 'leaf-u', artifactId: 'artifact-u', preview: '🙂'.repeat(300) });
+  await eventuallyAsync(async () => (await core.get(unicodeChild.childId)).state === 'ready');
+  const unicodeSnapshot = await core.get(unicodeChild.childId, { previewLimit: 10 });
+  assert.equal(unicodeSnapshot.result?.preview, '🙂🙂');
+  assert.equal((await core.get(unicodeChild.childId, { previewLimit: 3 })).result?.preview, '');
 });
 
 test('limits reject oversized UTF-8 prompts, excessive grants, active worker count, and a second writer', async () => {

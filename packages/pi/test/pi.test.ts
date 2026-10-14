@@ -75,7 +75,10 @@ test('extension registers once across session start and unregisters on shutdown'
   await handlers.get('session_start')?.({}, { cwd: '/tmp/next-worktree' });
   assert.equal(registrations.length, 2, 'a replacement Pi session gets its own MCP registration');
   assert.equal((registrations[1]?.config as { cwd?: string }).cwd, '/tmp/next-worktree');
-  await handlers.get('session_shutdown')?.({}, { cwd: '/tmp/next-worktree' });
+  await handlers.get('session_start')?.({}, { cwd: '/tmp/switched-worktree' });
+  assert.equal(registrations.length, 3, 'switching workspace cwd without shutdown updates the MCP registration');
+  assert.equal((registrations[2]?.config as { cwd?: string }).cwd, '/tmp/switched-worktree');
+  await handlers.get('session_shutdown')?.({}, { cwd: '/tmp/switched-worktree' });
   assert.deepEqual(removals, ['subzero', 'subzero']);
 });
 
