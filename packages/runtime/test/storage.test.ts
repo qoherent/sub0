@@ -30,6 +30,28 @@ test('persists child, active run, template and model metadata across close and r
   await reopened.close();
 }));
 
+test('exact run results survive event pruning and store reopen', async () => tempDb(async dbPath => {
+  const store = new SQLiteStore(dbPath, { brokerId: 'broker-a', eventRetention: 1 });
+  const { child, run, event } = records('durable-run');
+  const admission = await store.createChild(child, run, event, limits);
+  assert.equal(admission.kind, 'started');
+  if (admission.kind !== 'started') return;
+  await store.settleRun(child.childId, run.runId, admission.lease.ownerToken,
+    { type: 'completed', checkpointId: 'leaf', artifactId: 'artifact-exact', preview: 'durable' },
+    { childId: child.childId, runId: run.runId, at: '2026-10-07T00:00:01Z', type: 'completed', artifactId: 'artifact-exact', preview: 'durable' }, limits, true);
+  await store.appendEvent(child.childId, { childId: child.childId, at: '2026-10-07T00:00:02Z', type: 'tool', name: 'later', state: 'finished' });
+  assert.equal((await store.getRun(child.childId, run.runId))?.result?.artifactId, 'artifact-exact');
+  assert.equal(await store.getRun('other-child', run.runId), undefined);
+  await store.close();
+
+  const reopened = new SQLiteStore(dbPath, { brokerId: 'broker-b', eventRetention: 1 });
+  assert.deepEqual(await reopened.getRun(child.childId, run.runId), {
+    ...run, status: 'completed', result: { artifactId: 'artifact-exact', preview: 'durable' },
+  });
+  assert.equal((await reopened.readEvents(child.childId, 0, 10)).events.some(item => item.type === 'completed'), false);
+  await reopened.close();
+}));
+
 test('atomically enforces workspace worker and single writer limits across independent connections', async () => tempDb(async dbPath => {
   const a = new SQLiteStore(dbPath, { brokerId: 'a' });
   const b = new SQLiteStore(dbPath, { brokerId: 'b' });

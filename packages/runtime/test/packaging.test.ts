@@ -15,7 +15,7 @@ const required: Record<string, string[]> = {
   pi: ['dist/index.js', 'dist/index.d.ts'],
 };
 const names = Object.keys(required);
-type Manifest = { license?: string; private?: boolean; engines?: Record<string, string>; keywords?: string[]; files?: string[]; exports?: Record<string, string | Record<string, string>> };
+type Manifest = { version?: string; dependencies?: Record<string, string>; license?: string; private?: boolean; engines?: Record<string, string>; keywords?: string[]; files?: string[]; exports?: Record<string, string | Record<string, string>> };
 const manifestOf = async (name: string) => JSON.parse(await readFile(join(repoRoot, 'packages', name, 'package.json'), 'utf8')) as Manifest;
 const npmEnv = { ...process.env, npm_config_audit: 'false', npm_config_fund: 'false', npm_config_update_notifier: 'false' };
 
@@ -63,6 +63,12 @@ test('package manifests declare the MIT license, runtime engines, Pi gallery key
   assert.deepEqual((await manifestOf('runtime')).engines, { node: '>=24.15.0' });
   assert.deepEqual((await manifestOf('pi')).engines, { node: '>=22.19.0' });
   assert.ok((await manifestOf('pi')).keywords?.includes('pi-package'));
+});
+
+test('all published Subzero package manifests and workspace edges use version 0.2.0', async () => {
+  for (const name of names) assert.equal((await manifestOf(name)).version, '0.2.0', name);
+  assert.equal((await manifestOf('runtime')).dependencies?.['@subzero/core'], '0.2.0');
+  assert.equal((await manifestOf('pi')).dependencies?.['@subzero/runtime'], '0.2.0');
 });
 
 test('every development export equals its compiled default and is shipped and built', async () => {

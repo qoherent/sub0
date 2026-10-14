@@ -1,0 +1,10 @@
+{
+  "operation": "subzero_run",
+  "arguments": {
+    "prompt": "Summarize the latest changes.",
+    "templateId": "researcher",
+    "model": { "url": "https://api.example/v1", "model": "model-x", "credentialRef": "MODEL_KEY" },
+    "waitMs": 12000,
+    "previewLimit": 512
+  }
+}

@@ -83,6 +83,11 @@ export class SQLiteStore implements Store {
     return row ? childFromRow(row) : undefined;
   }
 
+  async getRun(childId: ChildId, runId: RunId): Promise<RunRecord | undefined> {
+    const row = this.db.prepare('SELECT * FROM runs WHERE child_id = ? AND run_id = ?').get(childId, runId) as unknown as RunRow | undefined;
+    return row ? runFromRow(row) : undefined;
+  }
+
   async listChildren(workspaceRoot?: string): Promise<ChildRecord[]> {
     const rows = workspaceRoot === undefined
       ? this.db.prepare('SELECT * FROM children ORDER BY created_at, child_id').all() as unknown as ChildRow[]

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { Value } from 'typebox/value';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -19,17 +20,17 @@ const key = 'mcp-synthetic-secret-91a';
 
 type Session = { client: Client; pid: number; close(): Promise<void> };
 
-async function launch(dataDir: string, workspace: string, origin: string, overrides: NodeJS.ProcessEnv = {}, compiled = false): Promise<Session> {
+async function launch(dataDir: string, workspace: string, origin: string, overrides: NodeJS.ProcessEnv = {}, compiled = false, mcpRequestBudgetMs?: number): Promise<Session> {
   await mkdir(dataDir, { recursive: true });
   const config = join(dataDir, 'config.json');
-  await writeFile(config, JSON.stringify({ credentialRefs: { TEST_MODEL: { env: 'SUBZERO_MCP_TEST_KEY', origins: [origin] } } }));
+  await writeFile(config, JSON.stringify({ credentialRefs: { TEST_MODEL: { env: 'SUBZERO_MCP_TEST_KEY', origins: [origin] } }, ...(mcpRequestBudgetMs === undefined ? {} : { mcpRequestBudgetMs }) }));
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [...(compiled ? [cliCompiled] : ['--conditions=development', cliSource]), '--data-dir', dataDir, '--workspace', workspace, '--config', config],
     env: { ...process.env, SUBZERO_MCP_TEST_KEY: key, ...overrides },
     stderr: 'pipe',
   });
-  const client = new Client({ name: 'subzero-mcp-test', version: '0.1.0' }, { capabilities: {} });
+  const client = new Client({ name: 'subzero-mcp-test', version: '0.2.0' }, { capabilities: {} });
   await client.connect(transport);
   const pid = transport.pid;
   assert.ok(pid);
@@ -135,7 +136,7 @@ test('separate CLI process advertises canonical tools and rejects invalid wire a
     session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin);
     const discovered = await session.client.listTools();
     assert.deepEqual(discovered.tools.map(tool => tool.name).sort(), [
-      'subzero_get', 'subzero_info', 'subzero_list', 'subzero_output', 'subzero_resume', 'subzero_send', 'subzero_spawn', 'subzero_stop',
+      'subzero_get', 'subzero_info', 'subzero_list', 'subzero_output', 'subzero_resume', 'subzero_run', 'subzero_send', 'subzero_spawn', 'subzero_stop',
     ]);
     const spawnTool = discovered.tools.find(tool => tool.name === 'subzero_spawn');
     assert.ok(spawnTool);
@@ -143,7 +144,7 @@ test('separate CLI process advertises canonical tools and rejects invalid wire a
     assert.equal(JSON.stringify(spawnTool.inputSchema).includes('workspaceRoot'), false);
     assert.equal(JSON.stringify(spawnTool.inputSchema).includes('"key"'), false);
     const info = structured(await session.client.callTool({ name: 'subzero_info', arguments: {} })) as { worker: { name: string; version: string } };
-    assert.deepEqual(info.worker, { name: 'pi', version: '1.0.4', capabilities: ['steer', 'followup', 'checkpoint-resume'] });
+    assert.deepEqual(info.worker, { name: 'pi', version: '1.2.0', capabilities: ['steer', 'followup', 'checkpoint-resume'] });
     const invalid = await session.client.callTool({ name: 'subzero_spawn', arguments: { prompt: 'x', templateId: 'researcher', model: { url: provider.endpoint, model: 'fake-model', credentialRef: 'TEST_MODEL', key } } });
     assert.equal(invalid.isError, true);
     assert.equal(JSON.stringify(invalid).includes(key), false);
@@ -162,7 +163,7 @@ test('compiled CLI exposes the same MCP tools over stdio', { timeout: 10_000 }, 
     session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin, {}, true);
     const tools = await session.client.listTools();
     assert.deepEqual(tools.tools.map(tool => tool.name).sort(), [
-      'subzero_get', 'subzero_info', 'subzero_list', 'subzero_output', 'subzero_resume', 'subzero_send', 'subzero_spawn', 'subzero_stop',
+      'subzero_get', 'subzero_info', 'subzero_list', 'subzero_output', 'subzero_resume', 'subzero_run', 'subzero_send', 'subzero_spawn', 'subzero_stop',
     ]);
   } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
 });
@@ -419,9 +420,14 @@ test('audit: another workspace on the same data directory cannot list, inspect, 
     assert.equal(listedByB.children.some(child => child.childId === started.childId), false);
 
     const before = JSON.stringify(structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } })));
+    const ownRun = structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, runId: started.runId } })) as { runId: string; status: string; result?: { artifactId: string } };
+    assert.equal(ownRun.status, 'completed', 'positive control: the owner can read its completed run');
+    assert.equal(ownRun.runId, started.runId);
+    assert.equal(ownRun.result?.artifactId, artifactId);
     const requestsBefore = provider.requests.length;
     const foreign = {
       get: await brokerB.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } }),
+      getRun: await brokerB.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, runId: started.runId, waitMs: 100 } }),
       send: await brokerB.client.callTool({ name: 'subzero_send', arguments: { childId: started.childId, mode: 'followup', message: 'cross-workspace followup' } }),
       stop: await brokerB.client.callTool({ name: 'subzero_stop', arguments: { childId: started.childId, expectedRunId: started.runId } }),
       resume: await brokerB.client.callTool({ name: 'subzero_resume', arguments: { childId: started.childId, model: { ...model(provider.endpoint), model: 'other-model' } } }),
@@ -429,6 +435,8 @@ test('audit: another workspace on the same data directory cannot list, inspect, 
     };
     const leaks = Object.entries(foreign).filter(([name, result]) => result.isError !== true || (name !== 'output' && !/not_found/.test(JSON.stringify(result)))).map(([name]) => name);
     assert.deepEqual(leaks, [], 'foreign calls that did not fail with not_found');
+    assert.equal(JSON.stringify(foreign).includes(artifactId), false, 'foreign errors do not disclose the result artifact');
+    assert.deepEqual(structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, runId: started.runId } })), ownRun, 'foreign calls leave the owner-visible run unchanged');
     const after = JSON.stringify(structured(await brokerA.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId } })));
     assert.equal(after, before, 'foreign calls leave child metadata, model, and events unchanged');
     assert.equal(provider.requests.length, requestsBefore, 'foreign calls start no provider request');
@@ -485,7 +493,13 @@ test('audit: broker SIGKILL stops a worker waiting on a hanging provider within 
 test('audit: large valid tool results stay parseable JSON in the model-facing text content', { timeout: 20_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-audit-large-result-'));
   const workspace = join(root, 'workspace');
+  let milestoneCalls = 0;
   const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (milestoneCalls < 30) {
+      const index = milestoneCalls++;
+      sendToolCall(response, 'ls', { path: workspace }, `large-result-${index}`);
+      return;
+    }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     for (let index = 0; index < 120; index++) response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: index === 0 ? { role: 'assistant', content: 'a'.repeat(100) } : { content: 'a'.repeat(100) }, finish_reason: null }] })}\n\n`);
     response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\n`);
@@ -516,6 +530,210 @@ test('audit: large valid tool results stay parseable JSON in the model-facing te
   } finally {
     await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
   }
+});
+
+test('MCP exposes bounded subzero_run and run-specific subzero_get snapshots', { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-run-tool-'));
+  const workspace = join(root, 'workspace');
+  const provider = await startFakeProvider({ onRequest(_body, response) { setTimeout(() => sendCompletion(response, 'run complete'), 1500); } });
+  let session: Session | undefined;
+  const progressUpdates: Array<{ progress: number; message: string }> = [];
+  try {
+    await mkdir(workspace);
+    session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin);
+    const run = structured(await session.client.callTool({ name: 'subzero_run', arguments: { prompt: 'finish', templateId: 'researcher', model: model(provider.endpoint), waitMs: 5000 } }, { onprogress: notification => {
+      progressUpdates.push({ progress: notification.progress, message: notification.message ?? '' });
+      return new Promise<void>(() => undefined);
+    } })) as { childId: string; runId: string; status: string; waitExpired: boolean; result?: { artifactId: string } };
+    const responseSchema = JSON.parse(await readFile(join(rootDir, 'packages/core/schemas/wire-responses.schema.json'), 'utf8'));
+    assert.equal(Value.Check(responseSchema, run), true, JSON.stringify(run));
+    assert.ok(run.childId);
+    assert.ok(run.runId);
+    assert.equal(run.status, 'completed');
+    assert.equal(run.waitExpired, false);
+    assert.ok(run.result?.artifactId);
+    assert.ok(progressUpdates.length > 0, 'MCP progress token receives run milestones');
+    assert.ok(progressUpdates.every(update => Number.isInteger(update.progress) && update.progress > 0 && Buffer.byteLength(update.message, 'utf8') <= 256));
+    assert.ok(progressUpdates.every((update, index) => index === 0 || update.progress > progressUpdates[index - 1]!.progress));
+    assert.equal(progressUpdates.some(update => update.message.includes('finish') || update.message.includes(key)), false);
+    const prior = structured(await session.client.callTool({ name: 'subzero_get', arguments: { childId: run.childId, runId: run.runId, waitMs: 0 } })) as typeof run;
+    assert.equal(prior.runId, run.runId);
+    assert.equal(prior.result?.artifactId, run.result.artifactId);
+    assert.equal('events' in prior, false);
+    const mismatch = await session.client.callTool({ name: 'subzero_get', arguments: { childId: run.childId, runId: 'not-this-run', waitMs: 0 } });
+    assert.equal(mismatch.isError, true);
+    assert.equal(JSON.stringify(mismatch).includes('run complete'), false);
+    assert.equal(Value.Check(responseSchema, structured(mismatch)), true, JSON.stringify(mismatch));
+  } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('MCP run snapshots validate real failed and stopped terminal outcomes', { timeout: 25_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-run-terminals-'));
+  const workspace = join(root, 'workspace');
+  const pidFile = join(root, 'sleep.pid');
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    if (providerMode === 'failed') { response.writeHead(500, { 'content-type': 'application/json' }).end('{"error":"synthetic failure"}'); return; }
+    sendToolCall(response, 'bash', { command: `sleep 45 & echo $! > '${pidFile}'; wait` });
+  } });
+  let providerMode: 'failed' | 'stopped' = 'failed';
+  let session: Session | undefined;
+  try {
+    await mkdir(workspace);
+    session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin);
+    const responseSchema = JSON.parse(await readFile(join(rootDir, 'packages/core/schemas/wire-responses.schema.json'), 'utf8'));
+    const failed = structured(await session.client.callTool({ name: 'subzero_run', arguments: { prompt: 'fail', templateId: 'researcher', model: model(provider.endpoint), waitMs: 8000 } })) as { childId: string; runId: string; status: string; waitExpired: boolean; errorCode?: string };
+    assert.equal(Value.Check(responseSchema, failed), true, JSON.stringify(failed));
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.waitExpired, false);
+    assert.ok(failed.errorCode);
+    assert.equal('events' in failed, false, 'terminal results do not include the legacy event batch');
+
+    providerMode = 'stopped';
+    const started = structured(await session.client.callTool({ name: 'subzero_run', arguments: { prompt: 'run until stopped', templateId: 'coder', model: model(provider.endpoint), waitMs: 0 } })) as { childId: string; runId: string; status: string };
+    assert.equal(started.status, 'running');
+    await waitFor(async () => readFile(pidFile, 'utf8').then(value => Number(value.trim()), () => 0), value => value > 1, 10_000);
+    await session.client.callTool({ name: 'subzero_stop', arguments: { childId: started.childId, expectedRunId: started.runId } });
+    const stopped = await waitFor(async () => structured(await session!.client.callTool({ name: 'subzero_get', arguments: { childId: started.childId, runId: started.runId, waitMs: 250 } })) as { childId: string; runId: string; status: string; waitExpired: boolean }, value => value.status === 'stopped', 10_000);
+    assert.equal(Value.Check(responseSchema, stopped), true, JSON.stringify(stopped));
+    assert.equal(stopped.waitExpired, false);
+    assert.equal('events' in stopped, false, 'terminal results do not include the legacy event batch');
+  } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('MCP run-specific snapshot reports an interrupted resumed worker without stale success data', { timeout: 25_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-run-interrupted-'));
+  const workspace = join(root, 'workspace');
+  let requestCount = 0;
+  const provider = await startFakeProvider({ onRequest(_body, response) {
+    requestCount++;
+    if (requestCount === 1) { sendCompletion(response, 'prior successful result'); return; }
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.write(`data: ${JSON.stringify({ id: 'fake', object: 'chat.completion.chunk', created: 1, model: 'fake-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'still running' }, finish_reason: null }] })}\n\n`);
+  } });
+  let session: Session | undefined;
+  let workerPid: number | undefined;
+  try {
+    await mkdir(workspace);
+    const dataDir = join(root, 'data');
+    session = await launch(dataDir, workspace, new URL(provider.endpoint).origin);
+    const responseSchema = JSON.parse(await readFile(join(rootDir, 'packages/core/schemas/wire-responses.schema.json'), 'utf8'));
+    const spawned = structured(await session.client.callTool({ name: 'subzero_spawn', arguments: { prompt: 'complete first', templateId: 'researcher', model: model(provider.endpoint) } })) as { childId: string; runId: string };
+    const prior = await waitFor(async () => structured(await session!.client.callTool({ name: 'subzero_get', arguments: { childId: spawned.childId, runId: spawned.runId, waitMs: 250 } })) as { status: string; result?: { artifactId: string } }, value => value.status === 'completed' && Boolean(value.result));
+    assert.ok(prior.result?.artifactId, 'precondition: the same child has a prior successful artifact');
+
+    const resumed = structured(await session.client.callTool({ name: 'subzero_resume', arguments: { childId: spawned.childId, model: model(provider.endpoint), message: 'hang on second turn' } })) as { childId: string; runId: string; state: string };
+    assert.equal(resumed.childId, spawned.childId);
+    assert.equal(resumed.state, 'running');
+    const identityPath = join(dataDir, 'sessions', createHash('sha256').update(resumed.childId).digest('hex'), 'worker-owner.json');
+    const ownedPid = await waitFor(async () => readFile(identityPath, 'utf8').then(value => (JSON.parse(value) as { pid: number; runId: string }).runId === resumed.runId ? (JSON.parse(value) as { pid: number }).pid : undefined, () => undefined), value => value !== undefined, 8_000);
+    assert.ok(ownedPid);
+    workerPid = ownedPid;
+    const testWorkerPid = ownedPid;
+    await waitFor(async () => provider.requests.length, value => value >= 2, 8_000);
+    assert.equal(await hasLiveGroup(testWorkerPid), true, 'precondition: the resumed worker group is live during its hanging provider request');
+
+    process.kill(-testWorkerPid, 'SIGKILL');
+    assert.equal(await waitFor(() => hasLiveGroup(testWorkerPid), value => !value, 5_000).then(() => true, () => false), true, 'the test-owned worker group exits after SIGKILL');
+    const interrupted = await waitFor(async () => structured(await session!.client.callTool({ name: 'subzero_get', arguments: { childId: resumed.childId, runId: resumed.runId, waitMs: 250 } })) as { childId: string; runId: string; status: string; waitExpired: boolean; errorCode?: string; result?: unknown; events?: unknown }, value => value.status === 'interrupted', 10_000);
+    assert.equal(Value.Check(responseSchema, interrupted), true, JSON.stringify(interrupted));
+    assert.equal(interrupted.childId, resumed.childId);
+    assert.equal(interrupted.runId, resumed.runId);
+    assert.equal(interrupted.status, 'interrupted');
+    assert.equal(interrupted.waitExpired, false);
+    assert.equal(interrupted.errorCode, 'worker_eof', 'the killed worker is recorded with the runtime interruption code');
+    assert.equal(interrupted.result, undefined, 'the prior successful artifact is not attached to this run');
+    assert.equal('events' in interrupted, false, 'run-specific snapshots do not include a stale event batch');
+    assert.equal(JSON.stringify(interrupted).includes(prior.result!.artifactId), false, 'the prior successful artifact ID is not leaked into the interrupted run snapshot');
+  } finally {
+    if (workerPid !== undefined) { try { process.kill(-workerPid, 'SIGKILL'); } catch { } }
+    await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('MCP request budget returns an accepted run snapshot that can be resumed by run ID', { timeout: 20_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-mcp-run-budget-'));
+  const workspace = join(root, 'workspace');
+  const provider = await startFakeProvider({ onRequest(_body, response) { setTimeout(() => sendCompletion(response, 'budget eventually completed'), 1200); } });
+  let session: Session | undefined;
+  try {
+    await mkdir(workspace);
+    session = await launch(join(root, 'data'), workspace, new URL(provider.endpoint).origin, {}, false, 300);
+    const startedAt = Date.now();
+    const run = structured(await session.client.callTool({ name: 'subzero_run', arguments: { prompt: 'wait for the delayed result', templateId: 'researcher', model: model(provider.endpoint), waitMs: 8000 } })) as { childId: string; runId: string; status: string; waitExpired: boolean };
+    assert.ok(Date.now() - startedAt < 1500, 'server work is capped by mcpRequestBudgetMs');
+    assert.ok(run.childId && run.runId, `accepted identity is returned when the wait budget expires: ${JSON.stringify(run)}`);
+    assert.equal(run.status, 'running');
+    assert.equal(run.waitExpired, true);
+    const immediate = structured(await session.client.callTool({ name: 'subzero_get', arguments: { childId: run.childId, runId: run.runId } })) as { status: string; waitExpired: boolean };
+    assert.equal(immediate.status, 'running');
+    assert.equal(immediate.waitExpired, false, 'run-specific get defaults to an immediate snapshot');
+    const done = await waitFor(async () => structured(await session!.client.callTool({ name: 'subzero_get', arguments: { childId: run.childId, runId: run.runId, waitMs: 300 } })) as { status: string; result?: { artifactId: string } }, value => value.status === 'completed' && Boolean(value.result));
+    assert.ok(done.result?.artifactId);
+  } finally { await session?.close(); await provider.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('MCP budget expiry during asynchronous credential preparation never dispatches later', { timeout: 10_000 }, async () => {
+  const { createMcpServer } = await import('../src/server.ts');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  let dispatches = 0;
+  const fakeApplication = {
+    workspaceRoot: '/workspace', mcpRequestBudgetMs: 25,
+    credentials: { resolve: async () => { await delay(100); return { key: 'synthetic-key' }; } },
+    run: async () => { dispatches++; return { childId: 'child-late', runId: 'run-late', status: 'running', waitExpired: false }; },
+    beginShutdown: async () => undefined, close: async () => undefined,
+  };
+  const server = createMcpServer(fakeApplication as never);
+  const client = new Client({ name: 'budget-test', version: '0.2.0' }, { capabilities: {} });
+  try {
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const response = await client.callTool({ name: 'subzero_run', arguments: { prompt: 'slow prepare', templateId: 'researcher', model: model('https://api.example/v1'), waitMs: 0 } });
+    assert.equal(response.isError, true);
+    assert.equal((structured(response) as { error: { code: string } }).error.code, 'request_timeout');
+    await delay(150);
+    assert.equal(dispatches, 0, 'late credential resolution cannot dispatch after timeout');
+  } finally { await client.close().catch(() => undefined); await server.shutdown(); }
+});
+
+test('MCP progress is opt-in and aborting observation never stops the accepted run', { timeout: 10_000 }, async () => {
+  const { createMcpServer } = await import('../src/server.ts');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  let progressWasUndefined = false;
+  let dispatches = 0;
+  let stopCalls = 0;
+  let observeAbort!: () => void;
+  const abortObserved = new Promise<void>(resolve => { observeAbort = resolve; });
+  const fakeApplication = {
+    workspaceRoot: '/workspace', mcpRequestBudgetMs: 5000,
+    credentials: { resolve: () => ({ key: 'synthetic-key' }) },
+    run: async (_input: unknown, signal: AbortSignal, progress?: (event: { seq: number; at: string; childId: string; type: 'run_started' }) => void) => {
+      dispatches++;
+      if (_input && typeof _input === 'object' && 'prompt' in _input && _input.prompt === 'without progress') {
+        progressWasUndefined = progress === undefined;
+        return { childId: 'child-no-progress', runId: 'run-no-progress', status: 'completed', waitExpired: false };
+      }
+      setTimeout(() => progress?.({ seq: 1, at: new Date().toISOString(), childId: 'child-abort', type: 'run_started' }), 10);
+      return new Promise(resolve => {
+        const onAbort = () => { observeAbort(); resolve({ childId: 'child-abort', runId: 'run-abort', status: 'running', waitExpired: false }); };
+        if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+      });
+    },
+    stop: async () => { stopCalls++; return { requested: true, confirmed: true }; },
+    beginShutdown: async () => undefined, close: async () => undefined,
+  };
+  const server = createMcpServer(fakeApplication as never);
+  const client = new Client({ name: 'progress-test', version: '0.2.0' }, { capabilities: {} });
+  try {
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    const noProgress = structured(await client.callTool({ name: 'subzero_run', arguments: { prompt: 'without progress', templateId: 'researcher', model: model('https://api.example/v1'), waitMs: 0 } })) as { status: string };
+    assert.equal(noProgress.status, 'completed');
+    assert.equal(progressWasUndefined, true);
+
+    const controller = new AbortController();
+    await assert.rejects(client.callTool({ name: 'subzero_run', arguments: { prompt: 'cancel observation', templateId: 'researcher', model: model('https://api.example/v1'), waitMs: 4000 } }, { signal: controller.signal, onprogress: () => controller.abort() }), /abort/i);
+    await abortObserved;
+    assert.equal(dispatches, 2);
+    assert.equal(stopCalls, 0, 'request cancellation does not call subzero_stop');
+  } finally { await client.close().catch(() => undefined); await server.shutdown(); }
 });
 
 test('audit: raw stdin EOF with a pending long get stops the broker, worker group, and shell descendant within 5 seconds', { timeout: 30_000 }, async () => {

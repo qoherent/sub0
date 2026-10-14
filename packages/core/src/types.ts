@@ -105,6 +105,7 @@ export type Settled = { kind: 'idle' } | { kind: 'next'; run: RunRecord } | { ki
 export interface Store {
   createChild(child: ChildRecord, run: RunRecord, event: EventInput, limits: CoreLimits): Promise<Admission>;
   getChild(childId: ChildId): Promise<ChildRecord | undefined>;
+  getRun(childId: ChildId, runId: RunId): Promise<RunRecord | undefined>;
   listChildren(workspaceRoot?: string): Promise<ChildRecord[]>;
   putTemplate(template: TemplateDefinition): Promise<void>;
   getTemplate(templateId: TemplateId): Promise<TemplateDefinition | undefined>;
@@ -153,8 +154,14 @@ export type SubzeroOptions = {
 /** Trusted host-side spawn input; the host injects workspaceRoot, which is absent from the public wire schema. */
 export type SpawnInput = { prompt: string; templateId: TemplateId; model: ModelArgs; workspaceRoot: string };
 export type SendInput = { mode: SendMode; message: string };
-export type GetInput = { waitMs?: number; cursor?: number; eventLimit?: number; previewLimit?: number };
+export type GetInput = { waitMs?: number; cursor?: number; eventLimit?: number; previewLimit?: number; runId?: RunId };
+export type RunSnapshot = { childId: ChildId; runId: RunId; status: RunState; waitExpired: boolean; result?: { artifactId: string; preview: string }; errorCode?: string };
+export type RunProgress = (event: Exclude<ChildEvent, { type: 'text' }>) => void | Promise<void>;
+export type GetMethod = {
+  (childId: ChildId, input: GetInput & { runId: RunId }, signal?: AbortSignal, progress?: RunProgress): Promise<RunSnapshot>;
+  (childId: ChildId, input?: GetInput & { runId?: undefined }, signal?: AbortSignal, progress?: RunProgress): Promise<ChildSnapshot>;
+};
 export type StopResult = { requested: boolean; confirmed: boolean };
 export type ResumeResult = { state: 'ready'; childId: ChildId } | { state: 'running'; childId: ChildId; runId: RunId };
 
-export type SubzeroErrorCode = 'invalid_request' | 'not_found' | 'credentials_required' | 'template_not_found' | 'limit_exceeded' | 'workspace_busy' | 'busy' | 'recovery_required' | 'stale_run' | 'unsupported_steer' | 'checkpoint_incompatible' | 'artifact_unavailable';
+export type SubzeroErrorCode = 'invalid_request' | 'not_found' | 'request_timeout' | 'credentials_required' | 'template_not_found' | 'limit_exceeded' | 'workspace_busy' | 'busy' | 'recovery_required' | 'stale_run' | 'unsupported_steer' | 'checkpoint_incompatible' | 'artifact_unavailable';

@@ -1,4 +1,4 @@
-import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, createAgentSession, type BashOperations } from '@earendil-works/pi-coding-agent';
+import { createReadToolDefinition, createWriteToolDefinition, createEditToolDefinition, createBashToolDefinition, createGrepToolDefinition, createFindToolDefinition, createLsToolDefinition, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, createAgentSession, type BashOperations, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
@@ -121,7 +121,7 @@ function createBuiltinTools(cwd: string, snapshot: any, secrets: string[]): any[
 }
 
 async function createMcpTools(snapshot: any, envMap: Record<string, string>) {
-  const definitions: any[] = [];
+  const definitions: ToolDefinition[] = [];
   for (const server of snapshot.mcpServers ?? []) {
     const env: Record<string, string> = {};
     for (const reference of server.envRefs ?? []) {
@@ -147,8 +147,8 @@ async function createMcpTools(snapshot: any, envMap: Record<string, string>) {
       definitions.push({
         name, label: name, description: tool.description ?? `MCP tool from ${server.name}`,
         parameters,
-        execute: async (_callId: string, args: unknown, context: { signal?: AbortSignal }) => {
-          const result = await client.callTool({ name: tool.name, arguments: redactStructured(args ?? {}, redactionSecrets) as Record<string, unknown> }, { signal: context.signal });
+        execute: async (_callId, args, signal) => {
+          const result = await client.callTool({ name: tool.name, arguments: redactStructured(args ?? {}, redactionSecrets) as Record<string, unknown> }, { signal });
           const content = (result.content ?? []).map((part: any) => ({ type: 'text' as const, text: redactSecrets(typeof part.text === 'string' ? part.text : JSON.stringify(part)) }));
           return { content, details: undefined, isError: result.isError === true };
         },

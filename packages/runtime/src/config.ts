@@ -8,9 +8,10 @@ export type RuntimeConfig = {
   dataRoot: string;
   templates: TemplateDefinition[];
   configuredModelRefs: string[];
+  mcpRequestBudgetMs: number;
   credentials: CredentialResolver;
 };
-export type LoadRuntimeConfigOptions = { dataRoot: string; workspaceRoot: string; credentialRefs?: CredentialMap; templatesFile?: string };
+export type LoadRuntimeConfigOptions = { dataRoot: string; workspaceRoot: string; credentialRefs?: CredentialMap; templatesFile?: string; mcpRequestBudgetMs?: unknown };
 type RawTemplate = {
   id: string; description: string; instructions: string; tools?: ToolGrant[]; skills?: Array<string | SkillSnapshot>;
   mcpServers?: McpGrant[]; writeCapable?: boolean; workerAdapter?: string; workerVersion?: string;
@@ -18,9 +19,12 @@ type RawTemplate = {
 
 const readerTools: ToolGrant[] = ['read', 'grep', 'find', 'ls'].map(name => ({ name, writable: false }));
 const writerTools: ToolGrant[] = [...readerTools, ...['edit', 'write', 'bash'].map(name => ({ name, writable: true }))];
+const maxTimerDelayMs = 2_147_483_647;
 
 /** Loads only files rooted under the explicitly supplied trusted data root. */
 export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<RuntimeConfig> {
+  const mcpRequestBudgetMs = options.mcpRequestBudgetMs ?? 30_000;
+  if (!Number.isSafeInteger(mcpRequestBudgetMs) || (mcpRequestBudgetMs as number) <= 0 || (mcpRequestBudgetMs as number) > maxTimerDelayMs) throw new Error(`mcpRequestBudgetMs must be a positive integer no greater than ${maxTimerDelayMs}.`);
   const dataRoot = await realpath(resolve(options.dataRoot));
   const workspaceRoot = await realpath(resolve(options.workspaceRoot));
   const templatesFile = options.templatesFile ?? 'templates.json';
@@ -64,7 +68,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     seen.add(entry.id);
   }
   const credentials = new CredentialResolver(options.credentialRefs ?? {});
-  return { workspaceRoot, dataRoot, templates, configuredModelRefs: credentials.configuredRefs(), credentials };
+  return { workspaceRoot, dataRoot, templates, configuredModelRefs: credentials.configuredRefs(), credentials, mcpRequestBudgetMs: mcpRequestBudgetMs as number };
 }
 
 async function resolveSkills(entries: Array<string | SkillSnapshot>, dataRoot: string): Promise<SkillSnapshot[]> {

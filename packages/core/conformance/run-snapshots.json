@@ -1,0 +1,7 @@
+[
+  { "childId": "child-a", "runId": "run-complete", "status": "completed", "waitExpired": false, "result": { "artifactId": "artifact-a", "preview": "finished" } },
+  { "childId": "child-a", "runId": "run-running", "status": "running", "waitExpired": true },
+  { "childId": "child-a", "runId": "run-failed", "status": "failed", "waitExpired": false, "errorCode": "worker_failed" },
+  { "childId": "child-a", "runId": "run-stopped", "status": "stopped", "waitExpired": false },
+  { "childId": "child-a", "runId": "run-interrupted", "status": "interrupted", "waitExpired": false, "errorCode": "worker_interrupted" }
+]

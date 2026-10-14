@@ -36,9 +36,9 @@ try {
   } }, null, 2));
 
   pi = spawn(process.execPath, [
-    piCli, '--print', '--no-session', '--tools', 'mcp__subzero__subzero_spawn,mcp__subzero__subzero_get', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes',
+    piCli, '--print', '--no-session', '--mode', 'json', '--tools', 'mcp__subzero__subzero_run,mcp__subzero__subzero_get', '--no-context-files', '--no-skills', '--no-prompt-templates', '--no-themes',
     '--extension', extension, '--provider', 'opencode-go', '--model', 'longcat-2.5-preview-free',
-    'Use mcp__subzero__subzero_spawn to start one coder child with model longcat-2.5-preview-free, URL https://opencode.ai/zen/go/v1, and credentialRef longcat. Have it create subzero-live-child.txt with exactly subzero-live-ok. Do not write the file yourself. Poll only with mcp__subzero__subzero_get, using waitMs 10000 and the latest nextCursor as cursor. Stop polling only after a completed event includes artifactId. If the child is failed or interrupted, report its state and code. Never call resume or stop.',
+    'Use mcp__subzero__subzero_run to start one coder child with model longcat-2.5-preview-free, URL https://opencode.ai/zen/go/v1, and credentialRef longcat. Have it create subzero-live-child.txt with exactly subzero-live-ok. Do not write the file yourself. If subzero_run returns status running or waitExpired, call mcp__subzero__subzero_get with that exact childId and runId, waitMs 10000, and no event cursor. Retry only that observation call until status is completed with result.artifactId. Never redispatch with subzero_run. If the child is failed or interrupted, report its state and code. Never call resume or stop.',
   ], {
     cwd: workspace,
     env: {
@@ -78,16 +78,20 @@ try {
     childRow = db.prepare('SELECT child_id, state, ownership_state, last_result FROM children WHERE workspace_root = ? ORDER BY created_at DESC LIMIT 1').get(workspace);
     if (childRow) {
       childEvents = db.prepare('SELECT type, payload FROM events WHERE child_id = ? ORDER BY seq').all(childRow.child_id);
-      childRuns = db.prepare('SELECT status, error_code FROM runs WHERE child_id = ? ORDER BY ordinal').all(childRow.child_id);
+      childRuns = db.prepare('SELECT run_id, status, result, error_code FROM runs WHERE child_id = ? ORDER BY ordinal').all(childRow.child_id);
     }
   } finally { db.close(); }
   assert.ok(childRow, 'Subzero should persist child metadata.');
   assert.equal(childRow.state, 'ready', 'the child should finish and release ownership.');
   assert.equal(childRow.ownership_state, 'none', 'the child should have no active owner after completion.');
+  assert.equal(childRuns.length, 1, 'the host dispatches one accepted child run');
+  assert.equal(childRuns[0].status, 'completed', 'the exact persisted run reached completed');
   const result = requireCompletionResult(childRow.last_result,
     summarizeLiveFailure({ child: childRow, runs: childRuns, events: childEvents, stdout, stderr, secretValues }));
   assert.ok(typeof result.preview === 'string' && result.preview.length > 0, 'the child should persist a nonempty completion result.');
   assert.ok(typeof result.artifactId === 'string' && result.artifactId.length > 0, 'the child should persist a completion artifact.');
+  const runResult = requireCompletionResult(childRuns[0].result, 'persisted run result missing');
+  assert.equal(runResult.artifactId, result.artifactId, 'run result and child result refer to the same artifact');
   assert.ok(childEvents.some(event => {
     if (event.type !== 'completed') return false;
     const payload = JSON.parse(event.payload);
@@ -95,7 +99,7 @@ try {
   }), 'the child should persist a completed event with an artifact.');
   assert.ok(childEvents.some(event => event.type === 'tool' && JSON.parse(event.payload).name === 'write' && JSON.parse(event.payload).state === 'finished'), 'the child should persist a successful write tool event.');
   preserveArtifacts = process.env.SUBZERO_TEST_KEEP_ARTIFACTS === '1';
-  process.stdout.write(`Live Pi delegation passed; child ${childRow.child_id} reached ready and wrote the expected file.\n`);
+  process.stdout.write(`Live Pi delegation passed; child ${childRow.child_id}, run ${childRuns[0].run_id} completed with artifact ${result.artifactId}; exact file and ownership release verified.\n`);
   if (preserveArtifacts) process.stdout.write(`Live artifacts retained at: ${root}\n`);
 } catch (error) {
   const scan = await scanSecrets().catch(() => ({ fileLeaks: -1, outputLeaks: -1 }));

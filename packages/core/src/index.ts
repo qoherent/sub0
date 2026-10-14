@@ -1,6 +1,6 @@
 import type {
-  Admission, ArtifactChunk, ChildId, ChildRecord, ChildSnapshot, ChildSummary, CoreLimits, EventInput,
-  GetInput, ModelArgs, ModelMetadata, OwnerLease, ResumeResult, RunId, RunRecord, SubscriptionItem,
+  Admission, ArtifactChunk, ChildEvent, ChildId, ChildRecord, ChildSnapshot, ChildSummary, CoreLimits, EventInput,
+  GetInput, GetMethod, ModelArgs, ModelMetadata, OwnerLease, ResumeResult, RunId, RunRecord, RunSnapshot, RunProgress, SubscriptionItem,
   SendInput, SpawnInput, StopResult, SubzeroOptions, TemplateDefinition, Worker, WorkerEvent, WorkerTerminal,
 } from './types.ts';
 export * from './types.ts';
@@ -44,8 +44,11 @@ export function createSubzero(options: SubzeroOptions) {
     templates.set(item.id, immutableSnapshot(item));
   }
   const localWorkers = new Map<ChildId, LocalWorker>();
+  const pendingStarts = new Map<RunId, { childId: ChildId; lease: OwnerLease; stopRequested: boolean; runStarted: boolean }>();
   const pendingDispatches = new Set<Promise<void>>();
+  const pendingAdmissions = new Set<Promise<{ child: ChildRecord; run: RunRecord; lease: OwnerLease; model: ModelArgs; opening: Promise<void> }>>();
   const credentials = new Map<ChildId, ModelArgs>();
+  let shuttingDown = false;
   const templateById = async (id: string): Promise<TemplateDefinition> => {
     let template = templates.get(id);
     if (!template) {
@@ -86,6 +89,8 @@ export function createSubzero(options: SubzeroOptions) {
     try { await opening; } finally { pendingDispatches.delete(opening); }
   };
   const dispatchWorker = async (child: ChildRecord, run: RunRecord, lease: OwnerLease, model: ModelArgs) => {
+    const start = { childId: child.childId, lease, stopRequested: false, runStarted: false };
+    pendingStarts.set(run.runId, start);
     let entry = localWorkers.get(child.childId);
     if (entry?.closed) { localWorkers.delete(child.childId); entry = undefined; }
     if (!entry) {
@@ -97,7 +102,11 @@ export function createSubzero(options: SubzeroOptions) {
           model: child.model, credential: { key: model.key },
         });
       } catch (error) {
-        await settleLocal(child, run, lease, { type: 'failed', code: 'worker_start_failed', message: safeMessage(error, model.key) }, model, undefined, true);
+        const current = await options.store.getRun(child.childId, run.runId);
+        const terminal: WorkerTerminal = shuttingDown || start.stopRequested || current?.status === 'stop_requested'
+          ? { type: 'stopped' }
+          : { type: 'failed', code: 'worker_start_failed', message: safeMessage(error, model.key) };
+        await settleLocal(child, run, lease, terminal, model, undefined, true);
         return;
       }
       let finish!: (exitConfirmed: boolean) => void;
@@ -105,33 +114,32 @@ export function createSubzero(options: SubzeroOptions) {
       entry = { worker, lease, childId: child.childId, key: model.key, closed: false, done, finish };
       localWorkers.set(child.childId, entry);
     }
+    const current = await options.store.getRun(child.childId, run.runId);
+    if (shuttingDown || start.stopRequested || current?.status === 'stop_requested') {
+      const exitConfirmed = await closeEntry(entry);
+      const terminal: WorkerTerminal = exitConfirmed ? { type: 'stopped' } : { type: 'interrupted', code: 'worker_exit_unconfirmed' };
+      await settleLocal(child, run, lease, terminal, model, entry, exitConfirmed);
+      return;
+    }
+    start.runStarted = true;
     void pump(entry, child, run, model);
   };
   const emitWorkerEvent = async (childId: ChildId, runId: RunId, event: WorkerEvent, key: string) => {
     if (event.type === 'completed' || event.type === 'stopped' || event.type === 'failed' || event.type === 'interrupted') return;
     const at = now();
-    if (event.type === 'text') {
-      const text = truncateUtf8(redact(event.text, key), Math.min(limits.eventBytes, 4096));
-      await options.store.appendEvent(childId, { at, childId, runId, type: 'text', text });
-    } else {
-      const name = truncateUtf8(redact(event.name, key), 256);
-      await options.store.appendEvent(childId, { at, childId, runId, type: 'tool', name, state: event.state });
-    }
+    if (event.type === 'text') return;
+    const name = truncateUtf8(redact(event.name, key), 256);
+    await options.store.appendEvent(childId, { at, childId, runId, type: 'tool', name, state: event.state });
   };
   const pump = async (entry: LocalWorker, child: ChildRecord, run: RunRecord, model: ModelArgs) => {
     let terminal: WorkerTerminal | undefined;
-    const redactor = createTextRedactor([model.key]);
-    const emitText = async (text: string) => { if (text) await emitWorkerEvent(child.childId, run.runId, { type: 'text', text }, model.key); };
     try {
       for await (const event of entry.worker.run({ runId: run.runId, prompt: run.prompt, fromCheckpointId: child.lastCompletedLeaf })) {
         if (event.type === 'completed' || event.type === 'stopped' || event.type === 'failed' || event.type === 'interrupted') terminal = event;
-        else if (event.type === 'text') await emitText(redactor.push(event.text));
         else await emitWorkerEvent(child.childId, run.runId, event, model.key);
       }
-      await emitText(redactor.flush());
       if (!terminal) terminal = { type: 'interrupted', code: 'worker_stream_ended' };
     } catch (error) {
-      await emitText(redactor.flush()).catch(() => undefined);
       terminal = { type: 'interrupted', code: 'worker_stream_failed', message: safeMessage(error, model.key) };
     }
     const closed = await closeEntry(entry);
@@ -142,6 +150,7 @@ export function createSubzero(options: SubzeroOptions) {
     const safeTerminal = sanitizeTerminal(terminal, model.key, limits.outputPreviewBytes);
     const ev = terminalToEvent(child.childId, run.runId, safeTerminal, now(), limits.outputPreviewBytes);
     const settled = await options.store.settleRun(child.childId, run.runId, lease.ownerToken, safeTerminal, ev, limits, workerExitConfirmed);
+    pendingStarts.delete(run.runId);
     if (settled.kind === 'stale') {
       if (entry) finishEntry(entry, workerExitConfirmed);
       return;
@@ -205,6 +214,102 @@ export function createSubzero(options: SubzeroOptions) {
       cursor: page.nextCursor, oldestCursor: page.oldestCursor, nextCursor: page.nextCursor, cursorGap: page.cursorGap,
     };
   };
+  const snapshotRun = async (childId: ChildId, runId: RunId, previewLimit: number): Promise<RunSnapshot> => {
+    const run = await options.store.getRun(childId, runId);
+    if (!run) throw new SubzeroError('not_found', 'Run was not found for this child.');
+    return {
+      childId, runId, status: run.status, waitExpired: false,
+      ...(run.result ? { result: { ...run.result, preview: truncateUtf8(run.result.preview, previewLimit) } } : {}),
+      ...(run.errorCode ? { errorCode: run.errorCode } : {}),
+    };
+  };
+  const observeRun = async (childId: ChildId, runId: RunId, waitMs: number, previewLimit: number, signal?: AbortSignal, progress?: RunProgress, startedAt = performance.now()): Promise<RunSnapshot> => {
+    signal?.throwIfAborted();
+    const deadline = startedAt + waitMs;
+    let snapshot = await snapshotRun(childId, runId, previewLimit);
+    if (isTerminal(snapshot.status) || waitMs === 0) return snapshot;
+
+    const controller = new AbortController();
+    const forwardAbort = () => controller.abort();
+    signal?.addEventListener('abort', forwardAbort, { once: true });
+    let iterator: AsyncIterator<ChildEvent> | undefined;
+    try {
+      // Subscribe before the authoritative reread so settlement between the first read and subscription is observed.
+      const stream = await options.store.subscribe(childId, 0, controller.signal);
+      iterator = stream[Symbol.asyncIterator]();
+      snapshot = await snapshotRun(childId, runId, previewLimit);
+      while (!isTerminal(snapshot.status)) {
+        signal?.throwIfAborted();
+        const remaining = deadline - performance.now();
+        if (remaining <= 0) break;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let eventResult: IteratorResult<ChildEvent> | undefined;
+        try {
+          eventResult = await Promise.race([
+            iterator.next(),
+            new Promise<undefined>(resolve => { timer = setTimeout(() => resolve(undefined), remaining); }),
+          ]);
+        } finally { clearTimeout(timer); }
+        signal?.throwIfAborted();
+        if (eventResult?.done && !isTerminal(snapshot.status)) throw new SubzeroError('busy', 'Run observation ended before the run settled.');
+        if (eventResult?.value && eventResult.value.runId === runId && eventResult.value.type !== 'text') {
+          try {
+            const delivery = progress?.(eventResult.value);
+            if (delivery && typeof delivery.then === 'function') void delivery.catch(() => undefined);
+          } catch { /* UI progress cannot affect durable execution or observation. */ }
+        }
+        snapshot = await snapshotRun(childId, runId, previewLimit);
+      }
+    } finally {
+      signal?.removeEventListener('abort', forwardAbort);
+      controller.abort();
+      await iterator?.return?.();
+    }
+    snapshot = await snapshotRun(childId, runId, previewLimit);
+    return { ...snapshot, waitExpired: !isTerminal(snapshot.status) && waitMs > 0 && performance.now() >= deadline };
+  };
+  const admitNewRun = async (input: SpawnInput, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    strictObject(input, ['prompt', 'templateId', 'model', 'workspaceRoot'], 'spawn input');
+    strictObject(input.model, ['url', 'model', 'key', 'api'], 'model');
+    validatePrompt(input?.prompt);
+    validateModel(input?.model);
+    if (typeof input.workspaceRoot !== 'string' || !input.workspaceRoot) throw new SubzeroError('invalid_request', 'workspaceRoot is required.');
+    const snapshot = await templateById(input.templateId);
+    await options.store.putTemplate(snapshot);
+    signal?.throwIfAborted();
+    const childId = options.ids.child();
+    const run = makeRun(childId, input.prompt, 'running', input.model.key);
+    const child: ChildRecord = {
+      childId, workspaceRoot: input.workspaceRoot, state: 'running', templateSnapshot: snapshot,
+      model: modelMetadata(input.model), activeRunId: run.runId, ownerGeneration: 0,
+      createdAt: now(), updatedAt: now(),
+    };
+    const admission = await options.store.createChild(child, run, { at: now(), childId, runId: run.runId, type: 'run_started' }, limits);
+    const lease = ensureNoAdmissionError(admission);
+    if (!lease) throw new SubzeroError('workspace_busy', 'Could not acquire worker ownership.');
+    credentials.set(childId, input.model);
+    const opening = dispatch(child, run, lease, input.model);
+    return { child, run, lease, model: input.model, opening };
+  };
+  const beginNewRun = (input: SpawnInput, signal?: AbortSignal) => {
+    const admission = admitNewRun(input, signal);
+    pendingAdmissions.add(admission);
+    void admission.then(() => pendingAdmissions.delete(admission), () => pendingAdmissions.delete(admission));
+    return admission;
+  };
+  const thisGet = async (childId: ChildId, input: GetInput, signal?: AbortSignal, progress?: RunProgress) => {
+    strictObject(input, ['waitMs', 'cursor', 'eventLimit', 'previewLimit', 'runId'], 'get input');
+    if (input.runId !== undefined) {
+      if (typeof input.runId !== 'string' || !input.runId) throw new SubzeroError('invalid_request', 'runId is required when reading a specific run.');
+      const waitMs = clampInt(input.waitMs, 0, limits.maxWaitMs, 0);
+      const previewLimit = clampInt(input.previewLimit, 0, limits.outputPreviewBytes, limits.outputPreviewBytes);
+      return observeRun(childId, input.runId, waitMs, previewLimit, signal, progress);
+    }
+    return readSnapshot(childId, input, signal);
+  };
+  const getMethod = (async (childId: ChildId, input: GetInput = {}, signal?: AbortSignal, progress?: RunProgress) =>
+    thisGet(childId, input, signal, progress)) as unknown as GetMethod;
   const requiredChild = async (childId: string) => {
     if (typeof childId !== 'string' || !childId) throw new SubzeroError('invalid_request', 'childId is required.');
     const child = await options.store.getChild(childId);
@@ -217,37 +322,28 @@ export function createSubzero(options: SubzeroOptions) {
       const stored = await options.store.listTemplates();
       const available = new Map([...stored, ...templates.values()].map(template => [template.id, template]));
       return {
-        protocolVersion: '0.1', coreVersion: '0.1.0', worker: { ...options.worker, capabilities: [...options.worker.capabilities] },
+        protocolVersion: '0.2', coreVersion: '0.2.0', worker: { ...options.worker, capabilities: [...options.worker.capabilities] },
         templates: [...available.values()].map(template => ({ id: template.id, description: template.description, tools: [...template.tools.map(tool => tool.name), ...template.mcpServers.flatMap(server => server.tools)], skills: template.skills.map(skill => skill.name), mcpServers: template.mcpServers.map(server => server.name), writeCapable: template.writeCapable })),
         configuredModelRefs: [...(options.configuredModelRefs ?? [])], limits: { ...limits },
       };
     },
     async spawn(input: SpawnInput): Promise<{ childId: ChildId; runId: RunId }> {
-      strictObject(input, ['prompt', 'templateId', 'model', 'workspaceRoot'], 'spawn input');
-      strictObject(input.model, ['url', 'model', 'key', 'api'], 'model');
-      validatePrompt(input?.prompt);
-      validateModel(input?.model);
-      if (typeof input.workspaceRoot !== 'string' || !input.workspaceRoot) throw new SubzeroError('invalid_request', 'workspaceRoot is required.');
-      const snapshot = await templateById(input.templateId);
-      await options.store.putTemplate(snapshot);
-      const childId = options.ids.child();
-      const run = makeRun(childId, input.prompt, 'running', input.model.key);
-      const child: ChildRecord = {
-        childId, workspaceRoot: input.workspaceRoot, state: 'running', templateSnapshot: snapshot,
-        model: modelMetadata(input.model), activeRunId: run.runId, ownerGeneration: 0,
-        createdAt: now(), updatedAt: now(),
-      };
-      const admission = await options.store.createChild(child, run, { at: now(), childId, runId: run.runId, type: 'run_started' }, limits);
-      const lease = ensureNoAdmissionError(admission);
-      if (!lease) throw new SubzeroError('workspace_busy', 'Could not acquire worker ownership.');
-      credentials.set(childId, input.model);
-      await dispatch(child, run, lease, input.model);
-      return { childId, runId: run.runId };
+      const admitted = await beginNewRun(input);
+      await admitted.opening;
+      return { childId: admitted.child.childId, runId: admitted.run.runId };
     },
-    async get(childId: ChildId, input: GetInput = {}, signal?: AbortSignal) {
-      strictObject(input, ['waitMs', 'cursor', 'eventLimit', 'previewLimit'], 'get input');
-      return readSnapshot(childId, input, signal);
+    async run(input: SpawnInput & { waitMs?: number; previewLimit?: number }, signal?: AbortSignal, progress?: RunProgress): Promise<RunSnapshot> {
+      const startedAt = performance.now();
+      strictObject(input, ['prompt', 'templateId', 'model', 'workspaceRoot', 'waitMs', 'previewLimit'], 'run input');
+      const waitMs = clampInt(input.waitMs, 0, limits.maxWaitMs, limits.maxWaitMs);
+      const previewLimit = clampInt(input.previewLimit, 0, limits.outputPreviewBytes, limits.outputPreviewBytes);
+      const { waitMs: _waitMs, previewLimit: _previewLimit, ...spawnInput } = input;
+      const admitted = await beginNewRun(spawnInput, signal);
+      // Dispatch owns startup and late-worker cleanup independently of this request's observation lifetime.
+      void admitted.opening.catch(() => undefined);
+      return observeRun(admitted.child.childId, admitted.run.runId, waitMs, previewLimit, signal, progress, startedAt);
     },
+    get: getMethod,
     async list(workspaceRoot?: string): Promise<ChildSummary[]> {
       return (await options.store.listChildren(workspaceRoot)).map(child => ({
         childId: child.childId, workspaceRoot: child.workspaceRoot, state: child.state, model: { ...child.model },
@@ -297,17 +393,27 @@ export function createSubzero(options: SubzeroOptions) {
       const child = await requiredChild(childId);
       if (typeof expectedRunId !== 'string' || !expectedRunId) throw new SubzeroError('invalid_request', 'expectedRunId is required.');
       const entry = localWorkers.get(childId);
+      const pending = pendingStarts.get(expectedRunId);
+      const locallyStarting = pending?.childId === childId ? pending : undefined;
       if (child.activeRunId && child.activeRunId !== expectedRunId) throw new SubzeroError('stale_run', 'expectedRunId does not identify the active run.');
-      if (child.activeRunId === expectedRunId && (!entry || entry.closed)) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
-      const outcome = await options.store.requestStop(childId, expectedRunId, entry?.lease.ownerToken, now());
+      if (child.activeRunId === expectedRunId && (!entry || entry.closed) && !locallyStarting) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
+      const outcome = await options.store.requestStop(childId, expectedRunId, entry?.lease.ownerToken ?? locallyStarting?.lease.ownerToken, now());
       if (outcome.kind === 'stale') throw new SubzeroError('stale_run', 'expectedRunId does not identify the active run.');
       if (outcome.kind === 'busy') throw new SubzeroError('busy', 'Child worker ownership changed before stop admission.');
       if (outcome.kind === 'not_found') throw new SubzeroError('not_found', 'Child session was not found.');
       if (outcome.kind === 'recovery_required') throw new SubzeroError('recovery_required', 'Prior worker termination is unconfirmed.');
       if (outcome.kind === 'already_terminal') return { requested: false, confirmed: true };
-      const stopped = await entry!.worker.stop(expectedRunId);
+      if (locallyStarting) locallyStarting.stopRequested = true;
+      const currentEntry = localWorkers.get(childId);
+      if (!currentEntry || currentEntry.closed) return { requested: true, confirmed: false };
+      const currentStart = pendingStarts.get(expectedRunId);
+      if (currentStart && !currentStart.runStarted) {
+        currentStart.stopRequested = true;
+        return { requested: true, confirmed: false };
+      }
+      const stopped = await currentEntry.worker.stop(expectedRunId);
       if (stopped.confirmed) {
-        const exitConfirmed = await entry!.done;
+        const exitConfirmed = await currentEntry.done;
         return { requested: true, confirmed: exitConfirmed };
       }
       return { requested: true, confirmed: false };
@@ -355,6 +461,7 @@ export function createSubzero(options: SubzeroOptions) {
       return options.artifactReader(artifactId, offset, length);
     },
     async shutdown(): Promise<void> {
+      shuttingDown = true;
       const stopOwnedWorkers = async () => {
         for (const [childId, entry] of [...localWorkers]) {
           if (entry.closed) continue;
@@ -368,6 +475,7 @@ export function createSubzero(options: SubzeroOptions) {
           await entry.done;
         }
       };
+      await Promise.allSettled([...pendingAdmissions]);
       await stopOwnedWorkers();
       await Promise.allSettled([...pendingDispatches]);
       await stopOwnedWorkers();
@@ -422,6 +530,7 @@ function clampInt(value: number | undefined, min: number, max: number, fallback:
   if (!Number.isInteger(value)) throw new SubzeroError('invalid_request', 'Expected an integer option.');
   return Math.max(min, Math.min(max, value));
 }
+function isTerminal(status: RunRecord['status']): boolean { return status === 'completed' || status === 'failed' || status === 'stopped' || status === 'interrupted'; }
 function strictObject(value: unknown, allowedKeys: string[], label: string) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new SubzeroError('invalid_request', `${label} must be an object.`);
   const extras = Object.keys(value).filter(key => !allowedKeys.includes(key));

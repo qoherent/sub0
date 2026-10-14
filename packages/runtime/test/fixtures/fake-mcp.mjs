@@ -5,6 +5,7 @@ if (process.argv[2]) appendFileSync(process.argv[2], 'started\n');
 if (process.argv[2] && process.argv[3] === 'missing-grant') writeFileSync(process.argv[2], String(process.pid));
 const send = value => process.stdout.write(`${JSON.stringify(value)}\n`);
 let initialized = false;
+let pendingCall;
 let buffer = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => {
@@ -27,6 +28,12 @@ process.stdin.on('data', chunk => {
         ...(process.argv[3] === 'missing-grant' ? [] : [{ name: 'allowed_echo', description: 'Echo a short string', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } }]),
         { name: 'unlisted_write', description: 'Must not be exposed', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } },
       ] } });
+    } else if (message.method === 'tools/call' && process.argv[3] === 'wait-cancel') {
+      pendingCall = message.id;
+      appendFileSync(process.argv[2], `call:${message.id}\n`);
+    } else if (message.method === 'notifications/cancelled' && process.argv[3] === 'wait-cancel') {
+      appendFileSync(process.argv[2], `cancelled:${message.params.requestId}\n`);
+      send({ jsonrpc: '2.0', id: pendingCall, result: { content: [{ type: 'text', text: 'cancelled' }], isError: true } });
     } else if (message.method === 'tools/call') {
       const credentialPresent = Boolean(process.env.SUBZERO_MCP_AUTH);
       send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: `mcp:${message.params.arguments.text};credential:${credentialPresent ? process.env.SUBZERO_MCP_AUTH : 'missing'}` }] } });

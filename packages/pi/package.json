@@ -1,6 +1,6 @@
 {
   "name": "@subzero/pi",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "keywords": ["pi-package"],
@@ -22,12 +22,12 @@
     "prepack": "node -e \"Promise.all(process.argv.slice(1).map(p=>require('node:fs/promises').access(p))).catch(()=>{console.error('Build output is missing; run npm run build before packing.');process.exit(1)})\" dist/index.js dist/index.d.ts"
   },
   "dependencies": {
-    "@subzero/runtime": "0.1.0"
+    "@subzero/runtime": "0.2.0"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.4"
+    "@earendil-works/pi-coding-agent": "1.2.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.4"
+    "@earendil-works/pi-coding-agent": "1.2.0"
   }
 }

@@ -77,6 +77,21 @@ test('runtime config loads trusted templates and explicit skill snapshots withou
     assert.deepEqual(config.templates.filter(item => item.id === 'coder').flatMap(item => item.tools.map(tool => tool.name)), ['read', 'grep', 'find', 'ls', 'edit', 'write', 'bash']);
     assert.equal(JSON.stringify(config).includes('secret-value'), false);
     assert.equal(JSON.stringify(config).includes('ambient.md'), false);
+    assert.equal(config.mcpRequestBudgetMs, 30_000);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('runtime config accepts only positive integer MCP request budgets', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-config-budget-'));
+  try {
+    const dataRoot = join(root, 'data'); const workspaceRoot = join(root, 'workspace');
+    await mkdir(dataRoot); await mkdir(workspaceRoot);
+    for (const value of [1, 2500, 30000]) {
+      assert.equal((await loadRuntimeConfig({ dataRoot, workspaceRoot, mcpRequestBudgetMs: value })).mcpRequestBudgetMs, value);
+    }
+    for (const value of [0, -1, 1.5, '30000', 2_147_483_648]) {
+      await assert.rejects(loadRuntimeConfig({ dataRoot, workspaceRoot, mcpRequestBudgetMs: value }), /mcpRequestBudgetMs/i);
+    }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -99,7 +114,7 @@ test('CLI runs when invoked through a symlinked executable path', async () => {
     await symlink(entry, linkedEntry);
     const result = spawnSync(process.execPath, [linkedEntry, '--version'], { encoding: 'utf8', timeout: 5_000 });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, '0.1.0\n');
+    assert.equal(result.stdout, '0.2.0\n');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

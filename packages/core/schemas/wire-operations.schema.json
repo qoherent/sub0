@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:subzero:protocol:0.1:operations",
-  "title": "Subzero v1 host operations",
+  "$id": "urn:subzero:protocol:0.2:operations",
+  "title": "Subzero protocol 0.2 host operations",
   "oneOf": [
-    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/get" },
+    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/run" }, { "$ref": "#/$defs/get" },
     { "$ref": "#/$defs/list" }, { "$ref": "#/$defs/send" }, { "$ref": "#/$defs/stop" },
     { "$ref": "#/$defs/resume" }, { "$ref": "#/$defs/output" }
   ],
@@ -31,12 +31,24 @@
         }
       } }
     },
+    "run": {
+      "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
+      "properties": { "operation": { "const": "subzero_run" }, "arguments": {
+        "type": "object", "additionalProperties": false, "required": ["prompt", "templateId", "model"],
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1 }, "templateId": { "type": "string", "minLength": 1 },
+          "model": { "$ref": "#/$defs/credentialModel" },
+          "waitMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+          "previewLimit": { "type": "integer", "minimum": 0, "maximum": 2048 }
+        }
+      } }
+    },
     "get": {
       "type": "object", "additionalProperties": false, "required": ["operation", "arguments"],
       "properties": { "operation": { "const": "subzero_get" }, "arguments": {
         "type": "object", "additionalProperties": false, "required": ["childId"],
         "properties": {
-          "childId": { "type": "string", "minLength": 1 }, "waitMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
+          "childId": { "type": "string", "minLength": 1 }, "runId": { "type": "string", "minLength": 1 }, "waitMs": { "type": "integer", "minimum": 0, "maximum": 30000 },
           "cursor": { "type": "integer", "minimum": 0 }, "eventLimit": { "type": "integer", "minimum": 1, "maximum": 50 },
           "previewLimit": { "type": "integer", "minimum": 0, "maximum": 2048 }
         }

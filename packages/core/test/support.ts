@@ -143,6 +143,7 @@ export class FakeStore implements Store {
     return { kind: 'started' as const, lease: { ownerToken: token, generation: 1 } };
   }
   async getChild(id: string) { return this.rows.get(id)?.child; }
+  async getRun(id: string, runId: string) { return structuredClone(this.rows.get(id)?.runs.find(run => run.runId === runId)); }
   async listChildren(workspaceRoot?: string) { return [...this.rows.values()].map(row => row.child).filter(child => !workspaceRoot || child.workspaceRoot === workspaceRoot); }
   async putTemplate(template: TemplateDefinition) { this.templates.set(template.id, structuredClone(template)); }
   async getTemplate(id: string) { const template = this.templates.get(id); return template && structuredClone(template); }
@@ -176,6 +177,9 @@ export class FakeStore implements Store {
     if (!row || row.ownerToken !== ownerToken || row.child.activeRunId !== runId) return { kind: 'stale' as const };
     const run = row.runs.find(item => item.runId === runId)!;
     run.status = workerExitConfirmed ? terminal.type : 'interrupted';
+    if (workerExitConfirmed && terminal.type === 'completed') run.result = { artifactId: terminal.artifactId, preview: terminal.preview };
+    if (workerExitConfirmed && (terminal.type === 'failed' || terminal.type === 'interrupted')) run.errorCode = terminal.code;
+    if (!workerExitConfirmed) run.errorCode = 'worker_exit_unconfirmed';
     const effectiveTerminal = workerExitConfirmed ? terminal.type : 'interrupted';
     if (effectiveTerminal !== 'completed') {
       for (const queued of row.queue.splice(0)) {

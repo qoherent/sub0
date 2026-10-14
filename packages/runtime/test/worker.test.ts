@@ -706,6 +706,48 @@ test('MCP bridge launches only the declared stdio server and exposes only its se
   }
 });
 
+test('worker stop forwards cancellation to an in-flight MCP tool call', { timeout: 15_000 }, async () => {
+  const provider = await startFakeProvider({ onRequest(_body, response) { sendToolCall(response, 'allowed_echo', { text: 'wait' }); } });
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-mcp-cancel-'));
+  const wireLog = join(root, 'mcp-wire.log');
+  const runId = 'run-mcp-cancel';
+  let worker: Worker | undefined;
+  let running: Promise<void> | undefined;
+  const events: WorkerEvent[] = [];
+  try {
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')), controlRequestTimeoutMs: 1_000 });
+    worker = await factory.open({
+      childId: 'child-mcp-cancel', workspaceRoot: root,
+      templateSnapshot: { id: 'mcp-reader', description: '', instructions: 'Use the allowed MCP tool.', tools: [], skills: [], mcpServers: [{ name: 'local', command: process.execPath, args: [fileURLToPath(new URL('./fixtures/fake-mcp.mjs', import.meta.url)), wireLog, 'wait-cancel'], tools: ['allowed_echo'], writeCapable: false }], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    running = (async () => { for await (const item of worker!.run({ runId, prompt: 'Call the declared MCP tool.' })) events.push(item); })();
+    const deadline = Date.now() + 5_000;
+    let wire = '';
+    while (Date.now() < deadline && !/^call:/m.test(wire)) {
+      wire = await readFile(wireLog, 'utf8').catch(() => '');
+      if (!/^call:/m.test(wire)) await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    const pendingId = /^call:(.+)$/m.exec(wire)?.[1];
+    assert.ok(pendingId, 'the MCP tool call is pending before stop');
+    const stop = await worker.stop(runId);
+    await running;
+    const finalWire = await readFile(wireLog, 'utf8');
+    assert.match(finalWire, new RegExp(`^cancelled:${pendingId}$`, 'm'), 'the MCP server received cancellation for the pending call');
+    assert.deepEqual(stop, { confirmed: true });
+    assert.equal(events.at(-1)?.type, 'stopped');
+    assert.equal(provider.requests.length, 1, 'no successor provider request after stop');
+  } finally {
+    if (worker) {
+      const closed = await worker.close();
+      await running?.catch(() => undefined);
+      assert.equal(closed.exitConfirmed, true);
+    }
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('a missing granted MCP tool rejects initialization before model execution and reaps the server', async () => {
   const provider = await startFakeProvider();
   const root = await mkdtemp(join(tmpdir(), 'subzero-worker-mcp-missing-'));

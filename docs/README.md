@@ -1,8 +1,12 @@
 # Documentation
 
-- [Reference design](DESIGN.md): System architecture, stack, Mermaid diagram, and capability contract.
-- [Usage](USAGE.md): Local setup, configuration, host settings, and tool examples.
-- [Testing and evidence](TESTING.md): Verification gates, test suite, and live checks.
-- [Plan and implementation record](PLAN.md): Completed milestone record and scope.
-- [Token-efficient subagents plan](PLAN-TOKEN-EFFICIENT-SUBAGENTS.md): Plan for synchronous delegation and reactive background notifications.
-- [Pi SDK experiment](../experiments/pi-sdk/README.md): Worker qualification and SQLite smoke.
+- [Design](DESIGN.md): architecture and behavior contract.
+- [Usage](USAGE.md): setup, configuration and the tool workflow.
+- [Testing](TESTING.md): current verification commands and limits.
+- [Plan](PLAN.md): current status pointer.
+- [Handoff](HANDOFF.md): continuity notes for the next session.
+
+## Historical evidence
+
+- [Implementation report](reports/2026-10-09-token-efficient-subagents-implementation.md): scope, acceptance contract and observed evidence from 2026-10-09.
+- [Benchmark data](reports/2026-10-09-token-efficient-subagents-benchmark.json): synthetic controller-call measurements from that report.

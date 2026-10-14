@@ -28,7 +28,7 @@ export type PiEngineFactoryOptions = {
 
 type WorkerMessage = { type: string; id?: number; [key: string]: unknown };
 type Identity = { pid: number; incarnation: string; runId: string; ownerGeneration?: number; startedAt: string; brokerId: string; brokerIncarnation: string };
-export const PI_WORKER_VERSION = '1.0.4';
+export const PI_WORKER_VERSION = '1.2.0';
 
 /** Owns isolated Pi worker processes and their durable per-child transcripts. */
 export class PiEngineFactory implements EngineFactory {

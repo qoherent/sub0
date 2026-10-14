@@ -1,6 +1,6 @@
 {
   "name": "@subzero/runtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "license": "MIT",
   "engines": { "node": ">=24.15.0" },
@@ -24,9 +24,9 @@
     "prepack": "node -e \"Promise.all(process.argv.slice(1).map(p=>require('node:fs/promises').access(p))).catch(()=>{console.error('Build output is missing; run npm run build before packing.');process.exit(1)})\" dist/index.js dist/index.d.ts dist/cli.js dist/engine/worker-child.js"
   },
   "dependencies": {
-    "@subzero/core": "0.1.0",
-    "@earendil-works/pi-coding-agent": "1.0.4",
-    "@earendil-works/pi-ai": "1.0.4",
+    "@subzero/core": "0.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@modelcontextprotocol/server": "2.3.1",
     "typebox": "1.3.27"

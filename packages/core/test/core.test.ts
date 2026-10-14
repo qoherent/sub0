@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { Value } from 'typebox/value';
 import { createSubzero, createTextRedactor } from '../src/index.ts';
 import { FakeStore, ControlledEngineFactory, ids, template, coder, tooManyTools } from './support.ts';
 
@@ -34,12 +35,240 @@ test('spawn snapshots the template and starts one child run with no persisted cr
   assert.equal((await core.get(created.childId)).activeRunId, created.runId);
 });
 
+test('run returns its exact terminal result and get can retrieve it after a successor starts', async () => {
+  const { core, engine } = setup();
+  const pending = core.run({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  await eventuallyAsync(async () => engine.runs.length === 1);
+  const concurrentRead = core.get('child-1', { runId: 'run-1', waitMs: 500 });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-a', artifactId: 'artifact-a', preview: 'first result' });
+  const first = await pending;
+  assert.deepEqual(first, { childId: 'child-1', runId: 'run-1', status: 'completed', waitExpired: false, result: { artifactId: 'artifact-a', preview: 'first result' } });
+  assert.deepEqual(await concurrentRead, first);
+  assert.deepEqual(await core.get(first.childId, { runId: first.runId }), first);
+});
+
+test('run deadline returns identity during pending open; abort does not stop and shutdown closes the late worker', async () => {
+  const { core, engine } = setup();
+  const originalOpen = engine.open.bind(engine);
+  let releaseOpen!: () => void;
+  let signalOpen!: () => void;
+  let closeCalls = 0;
+  const openGate = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const openStarted = new Promise<void>(resolve => { signalOpen = resolve; });
+  engine.open = async input => {
+    signalOpen();
+    await openGate;
+    const worker = await originalOpen(input);
+    return { ...worker, close: async () => { closeCalls++; return worker.close(); } };
+  };
+  const controller = new AbortController();
+  const pending = core.run({ prompt: 'slow start', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 5 }, controller.signal);
+  const snapshot = await pending;
+  assert.deepEqual(snapshot, { childId: 'child-1', runId: 'run-1', status: 'running', waitExpired: true });
+  controller.abort();
+  assert.equal((await core.get(snapshot.childId, { runId: snapshot.runId })).status, 'running');
+  let shutdownFinished = false;
+  const shutdown = core.shutdown().then(() => { shutdownFinished = true; });
+  try {
+    await openStarted;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(shutdownFinished, false, 'shutdown keeps responsibility for the accepted worker while open is pending');
+    releaseOpen();
+    await shutdown;
+  } finally {
+    releaseOpen();
+    await shutdown;
+  }
+  assert.equal(engine.runs.length, 0, 'shutdown prevents the late-opened worker from entering worker.run');
+  assert.equal(closeCalls, 1, 'shutdown closes the late-opened worker');
+  await eventuallyAsync(async () => (await core.get(snapshot.childId, { runId: snapshot.runId })).status === 'stopped');
+});
+
+test('explicit stop accepted during worker initialization prevents worker.run and reaps the late worker', async () => {
+  const { core, engine } = setup();
+  const originalOpen = engine.open.bind(engine);
+  let releaseOpen!: () => void;
+  let signalOpen!: () => void;
+  let closeCalls = 0;
+  const openGate = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const openStarted = new Promise<void>(resolve => { signalOpen = resolve; });
+  engine.open = async input => {
+    signalOpen();
+    await openGate;
+    const worker = await originalOpen(input);
+    return { ...worker, close: async () => { closeCalls++; return worker.close(); } };
+  };
+  const pending = core.run({ prompt: 'must not execute', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  try {
+    await openStarted;
+    assert.deepEqual(await core.stop('child-1', 'run-1'), { requested: true, confirmed: false });
+    releaseOpen();
+    const result = await pending;
+    assert.equal(result.status, 'stopped');
+    assert.equal(engine.runs.length, 0, 'stopped pending work never enters worker.run');
+    assert.equal(closeCalls, 1, 'the opened worker is reaped without running');
+  } finally {
+    releaseOpen();
+    await pending.catch(() => undefined);
+  }
+});
+
+test('shutdown preserves interrupted recovery when a late worker cannot confirm close', async () => {
+  const { core, engine } = setup();
+  engine.failClose = true;
+  const originalOpen = engine.open.bind(engine);
+  let releaseOpen!: () => void;
+  let signalOpen!: () => void;
+  let closeCalls = 0;
+  const openGate = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const openStarted = new Promise<void>(resolve => { signalOpen = resolve; });
+  engine.open = async input => {
+    signalOpen();
+    await openGate;
+    const worker = await originalOpen(input);
+    return { ...worker, close: async () => { closeCalls++; return worker.close(); } };
+  };
+  const pending = core.run({ prompt: 'uncertain late close', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 5 });
+  const snapshot = await pending;
+  assert.equal(snapshot.waitExpired, true);
+  const shutdown = core.shutdown();
+  try {
+    await openStarted;
+    releaseOpen();
+    await shutdown;
+  } finally {
+    releaseOpen();
+    await shutdown;
+  }
+  assert.equal(engine.runs.length, 0, 'shutdown never starts the worker when closing a late open');
+  assert.equal(closeCalls, 1, 'shutdown attempts to close the late worker');
+  assert.equal((await core.get(snapshot.childId, { runId: snapshot.runId })).status, 'interrupted');
+  await assert.rejects(core.resume(snapshot.childId, args), { code: 'recovery_required' });
+});
+
+test('accepted run observation abort leaves its worker running until explicit stop', async () => {
+  const { core, engine, store } = setup();
+  let signalSubscribed!: () => void;
+  const subscribed = new Promise<void>(resolve => { signalSubscribed = resolve; });
+  const originalSubscribe = store.subscribe.bind(store);
+  store.subscribe = async (...args) => { const value = await originalSubscribe(...args); signalSubscribed(); return value; };
+  const controller = new AbortController();
+  const pending = core.run({ prompt: 'abort observation', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 10_000 }, controller.signal);
+  await eventuallyAsync(async () => engine.runs.length === 1);
+  await subscribed;
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal(engine.runs[0]!.stopCalls, 0);
+  assert.equal((await core.get('child-1', { runId: 'run-1' })).status, 'running');
+  await core.stop('child-1', 'run-1');
+});
+
+test('run reports an elapsed positive deadline after delayed admission commits', async () => {
+  const { core, store, engine } = setup();
+  let releaseCreate!: () => void;
+  let signalCreate!: () => void;
+  const gate = new Promise<void>(resolve => { releaseCreate = resolve; });
+  const started = new Promise<void>(resolve => { signalCreate = resolve; });
+  const originalCreate = store.createChild.bind(store);
+  store.createChild = async (...args) => { signalCreate(); await gate; return originalCreate(...args); };
+  const pending = core.run({ prompt: 'slow admission', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 5 });
+  await started;
+  await new Promise(resolve => setTimeout(resolve, 15));
+  releaseCreate();
+  const snapshot = await pending;
+  assert.deepEqual(snapshot, { childId: 'child-1', runId: 'run-1', status: 'running', waitExpired: true });
+  assert.equal(engine.runs.length, 1);
+  await core.stop(snapshot.childId, snapshot.runId);
+});
+
+test('run progress reports only safe non-text milestones and cannot break the wait', async () => {
+  const { core, engine } = setup();
+  const seen: string[] = [];
+  const pending = core.run({ prompt: 'progress', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 }, undefined, event => {
+    seen.push(event.type);
+    throw new Error('broken host progress callback');
+  });
+  await eventuallyAsync(async () => engine.runs.length === 1);
+  engine.runs[0]!.emit({ type: 'text', text: 'private transcript text' });
+  engine.runs[0]!.emit({ type: 'tool', name: 'read_file', state: 'started' });
+  engine.runs[0]!.complete({ checkpointId: 'leaf', artifactId: 'artifact', preview: 'done' });
+  const result = await pending;
+  assert.equal(result.status, 'completed');
+  assert.equal(result.waitExpired, false);
+  assert.deepEqual(seen, ['run_started', 'tool', 'completed']);
+});
+
+test('run rejects unknown child and mismatched run without exposing another result', async () => {
+  const { core } = setup();
+  await assert.rejects(core.get('missing', { runId: 'run-x' }), { code: 'not_found' });
+  const first = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  const second = await core.spawn({ prompt: 'second', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  await assert.rejects(core.get(second.childId, { runId: first.runId }), { code: 'not_found' });
+});
+
+test('run-specific reads keep the prior result while an immediate successor runs', async () => {
+  const { core, engine } = setup();
+  const firstPending = core.run({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  await eventuallyAsync(async () => engine.runs.length === 1);
+  const successor = await core.send('child-1', { mode: 'followup', message: 'next' });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-first', artifactId: 'artifact-first', preview: 'first result' });
+  const first = await firstPending;
+  await eventuallyAsync(async () => engine.runs.length === 2);
+  const reread = await core.get(first.childId, { runId: first.runId, waitMs: 500 });
+  assert.equal(reread.status, 'completed');
+  assert.equal(reread.result?.artifactId, 'artifact-first');
+  assert.equal((await core.get(first.childId)).activeRunId, successor.runId);
+  await core.stop(first.childId, successor.runId);
+});
+
+test('run returns the stored failure and zero-wait reads never mark expiry', async () => {
+  const { core, engine } = setup();
+  const pending = core.run({ prompt: 'will fail', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  await eventuallyAsync(async () => engine.runs.length === 1);
+  engine.runs[0]!.fail('provider_error', 'failed');
+  const result = await pending;
+  assert.equal(result.status, 'failed');
+  assert.equal(result.errorCode, 'provider_error');
+  const immediate = await core.get(result.childId, { runId: result.runId, waitMs: 0 });
+  assert.equal(immediate.waitExpired, false);
+});
+
+test('run snapshots report stopped and interrupted outcomes without a prior result', async () => {
+  const stoppedSetup = setup();
+  const stoppedPending = stoppedSetup.core.run({ prompt: 'stop me', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  await eventuallyAsync(async () => stoppedSetup.engine.runs.length === 1);
+  await stoppedSetup.core.stop('child-1', 'run-1');
+  const stopped = await stoppedPending;
+  assert.equal(stopped.status, 'stopped');
+  assert.equal(stopped.result, undefined);
+
+  const interruptedSetup = setup();
+  interruptedSetup.engine.failClose = true;
+  const interruptedPending = interruptedSetup.core.run({ prompt: 'uncertain exit', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 });
+  await eventuallyAsync(async () => interruptedSetup.engine.runs.length === 1);
+  interruptedSetup.engine.runs[0]!.complete({ checkpointId: 'leaf', artifactId: 'should-not-be-success', preview: 'no' });
+  const interrupted = await interruptedPending;
+  assert.equal(interrupted.status, 'interrupted');
+  assert.equal(interrupted.errorCode, 'worker_exit_unconfirmed');
+  assert.equal(interrupted.result, undefined);
+});
+
+test('abort before admission commits no child or worker', async () => {
+  const { core, engine, store } = setup();
+  const controller = new AbortController();
+  const pending = core.run({ prompt: 'cancel before acceptance', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 500 }, controller.signal);
+  controller.abort();
+  await assert.rejects(pending, { name: 'AbortError' });
+  assert.equal((await store.dump()).length, 0);
+  assert.equal(engine.opened.length, 0);
+});
+
 test('info and list expose safe metadata and output reads are bounded chunks', async () => {
   const reader = async (artifactId: string, offset: number, length: number) => ({ artifactId, offset, text: 'chunk'.slice(0, length), nextOffset: offset + Math.min(5, length), eof: true });
   const { core } = setup({}, [template], reader);
   const created = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
   const info = await core.info();
-  assert.equal(info.protocolVersion, '0.1');
+  assert.equal(info.protocolVersion, '0.2');
   assert.equal(JSON.stringify(info).includes(args.key), false);
   assert.deepEqual(info.templates.map(item => item.id), ['researcher']);
   const rows = await core.list('/repo');
@@ -55,17 +284,31 @@ test('wire schemas parse and use credential references rather than raw keys', as
   const responseSchema = JSON.parse(await readFile(new URL('../schemas/wire-responses.schema.json', import.meta.url), 'utf8'));
   const templateSchema = JSON.parse(await readFile(new URL('../schemas/templates.schema.json', import.meta.url), 'utf8'));
   const fixture = JSON.parse(await readFile(new URL('../conformance/valid-spawn.json', import.meta.url), 'utf8'));
+  const runFixture = JSON.parse(await readFile(new URL('../conformance/valid-run.json', import.meta.url), 'utf8'));
+  const runSnapshots = JSON.parse(await readFile(new URL('../conformance/run-snapshots.json', import.meta.url), 'utf8')) as Array<{ status: string; waitExpired: boolean; [key: string]: unknown }>;
+  for (const snapshot of runSnapshots) assert.equal(Value.Check(responseSchema, snapshot), true, JSON.stringify(snapshot));
   assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
   assert.equal(responseSchema.$schema, schema.$schema);
   assert.equal(templateSchema.$schema, schema.$schema);
   assert.deepEqual(Object.keys(schema.$defs.credentialModel.properties).sort(), ['api', 'credentialRef', 'model', 'url']);
   assert.equal(schema.$defs.spawn.properties.arguments.required.includes('workspaceRoot'), false);
   assert.equal('workspaceRoot' in schema.$defs.spawn.properties.arguments.properties, false);
-  assert.equal(schema.$id, 'urn:subzero:protocol:0.1:operations');
-  assert.equal(responseSchema.$id, 'urn:subzero:protocol:0.1:responses');
+  assert.deepEqual(schema.$defs.run.properties.arguments.required, ['prompt', 'templateId', 'model']);
+  assert.deepEqual(Object.keys(schema.$defs.get.properties.arguments.properties).sort(), ['childId', 'cursor', 'eventLimit', 'previewLimit', 'runId', 'waitMs']);
+  assert.equal(schema.$defs.get.properties.arguments.properties.runId.minLength, 1);
+  assert.equal(responseSchema.$defs.runSnapshot.properties.waitExpired.type, 'boolean');
+  assert.equal(schema.$id, 'urn:subzero:protocol:0.2:operations');
+  assert.equal(responseSchema.$id, 'urn:subzero:protocol:0.2:responses');
   assert.equal(templateSchema.$id, 'urn:subzero:protocol:0.1:templates');
   assert.equal(fixture.arguments.model.credentialRef, 'MODEL_KEY');
   assert.equal('key' in fixture.arguments.model, false);
+  assert.equal(runFixture.operation, 'subzero_run');
+  assert.equal(runFixture.arguments.model.credentialRef, 'MODEL_KEY');
+  assert.equal('key' in runFixture.arguments.model, false);
+  assert.deepEqual(runSnapshots.map(snapshot => snapshot.status), ['completed', 'running', 'failed', 'stopped', 'interrupted']);
+  assert.equal(runSnapshots[1]?.waitExpired, true);
+  assert.ok(runSnapshots.every(snapshot => Object.keys(snapshot).every(key => ['childId', 'runId', 'status', 'waitExpired', 'result', 'errorCode'].includes(key))));
+  assert.ok(runSnapshots.filter(snapshot => snapshot.status === 'completed').every(snapshot => JSON.stringify(snapshot.result).includes('artifact-a')));
   const { core } = setup();
   await assert.rejects(core.spawn({ prompt: 'host injects root', templateId: 'researcher', model: args } as never), { code: 'invalid_request' });
 });
@@ -252,7 +495,7 @@ test('shutdown stops owned workers and clears their queued followups', async () 
   assert.equal((await core.get(child.childId)).state, 'ready');
 });
 
-test('shutdown waits for an EngineFactory.open already admitted before it closes workers', async () => {
+test('shutdown prevents an already-admitted pending EngineFactory.open from starting execution', async () => {
   const { core, engine, store } = setup();
   const originalOpen = engine.open.bind(engine);
   let releaseOpen!: () => void;
@@ -273,8 +516,36 @@ test('shutdown waits for an EngineFactory.open already admitted before it closes
     await shutdown;
     await core.shutdown();
   }
-  assert.equal(engine.runs[0]?.stopCalls, 1);
+  assert.equal(engine.runs.length, 0, 'shutdown does not start a worker after waiting for the admitted open');
   assert.equal((await store.getChild('child-1'))?.state, 'ready');
+});
+
+test('shutdown prevents execution when a pending admission resolves after shutdown begins', async () => {
+  const { core, engine, store } = setup();
+  const originalCreateChild = store.createChild.bind(store);
+  let releaseCreate!: () => void;
+  let signalCreate!: () => void;
+  const createGate = new Promise<void>(resolve => { releaseCreate = resolve; });
+  const createStarted = new Promise<void>(resolve => { signalCreate = resolve; });
+  store.createChild = async (...input) => {
+    signalCreate();
+    await createGate;
+    return originalCreateChild(...input);
+  };
+  const spawning = core.spawn({ prompt: 'pending admission during shutdown', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  await createStarted;
+  const shutdown = core.shutdown();
+  try {
+    releaseCreate();
+    const child = await spawning;
+    await shutdown;
+    assert.equal(engine.runs.length, 0, 'an admission resolving during shutdown never enters worker.run');
+    assert.equal((await core.get(child.childId)).state, 'ready');
+  } finally {
+    releaseCreate();
+    await spawning.catch(() => undefined);
+    await shutdown;
+  }
 });
 
 test('resume without a message validates and stores credentials but starts no run; message resumes at last completed leaf', async () => {
@@ -349,7 +620,7 @@ test('a broker with cached credentials cannot send after another broker commits 
 test('get reports a cursor gap and bounds its event batch and output preview', async () => {
   const { core, store, engine } = setup();
   const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
-  for (let i = 0; i < 8; i++) engine.runs[0]!.emit({ type: 'text', text: `chunk-${i}` });
+  for (let i = 0; i < 8; i++) engine.runs[0]!.emit({ type: 'tool', name: `tool-${i}`, state: 'finished' });
   await eventuallyAsync(async () => (await store.dump())[0]?.events.length === 9);
   await store.pruneEvents(child.childId, 4);
   engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'x'.repeat(2000) });
@@ -382,9 +653,10 @@ test('subscribe starts after its cursor and receives later events', async () => 
   const iterator = core.subscribe(child.childId, 0)[Symbol.asyncIterator]();
   await iterator.next(); // The initial run_started event is sequence 1.
   engine.runs[0]!.emit({ type: 'text', text: 'hello' });
+  engine.runs[0]!.emit({ type: 'tool', name: 'read_file', state: 'started' });
   const next = await iterator.next();
-  assert.equal(next.value?.type, 'text');
-  assert.equal(next.value?.text, 'hello');
+  assert.equal(next.value?.type, 'tool');
+  assert.equal(next.value?.type === 'tool' && next.value.name, 'read_file');
   await iterator.return?.();
 });
 
@@ -447,24 +719,20 @@ test('provider failure text containing the in-memory model key is redacted', asy
   assert.equal(persisted.includes('[REDACTED]'), true);
 });
 
-test('audit: a model key split across two text events is redacted from persisted and returned text', async () => {
+test('audit: worker text is not persisted as orchestration events while terminal output remains redacted', async () => {
   const { core, store, engine } = setup();
   const child = await core.spawn({ prompt: 'first', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
-  const split = 6;
-  engine.runs[0]!.emit({ type: 'text', text: `before ${args.key.slice(0, split)}` });
-  engine.runs[0]!.emit({ type: 'text', text: `${args.key.slice(split)} after` });
-  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'done' });
+  engine.runs[0]!.emit({ type: 'text', text: `provider echoed ${args.key}` });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: `result ${args.key}` });
   await eventuallyAsync(async () => (await core.get(child.childId)).state === 'ready');
-  const persisted = (await store.dump()).flatMap(row => row.events).flatMap(event => event.type === 'text' ? [event.text] : []).join('');
-  assert.equal(persisted.includes(args.key), false, `persisted text exposed the key: ${persisted}`);
+  const persistedEvents = (await store.dump()).flatMap(row => row.events);
+  assert.equal(persistedEvents.some(event => event.type === 'text'), false);
+  const persisted = JSON.stringify(await store.dump());
+  assert.equal(persisted.includes(args.key), false);
   assert.match(persisted, /\[REDACTED\]/);
-  assert.match(persisted, /before/);
-  assert.match(persisted, /after/);
-  const read = (await core.get(child.childId, { cursor: 0 })).events.flatMap(event => event.type === 'text' ? [event.text] : []).join('');
-  assert.equal(read.includes(args.key), false, `returned text exposed the key: ${read}`);
+  const read = JSON.stringify(await core.get(child.childId, { cursor: 0 }));
+  assert.equal(read.includes(args.key), false);
   assert.match(read, /\[REDACTED\]/);
-  assert.match(read, /before/);
-  assert.match(read, /after/);
 });
 
 test('audit: template instructions plus resolved skill contents are bounded by instructionBytes in UTF-8', () => {
@@ -620,7 +888,7 @@ test('audit: a get that wakes early leaves no pending wait timeout', async () =>
     const baseline = activeTimeouts();
     const waiting = core.get(child.childId, { waitMs: 30_000, cursor: 1 });
     await new Promise(resolve => setTimeout(resolve, 50));
-    engine.runs[0]!.emit({ type: 'text', text: 'wake' });
+    engine.runs[0]!.emit({ type: 'tool', name: 'wake', state: 'started' });
     const snapshot = await waiting;
     assert.ok(snapshot.events.length > 0);
     await new Promise(resolve => setTimeout(resolve, 20));

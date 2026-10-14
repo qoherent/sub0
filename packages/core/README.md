@@ -1,6 +1,6 @@
 # @subzero/core
 
-The dependency-free TypeScript reference implementation for Subzero v1. It owns child and run state transitions, admission limits, followup queues, event cursors, and public request validation. The normative host wire schemas are in `schemas/`; they use `credentialRef`. The trusted core `ModelArgs` type uses a literal `key` only in process memory.
+The dependency-free TypeScript reference implementation for Subzero protocol 0.2 (package version 0.2.0). It owns child and run state transitions, admission limits, followup queues, event cursors, and public request validation. The normative host wire schemas are in `schemas/`; they use `credentialRef`. The trusted core `ModelArgs` type uses a literal `key` only in process memory.
 
 ## Runtime seams
 
@@ -23,3 +23,5 @@ The Store persists `ModelMetadata`, not `ModelArgs`. Trusted native callers must
 An `open()` rejection must mean no worker was started or its exit was confirmed. If cleanup cannot confirm exit, return a failed worker handle whose `close()` reports `exitConfirmed: false`, so ownership remains held for recovery.
 
 The core owns followup queues. The Worker/Pi adapter must not add a second queue. The next run starts from the last completed checkpoint in a newly opened worker after the previous worker exits. Cross-broker get/list are supported; send/stop against another broker's live worker return `busy` because v1 has no control daemon.
+
+The public core call is `run(input: SpawnInput & { waitMs?: number; previewLimit?: number }, signal?, progress?)`. It dispatches once and observes that run for a bounded interval (30 seconds by default). Its compact snapshot contains only the requested run's identity, state, wait-expiry flag, result, or error code. `get(childId, { runId, waitMs?, previewLimit? }, signal?, progress?)` observes that exact run and defaults to an immediate read; child-only `get` remains the explicit state/event inspection path. Request abort releases observation without stopping accepted work. New worker text does not create persisted per-token event rows; the worker transcript and completed artifact remain the output record.

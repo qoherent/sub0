@@ -1,203 +1,78 @@
-# Subzero v0.1 reference design and implemented behavior
+# Subzero design and behavior contract
 
-Status: the selected v0.1 architecture has a working TypeScript implementation with security hardening. Current regressions, verification receipts, official version sources and unresolved design risks are in [testing evidence](TESTING.md). The worker remains Pi SDK 1.0.4; Pi 1.0.4 and 1.1.0 hosts have been exercised. Other host workflows and operating systems remain untested. Process exit evidence covers ordinary descendants in the worker process group on Linux; detached or daemonized new sessions are outside that guarantee. This shared-workspace design is not an OS sandbox. See [testing evidence](TESTING.md).
-
-## 1. Responsibility boundaries
-
-Subzero is a host-facing delegation layer. The parent agent calls Subzero tools through the host adapter. It is not a second host conversation, an external CLI provider catalog, or an ACP host facade.
-
-Host session: parent conversation, transcript, model, and UI. Owned by Codex, Pi, Claude Code, OpenCode, or another host.
-
-Child session: persistent child-agent conversation with a stable childId, template snapshot, workspace scope, model choice, and worker-owned transcript.
-
-Run: one attempt to process a prompt in a child session, with a stable runId, status, result, and events.
-
-Architecture:
+Subzero is a host-neutral, local MCP service for delegating work to persistent child sessions. Protocol 0.2 and package version 0.2.0 are current; the separate template schema remains 0.1. Hosts keep their own parent conversation. Subzero is not an ACP facade, a provider catalog or a sandbox. Current verification is in [TESTING.md](TESTING.md); [earlier implementation evidence](reports/2026-10-09-token-efficient-subagents-implementation.md) is historical.
 
 ```mermaid
-flowchart TB
-  subgraph HOSTS["1. Host Layer (Parent Sessions)"]
-    Hosts["<b>Parent Coding Agents</b>: Pi Agent &bull; Codex CLI &bull; Claude Code &bull; OpenCode<br/><i>Parent conversation & context window retained</i>"]
-  end
-
-  subgraph TRANSPORT["2. Transport Layer (Local MCP Stdio)"]
-    Broker["<code>@subzero/runtime</code> CLI Broker<br/><i>Single local stdio process per active host session</i>"]
-  end
-
-  subgraph METHODS["Subagent Lifecycle Methods (MCP Tools)"]
-    direction TB
-    M_Info["<b>Discovery</b>: <code>subzero_info</code> (metadata) &bull; <code>subzero_list</code> (sessions)"]
-    M_Spawn["<b>1. Spawn</b>: <code>subzero_spawn</code> (initialize child session & prompt run)"]
-    M_Loop["<b>2. Interact & Observe</b>: <code>subzero_send</code> (steer/followup) &bull; <code>subzero_get</code> (poll/cursor)"]
-    M_Result["<b>3. Results & Control</b>: <code>subzero_output</code> (artifacts) &bull; <code>subzero_stop</code> (cancel/reap)"]
-    M_Recover["<b>4. Recovery</b>: <code>subzero_resume</code> (branch completed leaf from checkpoint)"]
-    M_Info --> M_Spawn --> M_Loop --> M_Result --> M_Recover
-  end
-
-  subgraph CORE["3. Core Orchestration Layer (@subzero/core)"]
-    CoreEngine["State Machine & Admission Guard <i>(Ready / Running / Interrupted)</i><br/>Followup Queues & Monotonic Event Cursors<br/>Immutable Templates <i>(researcher / coder)</i>"]
-  end
-
-  subgraph RUNTIME["4. Runtime & Persistence Layer (@subzero/runtime)"]
-    RuntimeEngine["SQLite Storage (node:sqlite) — Atomic Txns & Monotonic Generations<br/>In-Memory Credential Resolver <i>(RAM only, never on disk)</i><br/>Local Disk Artifact Storage <i>(Bounded result files)</i>"]
-  end
-
-  subgraph WORKER["5. Execution Layer (Isolated Pi SDK 1.0.4 Worker)"]
-    WorkerProc["Supervised Worker Process Group <i>(Runs ONLY during active work)</i><br/>Private Child Transcript <i>(Never leaks to parent context)</i><br/>Least-Privilege Tools <i>(Exact grants; zero ambient host tools)</i>"]
-  end
-
-  subgraph EDGES["⚡ What Edges Us (Security & Architectural Boundaries)"]
-    direction TB
-    E1["🛡️ <b>Clean Separate Conversations</b>: Parent context never polluted; private child transcript"]
-    E2["🔒 <b>Stateful Stream Redaction</b>: Intercepts keys across tokens, args, & property keys"]
-    E3["⚡ <b>SQLite Generation Guarding</b>: Monotonic generations prevent multi-broker split-brain"]
-    E4["🛑 <b>Process Group Confinement</b>: Stdio EOF / SIGKILL reaps worker & shell children within 5s"]
-    E5["🎯 <b>Zero Ambient Grants</b>: No host tools, skills, or environment secrets leaked to child"]
-    E1 ~~~ E2 ~~~ E3 ~~~ E4 ~~~ E5
-  end
-
-  Hosts -->|MCP Stdio| Broker
-  Broker --> M_Info
-  M_Recover --> CoreEngine
-  CoreEngine --> RuntimeEngine
-  RuntimeEngine -->|Supervised Process Fork| WorkerProc
-  WorkerProc -.->|Guarded by| EDGES
+flowchart LR
+  Host["Host: parent session<br/>(Pi extension or other MCP client)"]
+  Runtime["@subzero/runtime<br/>MCP stdio server, SQLite, artifacts,<br/>credential-reference resolver"]
+  Core["@subzero/core<br/>state machine, admission,<br/>queues, event cursors"]
+  Worker["Pi SDK worker process<br/>one per active child, own transcript"]
+  Host -->|MCP over stdio| Runtime
+  Runtime --> Core
+  Runtime -->|supervised process group| Worker
 ```
 
-The host owns the parent conversation. Subzero owns child identity, run routing, queues, state, metadata, and event cursors. The worker owns its model loop, transcript/checkpoint, and child tool execution.
+## 1. Ownership
 
-## 2. Host transport and process ownership
+- Host: parent conversation, transcript, model and UI.
+- `@subzero/core`: child and run identity, state transitions, admission limits, follow-up queues, event cursors and request validation. It imports no Node, Pi, MCP SDK or SQLite package.
+- `@subzero/runtime`: MCP stdio server, Node 24.15+ `node:sqlite` store, artifacts, credential resolution and the Pi worker adapter.
+- Worker: the model loop, the durable child transcript and checkpoint, and child tool execution. Worker and SDK types stay private to the runtime adapter.
+- `@subzero/pi`: registers the runtime through Pi's `registerMcpServer` and adds one bounded static `subzero_delegation` guide section before agent start. It imports neither SQLite nor the worker SDK and adds no native tool registry.
 
-Use one local MCP stdio process per active host MCP client/process. Codex, Claude Code, and OpenCode configure the same executable. The Pi package uses the documented registerMcpServer API to register that executable for its session; it does not implement a second native tool set or registry.
+One broker process runs per active host MCP client; there is no daemon or listening port. Core requests worker closure before committing that run's terminal outcome. Confirmed exit permits settlement or a queued successor opening from the completed checkpoint; idle settled children remain ready. Unconfirmed exit retains ownership for recovery. Workers do not detach. Control-pipe EOF cancels the run and tears down ordinary descendants in the worker process group.
 
-No global daemon or HTTP listener in v1. The host starts/stops its MCP process. Each broker process owns the live child-worker process handles it created. A worker process exists only while that child has active or queued runs; after all runs settle it closes, releasing memory and the writer slot while the durable child session remains ready. Control-pipe EOF cancels the run and kills the worker/tool subprocess tree. Workers must not detach.
+## 2. Operations and runs
 
-On clean broker shutdown, request stop for active runs, clear queued follow-ups, wait for worker termination, and persist stopped/interrupted state. On broker crash, the worker observes EOF and tears down its tool subtree. Another broker may claim the child only after exclusive ownership is released and worker termination is confirmed. If that cannot be confirmed, return busy/recovery_required; do not start a second transcript writer.
+The nine MCP tools are `subzero_info`, `subzero_spawn`, `subzero_run`, `subzero_get`, `subzero_list`, `subzero_send`, `subzero_stop`, `subzero_resume` and `subzero_output`. There is no delete tool.
 
-Child IDs are persisted under a canonical OS-user/workspace scope, not a host-specific session ID. A restarted host can list and resume by childId. Hosts do not need to share their own conversation IDs.
+Run states are `queued`, `running`, `stop_requested`, `stopped`, `completed`, `failed` and `interrupted`; interrupted means execution ended without a confirmed terminal result. A child is `ready`, `running` or `interrupted`.
 
-## 3. Package boundaries
+- `spawn` creates a new child and its initial run and returns their IDs. `list` returns the workspace's children. `output` reads a stored result in bounded UTF-8 chunks. Core also exposes native `subscribe` for adapters that can consume an async iterator. The normative wire shapes are in [wire-operations.schema.json](../packages/core/schemas/wire-operations.schema.json) and [wire-responses.schema.json](../packages/core/schemas/wire-responses.schema.json); TypeScript types are in [types.ts](../packages/core/src/types.ts).
+- `run` dispatches one run and waits up to `waitMs`, default 30 seconds. Run-specific `get` with `runId` defaults to zero wait. Both return a bounded snapshot of exactly the requested run: `childId`, `runId`, `status`, `waitExpired`, and a result or error code when available.
+- A wait expiry or request abort only ends observation. It never stops accepted work; explicit `subzero_stop` does.
+- Child-only `get` (no `runId`) returns child state and a bounded event batch. Its result is the child's latest result and can belong to an earlier run, so it is not the outcome of any particular run.
+- `stop` requires `expectedRunId`; a mismatch returns `stale_run` without effect. A match clears queued follow-ups and sets `stop_requested`; `stopped` is set only after cancellation and process-group exit are confirmed.
+- `send` takes `steer` (active run only; rejected as unsupported if the worker lacks steering) or `followup` (queues while busy, starts when idle).
+- `resume` without a message validates credentials and the exact checkpoint and returns a ready child. With a message it starts a fresh run from the last completed leaf. Interrupted prompts and effects are never replayed automatically.
 
-- @subzero/core: language-neutral JSON Schemas/conformance fixtures plus TypeScript reference orchestration, state transitions, limits, queues, event cursor logic. No Node, Pi, MCP SDK, SQLite, ACP, or worker package imports.
-- @subzero/runtime: MCP stdio server, Node 24.15+ SQLite storage adapter, per-child Pi SDK worker process, event/result normalization, host-secret-reference resolution.
-- @subzero/pi: thin Pi extension package. Registers @subzero/runtime with pi.registerMcpServer and optional command aliases. Imports neither SQLite nor the worker SDK.
+The MCP work budget `mcpRequestBudgetMs` defaults to 30000, must be a positive integer up to 2147483647, and should sit below the host request timeout. It bounds request work, not worker execution.
 
-The worker dependency is exact-pinned to Pi SDK 1.0.4. No wildcard host or worker compatibility claim. Publish a tested-version table for each host adapter. Reject an incompatible worker transcript/session version; do not perform best-effort mutation across versions.
+## 3. Models and credentials
 
-## 4. Public JSON contract and reference API
+Callers supply the model URL, model name, optional API protocol and a `credentialRef` explicitly on spawn and on explicit resume. The API protocol defaults to `openai-completions`; there is no URL-based inference and no advertised provider catalog. The runtime resolves a configured reference to key material in memory only for listed origins, and the core receives the literal key in process memory. Configured keys are redacted before persistence, and runtime credential resolution rejects a known key placed in a model URL. Native callers must supply secret-free metadata. Redaction covers configured secrets, not every secret reachable by the OS user. A missing reference returns `credentials_required`. After a broker restart the host must call `resume` with a credential reference before sending more work.
 
-The normative contract is a versioned JSON Schema set plus documented state/capability semantics. It is independent of TypeScript and can be implemented by non-JavaScript hosts. The TypeScript reference API is illustrative. Ship conformance fixtures with the schemas.
+`subzero_info` returns `protocolVersion`, `coreVersion`, the worker name, version and capabilities, the available templates, `configuredModelRefs` and limits. It is not a host-compatibility or provider-API catalog.
 
-Core reference values:
+## 4. Templates and grants
 
-    type TemplateId = string;
-    type ModelArgs = { url: string; model: string; key: string; api?: string };
-    type SendMode = "steer" | "followup";
-    type Delivery = "steered" | "queued" | "started";
+Built-in templates are `researcher` (read tools only) and `coder` (exact read, write and command tools); user templates are keyed by string ID. At spawn the resolved instructions, skill text and exact tool and MCP grants are persisted as an immutable snapshot, and resume reuses it. Nothing is inherited from the host or discovered ambiently. Built-in children have no Subzero delegation tools and nested delegation is outside the contract; no guarantee is made about arbitrary servers a user configures. Template MCP servers are launched only as declared and only their granted tools are exposed. If the worker cannot enforce the exact grant set, spawn fails before model execution. Grants fail closed.
 
-    type SpawnInput = {
-      prompt: string;
-      templateId: TemplateId;
-      model: ModelArgs;
-      workspaceRoot: string; // host supplied execution context
-    };
+## 5. Workspace, admission and ownership
 
-Core operations:
+The workspace root is the canonical scope and working directory, not a filesystem boundary. In the trusted core API it is a caller-supplied field:
 
-    info()
-    spawn(input) -> { childId, runId }
-    get(childId, { waitMs?, cursor? }) -> ChildSnapshot
-    subscribe(childId, cursor?) -> AsyncIterable<ChildEvent>
-    list(workspaceRoot?) -> ChildSummary[]
-    send(childId, mode, message) -> { runId, delivery }
-    stop(childId, expectedRunId) -> StopRequest
-    resume(childId, modelArgs, message?) -> ready | new Run
-    readArtifact(artifactId, offset, length) -> ArtifactChunk
+    workspaceRoot: string; // host supplied execution context
 
-The core receives the literal model key in memory. The MCP schema receives credentialRef and the runtime resolves it before calling core. The API protocol defaults to openai-completions, as qualified by the probe; other protocols must be explicitly selected from the engine's advertised supported protocols. Do not infer a protocol from the endpoint URL. Worker/session SDK types are private to the runtime adapter.
+MCP callers do not pass it; the server supplies its configured workspace. Pi's native file tools can reach paths outside it and a granted shell runs with the launching user's authority. Children share the workspace and the design is not an OS sandbox.
 
-## 5. Template and capability contract
+Admission is serialized through the shared SQLite database: at most one write-capable run per workspace across brokers; read-only children may run concurrently. This does not constrain the host or other processes writing files.
 
-Built-in templates are researcher and coder. User templates are keyed by arbitrary string templateId and contain:
+Ownership is an exclusive per-child generation. A new broker may claim a child only after the previous owner's release or confirmed worker exit. If exit cannot be proven, the result is `busy` or `recovery_required`; a second transcript writer is never started, and PID/TTL-only leases are not accepted as proof of worker exit.
 
-- instructions;
-- exact tool descriptors and grants;
-- explicit skills[];
-- explicit MCP server configurations and allowed tool names.
+## 6. Checkpoints and versions
 
-At spawn, resolve and persist an immutable template/grant snapshot. A resume reuses the same snapshot. If its required worker adapter/version is unavailable, return a typed incompatibility error. Never add new tools, skills, or MCP servers silently on resume.
+The worker owns the transcript; SQLite records the last completed leaf. After a partial tool call, resume branches from that leaf and preserves the interrupted branch; the continuation prompt says it continues from a saved checkpoint and asks the worker to inspect the current workspace before acting. The required worker adapter and version and the session SDK and header version are validated, and immutable template grants are never upgraded. A mismatch or unreadable checkpoint is refused and stored state is preserved, never coerced, replayed, migrated or deleted. Sessions from prior SDKs need a new child.
 
-Researcher gets exact read-tool names and no write or shell tools. Coder gets its own exact read, write, and command tool names. User-defined string template IDs follow the same schema. No tools are inherited from the host or ambiently discovered. Subzero delegation tools are not registered in a child; nested delegation is outside the v1 contract.
+## 7. Events, results and limits
 
-The runtime MCP client connects only to the MCP servers explicitly in the template. It maps only their declared tools to the worker's custom-tool surface. Skill files and tool catalogs are loaded only from the snapshot, not from ambient host folders.
+Event rows carry per-child monotonic sequence numbers and record lifecycle, tool names, stop requests and confirmation, completion and errors. They omit raw tool arguments, secrets and transcripts; new worker text is not stored as per-token rows. When a requested cursor is older than retained history the response reports a cursor gap. Progress notifications are sent only for an active request that supplied a progress token and channel, are throttled and carry no transcript text. No unsolicited parent turn or background wakeup is promised.
 
-If the worker cannot enforce the exact requested grant set, fail spawn before model execution. No general permission-approval broker is part of v1; ungranted capabilities fail closed.
+Full results are stored as local artifacts; MCP returns a bounded preview and an opaque artifact ID that `subzero_output` reads by `offset` and `length`. Transcripts and artifacts are not deleted automatically.
 
-## 6. Workspace and model inputs
+Limits: four active worker processes per workspace, one write-capable run per workspace, 64 KiB prompt and instructions, 64 granted tools and 8 KiB per event payload. These are policy limits, not transport maxima, and there is no automatic retry.
 
-The host adapter supplies the canonical workspace root. It selects the working directory and metadata scope, not a filesystem boundary: Pi's native file tools accept paths outside cwd, and a granted shell runs with the launching user's OS authority. The prompt and template are explicit. Parent transcript/history is not copied implicitly.
+## 8. Latest-only Pi and host scope
 
-Children share the workspace. SQLite-backed admission serializes Subzero write-capable runs across broker processes sharing the workspace. Read-only children may run concurrently. This serialization does not prevent the parent host, another non-Subzero process, or external tools from editing files. It is not a sandbox.
-
-The core receives {url, model, key} for spawn and explicit resume in memory. Do not read ambient Pi, fx, Codex, or host-provider credentials. Do not store raw keys. The MCP-visible schema accepts credentialRef; the runtime resolves it against explicitly configured environment or secret references, then passes key material to core in memory. A missing reference returns credentials_required. Within a live broker, a later followup reopens the worker using the selected child model and its in-memory key. After broker restart, the host must call resume with a credential reference before sending more work.
-
-The caller selects model URL, model, API protocol, and credential reference on spawn and explicit resume. The credential resolver accepts only references configured for this runtime; it is not an arbitrary environment-variable lookup. No provider catalog or config default overrides the supplied model values.
-
-## 7. Session and run semantics
-
-Child state: ready, running, interrupted. A ready child has no worker process; it retains its transcript reference and template snapshot.
-
-Run state: queued, running, stop_requested, stopped, completed, failed, interrupted. Interrupted means execution ended without a confirmed terminal result.
-
-Each prompt is a distinct run. Spawn creates a child session and its initial run. Subzero owns the follow-up queue and dispatches each prompt after the preceding run settles; it does not duplicate that queue inside Pi. Persist each completed run's transcript leaf before dispatching the next queued run. A follow-up while idle reopens the child and starts a new run immediately.
-
-Send requires a mode:
-- steer modifies the current active run only. If the worker does not advertise steering, reject unsupported_steer. Never reinterpret it as followup.
-- followup adds a new run. When busy it queues; when idle it starts.
-
-Stop requires expectedRunId. If it does not match the active run, return stale_run without effect. A matching stop clears queued follow-ups and sets stop_requested. Set stopped only after the worker confirms cancellation and process-tree exit. The response distinguishes requested from confirmed.
-
-Resume without a message validates credentials and the exact checkpoint, then returns a ready child at its last completed transcript leaf; it starts no run or worker process. Resume with a message starts a fresh worker process and run from that leaf. Never retry or replay an interrupted prompt/effect automatically. For a partial Pi tool call, use SessionManager.branch(lastCompletedLeaf), preserve the interrupted branch, and append a recovery notice that the working tree may include interrupted changes. If the worker version cannot load the exact checkpoint, refuse resume and preserve stored state.
-
-## 8. Events, info, and MCP calls
-
-info returns Subzero protocol/core versions, selected worker name/version, worker capabilities, available templates with descriptions/grants, configured model/auth references without secrets, supported host adapter versions, and limits.
-
-Events have monotonically increasing per-child sequence numbers and include child/run lifecycle, text updates, tool activity names, stop request/confirmation, completion, and error. Omit raw tool arguments, secrets, and full worker transcripts.
-
-MCP tools: subzero_info, subzero_spawn, subzero_get, subzero_list, subzero_send, subzero_stop, subzero_resume, and subzero_output. There is no clear/delete tool in v1. subzero_get accepts bounded waitMs and cursor. The wait is bounded; the response includes the current state, bounded event batch, next cursor, oldest available cursor, and result/artifact reference. When a requested cursor is older than retained history, report an explicit cursor gap.
-
-The core exposes native subscribe for Pi or other adapters able to consume an async iterator. MCP callers poll with get; progress notifications may update a currently active tool call. Do not push an unsolicited model turn or assume the host will react to background notifications.
-
-## 9. Results, artifacts, and limits
-
-Full child output/result is stored as a local worker-owned artifact. MCP returns a bounded preview and opaque artifact reference; subzero_output reads chunks by offset/length. Event history is bounded and may be pruned, with cursor gaps explicit. Do not automatically delete child transcripts or full result artifacts in v1.
-
-Initial policy defaults:
-- maximum four active worker processes per workspace; idle child sessions do not retain worker processes.
-- maximum one write-capable Subzero run per workspace across brokers;
-- maximum 64 KiB UTF-8 prompt/instructions;
-- maximum 64 granted tools;
-- maximum 8 KiB per event payload, with larger output in artifacts.
-
-These are policy limits, not transport maxima. No automatic retry after worker or model failure.
-
-## 10. Persistence, ownership, recovery
-
-SQLite stores Subzero metadata and bounded event rows: child/run IDs, state, worker session reference/version, template and grant snapshot, model URL/model/API protocol, workspace scope, owner generation, stop request/confirmation, artifact refs, and event cursors. It does not store API keys or the full transcript.
-
-The worker owns the durable transcript. Workers exist only during active/queued runs; after a busy episode settles, persist the completed leaf/result and close the process to release memory and writer ownership. Record the last completed transcript leaf in SQLite so interrupted resumes can branch safely while preserving the interrupted branch. Use transactions plus an exclusive child ownership generation to prevent simultaneous resumes or transcript writers across MCP broker processes. All Subzero brokers use the same workspace database path.
-
-A DB transaction only protects a claim update; it cannot prove a live external worker is dead. The worker must be a supervised per-child process whose control-pipe EOF cancels work and terminates its tool subprocess tree. Broker startup cannot claim a child until the prior worker has confirmed exit. Ambiguous ownership remains busy/recovery_required; never use a PID/TTL-only lease to start a duplicate.
-
-The reference sidecar targets Node 24 LTS, minimum 24.15, where node:sqlite reached Release Candidate status; the API also exists in earlier Node versions. Pi itself requires Node 22.19+. The local probe verified WAL, BEGIN IMMEDIATE, and close/reopen persistence on Node 24.21. Keep the SQLite adapter isolated. Hosts launch the sidecar and need not use its runtime internally.
-
-## 11. Host adapters and evidence
-
-Pi 1.0.4 is the first host integration. It registers the shared MCP executable with Pi's documented registerMcpServer API; no second Pi-native tool set or registry. The @subzero/pi package is an installer/registration adapter only.
-
-Codex, Claude Code, and OpenCode configure the same local stdio executable through their own host settings. There is no common plugin package manager. Exact host tested versions belong in the compatibility table; no wildcard range is a compatibility promise.
-
-Pi worker process model is selected for bounded stop/fault containment. The tested package set is exact-pinned: Pi SDK 1.0.4 and pi-ai 1.0.4. Root measured 135 MB installed dependencies (121 packages), about 143 MB baseline RSS per loaded worker test process, and about 178 MB after multiple sessions in one process. Idle child sessions close their worker; a four active-process cap is an initial policy limit, not a performance guarantee. Record footprint in package docs.
-
-Historical exploration notes are superseded by the current local test suite and qualification probes in [experiments/pi-sdk/](../experiments/pi-sdk/README.md).
+The host extension, runtime worker and `pi-ai` are exact-pinned to the latest Pi release, currently 1.2.0. Upgrades resolve npm's latest tag and re-pin exactly; no older lane, shim or fallback SDK is kept. The `subzero_delegation` guide and Pi `codemode` handling are qualified for Linux controlled print/JSON runs with loopback providers: with codemode, each MCP call resolves to a result object even on handled errors, so `isError` must be checked. `codemode.mode` stays the user's choice. TUI, RPC, reload, custom-triggered runtime turns, other hosts (Codex, Claude Code, OpenCode) and other platforms are not qualified. The separate experimental `pi-durable` package is not used and no second scheduler is added.

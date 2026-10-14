@@ -1,0 +1,245 @@
+{
+  "status": "SUCCESS",
+  "baselineRevision": "dce84c1",
+  "sources": {
+    "baselineIndexSha256": "f339e83dc7ad7fcede7452a8d4d2f801cd18b8764608165c0f0852c4d5f81edf",
+    "baselineTypesSha256": "8864674ccc2c51d936a267556d245c670e5955700db88b3a903a54d34a6be3c7",
+    "candidateIndexSha256": "e7eeb73ab69de98e03fc45219f0ead955f9ac0b4fa75332f664071f16a61dfe9",
+    "candidateTypesSha256": "4bb7626b846036187cb6fc2dcc554e8fb7e35600c7fc46cda21255216919c8de",
+    "fixtureSupportSha256": "c3f85fd2932231c7679e6f7fecd739f9c430217fa9214513a97498b0926490c0"
+  },
+  "methodology": {
+    "sameFixtures": "packages/core/test/support.ts FakeStore, ControlledEngineFactory, template and ids()",
+    "input": {
+      "workspaceRoot": "/synthetic/workspace",
+      "templateId": "researcher",
+      "model": {
+        "url": "https://benchmark.invalid/v1",
+        "model": "synthetic-control"
+      },
+      "previewLimit": 64
+    },
+    "previewLimit": 64,
+    "eventSchedule": "each activity unit emits one WorkerEvent text plus one tool at evenly spaced offsets; completion occurs at durationMs",
+    "responseBytes": "sum of UTF-8 bytes of JSON.stringify over actual core-returned values",
+    "persistedTextRows": "actual FakeStore readEvents type=text count",
+    "controllerCalls": "calls to core observation API; setup is included for baseline spawn, candidate run is one call",
+    "limits": {
+      "outputPreviewBytes": 96,
+      "maxWaitMs": 1000
+    }
+  },
+  "cases": [
+    {
+      "variant": "baseline",
+      "activity": 4,
+      "durationMs": 60,
+      "waitMs": 200,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 7,
+      "returnedValues": 7,
+      "responseJsonUtf8Bytes": 3069,
+      "elapsedMs": 62.312,
+      "persistedTextRows": 5,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 4,
+        "completedAtMs": 60
+      }
+    },
+    {
+      "variant": "candidate",
+      "activity": 4,
+      "durationMs": 60,
+      "waitMs": 200,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 1,
+      "returnedValues": 1,
+      "responseJsonUtf8Bytes": 188,
+      "elapsedMs": 61.259,
+      "persistedTextRows": 0,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 4,
+        "completedAtMs": 60
+      }
+    },
+    {
+      "variant": "baseline",
+      "activity": 4,
+      "durationMs": 240,
+      "waitMs": 80,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 7,
+      "returnedValues": 7,
+      "responseJsonUtf8Bytes": 3069,
+      "elapsedMs": 239.025,
+      "persistedTextRows": 5,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 4,
+        "completedAtMs": 240
+      }
+    },
+    {
+      "variant": "candidate",
+      "activity": 4,
+      "durationMs": 240,
+      "waitMs": 80,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 3,
+      "returnedValues": 3,
+      "responseJsonUtf8Bytes": 338,
+      "elapsedMs": 241.406,
+      "persistedTextRows": 0,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 4,
+        "completedAtMs": 240
+      }
+    },
+    {
+      "variant": "baseline",
+      "activity": 40,
+      "durationMs": 60,
+      "waitMs": 200,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 43,
+      "returnedValues": 43,
+      "responseJsonUtf8Bytes": 22581,
+      "elapsedMs": 59.641,
+      "persistedTextRows": 41,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 40,
+        "completedAtMs": 60
+      }
+    },
+    {
+      "variant": "candidate",
+      "activity": 40,
+      "durationMs": 60,
+      "waitMs": 200,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 1,
+      "returnedValues": 1,
+      "responseJsonUtf8Bytes": 188,
+      "elapsedMs": 60.673,
+      "persistedTextRows": 0,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 40,
+        "completedAtMs": 60
+      }
+    },
+    {
+      "variant": "baseline",
+      "activity": 40,
+      "durationMs": 240,
+      "waitMs": 80,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 43,
+      "returnedValues": 43,
+      "responseJsonUtf8Bytes": 22581,
+      "elapsedMs": 239.438,
+      "persistedTextRows": 41,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 40,
+        "completedAtMs": 240
+      }
+    },
+    {
+      "variant": "candidate",
+      "activity": 40,
+      "durationMs": 240,
+      "waitMs": 80,
+      "wallDeadlineMs": 5000,
+      "maxApiCalls": 100,
+      "apiCalls": 3,
+      "returnedValues": 3,
+      "responseJsonUtf8Bytes": 338,
+      "elapsedMs": 240.398,
+      "persistedTextRows": 0,
+      "finalStatus": "completed",
+      "artifactId": "artifact-controlled",
+      "preview": "Controlled benchmark artifact preview — finished.",
+      "storedResult": {
+        "artifactId": "artifact-controlled",
+        "preview": "Controlled benchmark artifact preview — finished."
+      },
+      "schedule": {
+        "eventsEmitted": 40,
+        "completedAtMs": 240
+      }
+    }
+  ],
+  "assertions": {
+    "baselineSourceExactGitShow": true,
+    "candidateSourceDirectImport": true,
+    "baselineShortCompleted": true,
+    "baselineLongCompleted": true,
+    "candidateShortCompleted": true,
+    "candidateLongCompleted": true,
+    "storedRunResultCheckedForEveryCase": true,
+    "noManualResponseConstruction": true,
+    "candidateShortExactlyOneCoreRunCall": true,
+    "candidateLongCallsWithinWaitWindowBound": true,
+    "candidatePersistedTextRowsZero": true,
+    "candidateLowHighCallCountsWithinOneCall": true
+  },
+  "limitations": [
+    "Synthetic local core/controller benchmark only; no provider, LLM tokens, billing, production load, or wall-clock savings inference.",
+    "FakeStore event fanout and Node scheduler timings are local fixtures; elapsed duration includes setup and excludes shutdown cleanup.",
+    "Persisted text rows are core event-store records generated by the actual worker schedule."
+  ]
+}

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:subzero:protocol:0.1:responses",
-  "title": "Subzero v1 responses and events",
+  "$id": "urn:subzero:protocol:0.2:responses",
+  "title": "Subzero protocol 0.2 responses and events",
   "oneOf": [
-    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/snapshot" },
+    { "$ref": "#/$defs/info" }, { "$ref": "#/$defs/spawn" }, { "$ref": "#/$defs/runSnapshot" }, { "$ref": "#/$defs/snapshot" },
     { "$ref": "#/$defs/children" }, { "$ref": "#/$defs/send" }, { "$ref": "#/$defs/stop" },
     { "$ref": "#/$defs/resume" }, { "$ref": "#/$defs/artifact" }, { "$ref": "#/$defs/error" },
     { "$ref": "#/$defs/subscriptionItem" }
@@ -83,6 +83,16 @@
       }
     },
     "spawn": { "type": "object", "additionalProperties": false, "required": ["childId", "runId"], "properties": { "childId": { "type": "string" }, "runId": { "type": "string" } } },
+    "runSnapshot": {
+      "type": "object", "additionalProperties": false, "required": ["childId", "runId", "status", "waitExpired"],
+      "properties": {
+        "childId": { "type": "string", "minLength": 1 }, "runId": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["queued", "running", "stop_requested", "stopped", "completed", "failed", "interrupted"] },
+        "waitExpired": { "type": "boolean" },
+        "result": { "$ref": "#/$defs/artifactRef" },
+        "errorCode": { "type": "string", "minLength": 1 }
+      }
+    },
     "snapshot": {
       "type": "object", "additionalProperties": false, "required": ["childId", "workspaceRoot", "state", "templateId", "model", "events", "cursor", "oldestCursor", "nextCursor", "cursorGap"],
       "properties": {
@@ -109,6 +119,6 @@
       { "type": "object", "additionalProperties": false, "required": ["state", "childId", "runId"], "properties": { "state": { "const": "running" }, "childId": { "type": "string" }, "runId": { "type": "string" } } }
     ] },
     "artifact": { "type": "object", "additionalProperties": false, "required": ["artifactId", "offset", "text", "nextOffset", "eof"], "properties": { "artifactId": { "type": "string" }, "offset": { "type": "integer" }, "text": { "type": "string" }, "nextOffset": { "type": "integer" }, "eof": { "type": "boolean" } } },
-    "error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": { "code": { "enum": ["invalid_request", "not_found", "credentials_required", "template_not_found", "limit_exceeded", "workspace_busy", "busy", "recovery_required", "stale_run", "unsupported_steer", "checkpoint_incompatible", "artifact_unavailable", "request_failed", "runtime_shutting_down"] }, "message": { "type": "string", "maxLength": 500 } } } } }
+    "error": { "type": "object", "additionalProperties": false, "required": ["error"], "properties": { "error": { "type": "object", "additionalProperties": false, "required": ["code", "message"], "properties": { "code": { "enum": ["invalid_request", "not_found", "request_timeout", "credentials_required", "template_not_found", "limit_exceeded", "workspace_busy", "busy", "recovery_required", "stale_run", "unsupported_steer", "checkpoint_incompatible", "artifact_unavailable", "request_failed", "runtime_shutting_down"] }, "message": { "type": "string", "maxLength": 500 } } } } }
   }
 }

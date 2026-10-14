@@ -14,9 +14,9 @@ export type RuntimeApplicationOptions = { dataRoot: string; workspaceRoot: strin
 export type RuntimeApplication = ReturnType<typeof createSubzero> & {
   close(): Promise<void>; beginShutdown(): Promise<void>; recoverChild(childId: string): Promise<boolean>;
   assertChildWorkspace(childId: string): Promise<void>; assertArtifactWorkspace(artifactId: string): Promise<void>;
-  workspaceRoot: string; dataRoot: string; credentials: CredentialResolver;
+  workspaceRoot: string; dataRoot: string; credentials: CredentialResolver; mcpRequestBudgetMs: number;
 };
-type RuntimeFile = { credentialRefs?: CredentialMap; templatesFile?: string };
+type RuntimeFile = { credentialRefs?: CredentialMap; templatesFile?: string; mcpRequestBudgetMs?: unknown };
 
 /** Assemble the trusted host runtime. Config contains credential references only. */
 export async function createRuntimeApplication(options: RuntimeApplicationOptions): Promise<RuntimeApplication> {
@@ -27,6 +27,7 @@ export async function createRuntimeApplication(options: RuntimeApplicationOption
   const config = await loadRuntimeConfig({
     dataRoot, workspaceRoot, credentialRefs: runtimeFile.credentialRefs,
     ...(runtimeFile.templatesFile ? { templatesFile: runtimeFile.templatesFile } : {}),
+    ...(runtimeFile.mcpRequestBudgetMs === undefined ? {} : { mcpRequestBudgetMs: runtimeFile.mcpRequestBudgetMs }),
   });
   const brokerId = options.brokerId ?? randomUUID();
   const brokerIncarnation = randomUUID();
@@ -66,7 +67,7 @@ export async function createRuntimeApplication(options: RuntimeApplicationOption
     await subzero.shutdown();
   })();
   return Object.assign(subzero, {
-    workspaceRoot, dataRoot, credentials: config.credentials, recoverChild, assertChildWorkspace, assertArtifactWorkspace,
+    workspaceRoot, dataRoot, credentials: config.credentials, mcpRequestBudgetMs: config.mcpRequestBudgetMs, recoverChild, assertChildWorkspace, assertArtifactWorkspace,
     beginShutdown,
     close(): Promise<void> {
       if (!closing) closing = (async () => {
@@ -93,12 +94,17 @@ async function readRuntimeFile(path: string): Promise<RuntimeFile> {
   try { value = JSON.parse(raw); } catch { throw new Error('Runtime config must contain valid JSON.'); }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Runtime config must be a JSON object.');
   const record = value as Record<string, unknown>;
-  const extras = Object.keys(record).filter(key => key !== 'credentialRefs' && key !== 'templatesFile');
+  const extras = Object.keys(record).filter(key => !['credentialRefs', 'templatesFile', 'mcpRequestBudgetMs'].includes(key));
   if (extras.length) throw new Error(`Unsupported runtime config fields: ${extras.join(', ')}.`);
   if (containsCredentialKey(record)) throw new Error('Runtime config may contain credential references, not raw keys.');
   if (record.templatesFile !== undefined && (typeof record.templatesFile !== 'string' || !record.templatesFile || isAbsolute(record.templatesFile))) throw new Error('templatesFile must be a relative path under dataRoot.');
+  if (record.mcpRequestBudgetMs !== undefined && (!Number.isSafeInteger(record.mcpRequestBudgetMs) || (record.mcpRequestBudgetMs as number) <= 0 || (record.mcpRequestBudgetMs as number) > 2_147_483_647)) throw new Error('mcpRequestBudgetMs must be a positive integer no greater than 2147483647.');
   if (record.credentialRefs !== undefined && (!record.credentialRefs || typeof record.credentialRefs !== 'object' || Array.isArray(record.credentialRefs))) throw new Error('credentialRefs must be an object.');
-  return { ...(record.credentialRefs ? { credentialRefs: record.credentialRefs as CredentialMap } : {}), ...(record.templatesFile ? { templatesFile: record.templatesFile as string } : {}) };
+  return {
+    ...(record.credentialRefs ? { credentialRefs: record.credentialRefs as CredentialMap } : {}),
+    ...(record.templatesFile ? { templatesFile: record.templatesFile as string } : {}),
+    ...(record.mcpRequestBudgetMs === undefined ? {} : { mcpRequestBudgetMs: record.mcpRequestBudgetMs }),
+  };
 }
 
 function containsCredentialKey(value: unknown): boolean {
@@ -113,10 +119,10 @@ export function defaultDataRoot(): string {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'subzero');
 }
 
-export function runtimeVersion(): string { return '0.1.0'; }
+export function runtimeVersion(): string { return '0.2.0'; }
 
 const publicToolErrorCodes = new Set([
-  'invalid_request', 'not_found', 'credentials_required', 'template_not_found', 'limit_exceeded',
+  'invalid_request', 'not_found', 'request_timeout', 'credentials_required', 'template_not_found', 'limit_exceeded',
   'workspace_busy', 'busy', 'recovery_required', 'stale_run', 'unsupported_steer',
   'checkpoint_incompatible', 'artifact_unavailable', 'request_failed', 'runtime_shutting_down',
 ]);
