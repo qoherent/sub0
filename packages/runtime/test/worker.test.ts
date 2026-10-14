@@ -1075,6 +1075,117 @@ test('audit: a model key used as a tool-argument property name is redacted from 
   }
 });
 
+test('audit: worker ready handshake timeout rejects open and reaps the hung worker process', { timeout: 8_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-ready-timeout-'));
+  const factory = new PiEngineFactory({
+    dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')),
+    workerEntrypointForTesting: fileURLToPath(new URL('./fixtures/worker-control.mjs', import.meta.url)),
+    workerArgumentsForTesting: ['hang-ready'], controlRequestTimeoutMs: 150, shutdownGraceMs: 100,
+  });
+  try {
+    const childId = 'child-ready-timeout';
+    const raced = await Promise.race([
+      factory.open({
+        childId, workspaceRoot: root,
+        templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+        model: { url: 'http://127.0.0.1:1/v1', model: 'fake-model' }, credential: { key },
+      }).then(() => 'opened', error => error instanceof Error ? error.message : String(error)),
+      new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 2_500)),
+    ]);
+    assert.match(String(raced), /worker_ready_timeout|worker_process_exited/);
+    const childDir = join(root, 'sessions', createHash('sha256').update(childId).digest('hex'));
+    const identity = JSON.parse(await readFile(join(childDir, 'worker-owner.json'), 'utf8')) as { pid: number };
+    assert.equal(await procState(identity.pid), 'gone', 'the hung worker process is reaped after ready timeout');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: proveWorkerExited permits recovery when broker crashed after promoting a queued run in the same generation', async () => {
+  const provider = await startFakeProvider();
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-stale-runid-recovery-'));
+  const childId = 'stale-runid-child';
+  const run1Id = 'stale-run-1';
+  const run2Id = 'stale-run-2';
+  const brokerId = 'stale-runid-owner';
+  const brokerIncarnation = 'stale-runid-incarnation';
+  const brokerReceiptDir = join(root, 'brokers');
+  const { child, run: run1, event } = records(childId, false, run1Id);
+  let worker: Awaited<ReturnType<PiEngineFactory['open']>> | undefined;
+  const store = new SQLiteStore(join(root, 'state.sqlite'), { brokerId });
+  try {
+    await writeBrokerReceipt(brokerReceiptDir, brokerId, 'active', brokerIncarnation);
+    const admission = await store.createChild(child, run1, event, limits);
+    assert.equal(admission.kind, 'started');
+    const generation = admission.lease.generation;
+    const queuedRun = records(childId, false, run2Id).run;
+    const queued = await store.admitRun(childId, { ...queuedRun, status: 'queued' }, limits, generation);
+    assert.equal(queued.kind, 'queued');
+
+    const factory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')), brokerId, brokerIncarnation, brokerReceiptDir });
+    worker = await factory.open({
+      childId, runId: run1Id, ownerGeneration: generation, workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Complete.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: provider.endpoint, model: 'fake-model' }, credential: { key },
+    });
+    for await (const _item of worker.run({ runId: run1Id, prompt: 'finish run 1' })) { /* consume */ }
+    assert.equal((await worker.close()).exitConfirmed, true);
+    worker = undefined;
+
+    // Settle run-1 so SQLite promotes run-2 to active_run_id under the same ownerGeneration before any worker opens for run-2
+    const settled = await store.settleRun(
+      childId, run1Id, admission.lease.ownerToken,
+      { type: 'completed', checkpointId: 'cp-1', artifactId: 'a'.repeat(64), preview: 'ok' },
+      { at: new Date().toISOString(), childId, runId: run1Id, type: 'completed', artifactId: 'a'.repeat(64), preview: 'ok' },
+      limits, true,
+    );
+    assert.equal(settled.kind, 'next');
+    await writeBrokerReceipt(brokerReceiptDir, brokerId, 'closed', brokerIncarnation);
+
+    const recoveryFactory = new PiEngineFactory({ dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')), brokerId: 'restarted-broker', brokerIncarnation: 'restarted-inc', brokerReceiptDir });
+    const latestChild = await store.getChild(childId);
+    assert.equal(latestChild?.activeRunId, run2Id);
+    assert.equal(await recoveryFactory.proveWorkerExited(childId, latestChild?.activeRunId, latestChild?.ownerGeneration), true);
+  } finally {
+    if (worker) await worker.close();
+    await store.close().catch(() => undefined);
+    await provider.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('audit: worker closing stdin before run write does not emit an unhandled EPIPE error', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'subzero-worker-stdin-epipe-'));
+  const factory = new PiEngineFactory({
+    dataRoot: join(root, 'sessions'), artifactStore: new LocalArtifactStore(join(root, 'artifacts')),
+    workerEntrypointForTesting: fileURLToPath(new URL('./fixtures/worker-control.mjs', import.meta.url)),
+    workerArgumentsForTesting: ['close-stdin'], controlRequestTimeoutMs: 500, shutdownGraceMs: 100,
+  });
+  let worker: Worker | undefined;
+  let uncaught: unknown;
+  const onUncaught = (error: unknown) => { uncaught = error; };
+  process.on('uncaughtException', onUncaught);
+  try {
+    worker = await factory.open({
+      childId: 'child-stdin-epipe', workspaceRoot: root,
+      templateSnapshot: { id: 'reader', description: '', instructions: 'Answer.', tools: [], skills: [], mcpServers: [], writeCapable: false },
+      model: { url: 'http://127.0.0.1:1/v1', model: 'fake-model' }, credential: { key },
+    });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const events: WorkerEvent[] = [];
+    for await (const event of worker.run({ runId: 'run-epipe', prompt: 'trigger write on closed pipe' })) {
+      events.push(event);
+    }
+  } catch {
+    // Expected stream rejection when stdin pipe is closed.
+  } finally {
+    process.off('uncaughtException', onUncaught);
+    if (worker) await worker.close();
+    await rm(root, { recursive: true, force: true });
+  }
+  assert.equal(uncaught, undefined, 'no uncaught EPIPE exception should escape WorkerIpc');
+});
+
 async function procState(pid: number): Promise<string> {
   try {
     const content = await readFile(`/proc/${pid}/stat`, 'utf8');

@@ -904,6 +904,80 @@ test('audit: a get that wakes early leaves no pending wait timeout', async () =>
   });
 });
 
+test('audit: stop does not hang forever if worker.stop confirms without ending the run stream', async () => {
+  const { core, engine } = setup();
+  const originalOpen = engine.open.bind(engine);
+  engine.open = async input => {
+    const worker = await originalOpen(input);
+    return {
+      ...worker,
+      stop: async () => ({ confirmed: true }),
+      close: async () => {
+        engine.runs.at(-1)?.events.end();
+        return worker.close();
+      },
+    };
+  };
+  const child = await core.spawn({ prompt: 'hung after stop confirm', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  const raced = await Promise.race([
+    core.stop(child.childId, child.runId),
+    new Promise<'hung'>(resolve => setTimeout(() => resolve('hung'), 1_000)),
+  ]);
+  assert.deepEqual(raced, { requested: true, confirmed: true });
+  assert.equal((await core.get(child.childId, { runId: child.runId })).status, 'stopped');
+});
+
+test('audit: shutdown awaits in-flight close and settlement without clobbering a completed run when worker.stop is unconfirmed', async () => {
+  const { core, engine } = setup();
+  const originalOpen = engine.open.bind(engine);
+  engine.open = async input => {
+    const worker = await originalOpen(input);
+    return {
+      ...worker,
+      stop: async () => ({ confirmed: false }),
+    };
+  };
+  engine.holdNextClose();
+  const child = await core.spawn({ prompt: 'complete before shutdown', templateId: 'researcher', model: args, workspaceRoot: '/repo' });
+  engine.runs[0]!.complete({ checkpointId: 'leaf-shutdown', artifactId: 'artifact-shutdown', preview: 'done' });
+  await engine.closeStarted;
+  let shutdownResolved = false;
+  const shuttingDown = core.shutdown().then(() => { shutdownResolved = true; });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(shutdownResolved, false, 'shutdown waits for in-flight closeEntry and settleLocal');
+  engine.finishClose();
+  await shuttingDown;
+  const snapshot = await core.get(child.childId, { runId: child.runId });
+  assert.equal(snapshot.status, 'completed');
+  assert.equal(snapshot.result?.artifactId, 'artifact-shutdown');
+});
+
+test('audit: send queues a followup on the owning broker while worker initialization is still pending', async () => {
+  const { core, engine } = setup();
+  let releaseOpen!: () => void;
+  const openGate = new Promise<void>(resolve => { releaseOpen = resolve; });
+  const originalOpen = engine.open.bind(engine);
+  let firstOpen = true;
+  engine.open = async input => {
+    if (firstOpen) {
+      firstOpen = false;
+      await openGate;
+    }
+    return originalOpen(input);
+  };
+  const firstRun = await core.run({ prompt: 'first run', templateId: 'researcher', model: args, workspaceRoot: '/repo', waitMs: 20 });
+  assert.equal(firstRun.status, 'running');
+  assert.equal(firstRun.waitExpired, true);
+  const queued = await core.send(firstRun.childId, { mode: 'followup', message: 'queued during init' });
+  assert.equal(queued.delivery, 'queued');
+  releaseOpen();
+  await eventually(() => engine.runs.length === 1);
+  engine.runs[0]!.complete({ checkpointId: 'leaf-1', artifactId: 'artifact-1', preview: 'one' });
+  await eventually(() => engine.runs.length === 2);
+  engine.runs[1]!.complete({ checkpointId: 'leaf-2', artifactId: 'artifact-2', preview: 'two' });
+  await eventuallyAsync(async () => (await core.get(firstRun.childId, { runId: queued.runId })).status === 'completed');
+});
+
 async function eventually(predicate: () => boolean) {
   for (let attempt = 0; attempt < 50 && !predicate(); attempt++) await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(predicate(), true, 'expected asynchronous worker transition');

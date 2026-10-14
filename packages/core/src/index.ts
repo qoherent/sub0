@@ -26,7 +26,7 @@ export class SubzeroError extends Error {
   }
 }
 
-type LocalWorker = { worker: Worker; lease: OwnerLease; childId: ChildId; key: string; closed: boolean; done: Promise<boolean>; finish: (exitConfirmed: boolean) => void };
+type LocalWorker = { worker: Worker; lease: OwnerLease; childId: ChildId; key: string; closed: boolean; streamEnded: boolean; stopConfirmed: boolean; closing?: Promise<boolean>; done: Promise<boolean>; finish: (exitConfirmed: boolean) => void };
 type Info = {
   protocolVersion: string;
   coreVersion: string;
@@ -111,7 +111,7 @@ export function createSubzero(options: SubzeroOptions) {
       }
       let finish!: (exitConfirmed: boolean) => void;
       const done = new Promise<boolean>(resolve => { finish = resolve; });
-      entry = { worker, lease, childId: child.childId, key: model.key, closed: false, done, finish };
+      entry = { worker, lease, childId: child.childId, key: model.key, closed: false, streamEnded: false, stopConfirmed: false, done, finish };
       localWorkers.set(child.childId, entry);
     }
     const current = await options.store.getRun(child.childId, run.runId);
@@ -138,10 +138,11 @@ export function createSubzero(options: SubzeroOptions) {
         if (event.type === 'completed' || event.type === 'stopped' || event.type === 'failed' || event.type === 'interrupted') terminal = event;
         else await emitWorkerEvent(child.childId, run.runId, event, model.key);
       }
-      if (!terminal) terminal = { type: 'interrupted', code: 'worker_stream_ended' };
+      if (!terminal) terminal = entry.stopConfirmed ? { type: 'stopped' } : { type: 'interrupted', code: 'worker_stream_ended' };
     } catch (error) {
-      terminal = { type: 'interrupted', code: 'worker_stream_failed', message: safeMessage(error, model.key) };
+      terminal = entry.stopConfirmed ? { type: 'stopped' } : { type: 'interrupted', code: 'worker_stream_failed', message: safeMessage(error, model.key) };
     }
+    entry.streamEnded = true;
     const closed = await closeEntry(entry);
     if (!closed) terminal = { type: 'interrupted', code: 'worker_exit_unconfirmed' };
     await settleLocal(child, run, entry.lease, terminal, model, entry, closed);
@@ -166,12 +167,21 @@ export function createSubzero(options: SubzeroOptions) {
     }
     if (entry) finishEntry(entry, workerExitConfirmed);
   };
-  const closeEntry = async (entry: LocalWorker): Promise<boolean> => {
+  const closeEntry = (entry: LocalWorker): Promise<boolean> => entry.closing ??= (async () => {
     try {
       const outcome = await entry.worker.close();
       entry.closed = true;
       return outcome.exitConfirmed;
     } catch { entry.closed = true; return false; }
+  })();
+  const awaitEntryAfterStop = async (entry: LocalWorker): Promise<boolean> => {
+    entry.stopConfirmed = true;
+    const settledInTime = await Promise.race([
+      entry.done.then(() => true),
+      new Promise<false>(resolve => { const timer = setTimeout(() => resolve(false), 250); timer.unref?.(); }),
+    ]);
+    if (!settledInTime) await closeEntry(entry);
+    return entry.done;
   };
   const finishEntry = (entry: LocalWorker, exitConfirmed: boolean) => {
     if (localWorkers.get(entry.childId) === entry) localWorkers.delete(entry.childId);
@@ -363,6 +373,7 @@ export function createSubzero(options: SubzeroOptions) {
       validatePrompt(input.message);
       const child = await requiredChild(childId);
       const active = localWorkers.get(childId);
+      const locallyStarting = child.activeRunId ? pendingStarts.get(child.activeRunId)?.childId === childId : false;
       if (input.mode === 'steer') {
         if (!child.activeRunId || child.state !== 'running') throw new SubzeroError('busy', 'There is no active run to steer.');
         if (!active || active.closed) throw new SubzeroError('busy', 'The active child worker is not available for steering.');
@@ -373,7 +384,7 @@ export function createSubzero(options: SubzeroOptions) {
         await active.worker.steer(safeMessage);
         return { runId: child.activeRunId, delivery: 'steered' };
       }
-      if (child.state === 'running' && !active) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
+      if (child.state === 'running' && (!active || active.closed) && !locallyStarting) throw new SubzeroError('busy', 'The active child worker is owned by another broker.');
       const model = credentials.get(childId);
       if (child.state !== 'running' && !model) throw new SubzeroError('credentials_required', 'Call resume with credentials before sending work after broker restart.');
       if (child.state !== 'running' && model && !sameModelMetadata(child.model, modelMetadata(model))) throw new SubzeroError('credentials_required', 'Saved model settings changed; resume with credentials for the current model before sending work.');
@@ -413,7 +424,7 @@ export function createSubzero(options: SubzeroOptions) {
       }
       const stopped = await currentEntry.worker.stop(expectedRunId);
       if (stopped.confirmed) {
-        const exitConfirmed = await currentEntry.done;
+        const exitConfirmed = await awaitEntryAfterStop(currentEntry);
         return { requested: true, confirmed: exitConfirmed };
       }
       return { requested: true, confirmed: false };
@@ -464,15 +475,29 @@ export function createSubzero(options: SubzeroOptions) {
       shuttingDown = true;
       const stopOwnedWorkers = async () => {
         for (const [childId, entry] of [...localWorkers]) {
+          if (entry.streamEnded) {
+            await entry.done;
+            continue;
+          }
           if (entry.closed) continue;
           const child = await options.store.getChild(childId);
           if (!child?.activeRunId) continue;
+          if (entry.streamEnded) {
+            await entry.done;
+            continue;
+          }
           const runId = child.activeRunId;
           const requested = await options.store.requestStop(childId, runId, entry.lease.ownerToken, now());
-          if (requested.kind !== 'requested') continue;
+          if (requested.kind !== 'requested') {
+            if (entry.streamEnded) await entry.done;
+            continue;
+          }
           const stopped = await entry.worker.stop(runId);
-          if (!stopped.confirmed) continue;
-          await entry.done;
+          if (!stopped.confirmed) {
+            if (entry.streamEnded) await entry.done;
+            continue;
+          }
+          await awaitEntryAfterStop(entry);
         }
       };
       await Promise.allSettled([...pendingAdmissions]);

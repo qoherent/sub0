@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdir, open } from 'node:fs/promises';
+import { mkdir, open, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ArtifactChunk } from '@subzero/core';
 
@@ -16,33 +16,45 @@ export class LocalArtifactStore {
     this.previewBytes = positiveInteger(options.previewBytes, 2048, 'previewBytes');
   }
 
+  private allocateArtifactId(): string {
+    return randomBytes(32).toString('hex');
+  }
+
   async write(runId: string, content: string): Promise<{ artifactId: string; preview: string }> {
     if (!runId || typeof content !== 'string') throw new TypeError('runId and string content are required.');
     await mkdir(this.root, { recursive: true, mode: 0o700 });
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const artifactId = randomBytes(32).toString('hex');
-      const path = this.pathFor(artifactId);
-      try {
-        const runsDir = join(this.root, '.runs');
-        await mkdir(runsDir, { recursive: true, mode: 0o700 });
-        const runKey = createHash('sha256').update(runId, 'utf8').digest('hex');
-        let marker;
-        try { marker = await open(join(runsDir, `${runKey}.json`), 'wx', 0o600); }
-        catch (error) {
-          if ((error as { code?: string }).code === 'EEXIST') throw new Error('Artifact for this run is already immutable.');
-          throw error;
-        }
-        try { await marker.writeFile(JSON.stringify({ artifactId }), 'utf8'); await marker.sync(); }
-        finally { await marker.close(); }
-        const file = await open(path, 'wx', 0o600);
-        try { await file.writeFile(content, { encoding: 'utf8' }); await file.sync(); }
-        finally { await file.close(); }
-        return { artifactId, preview: utf8Prefix(Buffer.from(content, 'utf8'), this.previewBytes).text };
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'EEXIST' || attempt === 2) throw error;
-      }
+    const runsDir = join(this.root, '.runs');
+    await mkdir(runsDir, { recursive: true, mode: 0o700 });
+    const runKey = createHash('sha256').update(runId, 'utf8').digest('hex');
+    const markerPath = join(runsDir, `${runKey}.json`);
+    let marker;
+    try { marker = await open(markerPath, 'wx', 0o600); }
+    catch (error) {
+      if ((error as { code?: string }).code === 'EEXIST') throw new Error('Artifact for this run is already immutable.');
+      throw error;
     }
-    throw new Error('Could not allocate an artifact identifier.');
+    let committed = false;
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const artifactId = this.allocateArtifactId();
+        const path = this.pathFor(artifactId);
+        try {
+          const file = await open(path, 'wx', 0o600);
+          try { await file.writeFile(content, { encoding: 'utf8' }); await file.sync(); }
+          finally { await file.close(); }
+          await marker.writeFile(JSON.stringify({ artifactId }), 'utf8');
+          await marker.sync();
+          committed = true;
+          return { artifactId, preview: utf8Prefix(Buffer.from(content, 'utf8'), this.previewBytes).text };
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'EEXIST' || attempt === 2) throw error;
+        }
+      }
+      throw new Error('Could not allocate an artifact identifier.');
+    } finally {
+      await marker.close();
+      if (!committed) await rm(markerPath, { force: true }).catch(() => undefined);
+    }
   }
 
   async read(artifactId: string, offset: number, length: number): Promise<ArtifactChunk> {

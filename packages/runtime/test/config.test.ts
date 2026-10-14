@@ -131,3 +131,20 @@ test('audit: missing credential reference or environment key fails with the docu
   assert.throws(() => resolver.resolve('MODEL_A', 'https://api.example.com/v1', {}), { code: 'credentials_required', message: /Credential is not configured/ });
   assert.throws(() => resolver.resolve('MODEL_A', 'https://api.example.com/v1', { SUBZERO_MODEL_A_KEY: '' }), { code: 'credentials_required' });
 });
+
+test('audit: LocalArtifactStore.write retries when an artifact filename collides without tripping the run immutability marker', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'subzero-artifact-collision-'));
+  try {
+    await mkdir(dir, { recursive: true });
+    const collidingId = 'a'.repeat(64);
+    await writeFile(join(dir, `${collidingId}.artifact`), 'existing');
+    const artifacts = new LocalArtifactStore(dir);
+    let calls = 0;
+    (artifacts as any).allocateArtifactId = () => calls++ === 0 ? collidingId : 'b'.repeat(64);
+    const stored = await artifacts.write('run-collision', 'recovered content');
+    assert.equal(stored.artifactId, 'b'.repeat(64));
+    assert.equal((await artifacts.read(stored.artifactId, 0, 100)).text, 'recovered content');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

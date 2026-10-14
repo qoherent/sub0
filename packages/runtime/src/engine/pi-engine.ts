@@ -88,7 +88,7 @@ export class PiEngineFactory implements EngineFactory {
     try { identity = JSON.parse(await readFile(join(childDir, 'worker-owner.json'), 'utf8')) as Identity; }
     catch { return false; }
     if (!Number.isSafeInteger(identity.pid) || identity.pid <= 1 || !/^[a-f0-9]{48}$/.test(identity.incarnation) || !identity.runId ||
-      (expectedRunId && identity.runId !== expectedRunId) || (expectedGeneration !== undefined && identity.ownerGeneration !== expectedGeneration)) return false;
+      (expectedGeneration !== undefined ? identity.ownerGeneration !== expectedGeneration : Boolean(expectedRunId && identity.runId !== expectedRunId))) return false;
     if (this.brokerReceiptDir) {
       const ownerLive = await isBrokerIncarnationLive(this.brokerReceiptDir, identity.brokerId, identity.brokerIncarnation);
       if (ownerLive !== false) return false;
@@ -141,7 +141,7 @@ export class PiEngineFactory implements EngineFactory {
     catch (error) {
       this.openingWorkers.delete(ipc);
       ipc.initializationError = 'worker_initialization_failed';
-      await ipc.close();
+      await ipc.close(this.shutdownGraceMs);
       if (ipc.exitConfirmed) throw error;
     }
     return ipc;
@@ -256,8 +256,14 @@ class WorkerIpc {
     this.isGroupGone = isGroupGone;
     this.pid = child.pid ?? -1;
     this.incarnation = randomBytes(24).toString('hex');
-    this.ready = new Promise((resolve, reject) => { this.resolveReady = resolve; this.rejectReady = reject; });
+    this.ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('worker_ready_timeout')), controlRequestTimeoutMs);
+      timer.unref();
+      this.resolveReady = () => { clearTimeout(timer); resolve(); };
+      this.rejectReady = error => { clearTimeout(timer); reject(error); };
+    });
     this.exitPromise = new Promise(resolve => { this.resolveExit = resolve; });
+    child.stdin?.on('error', error => this.fail(error));
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', chunk => this.onData(String(chunk)));
     child.on('error', error => this.fail(error));
@@ -316,7 +322,9 @@ class WorkerIpc {
     const id = this.nextId++;
     const queue = new AsyncMessageQueue<WorkerMessage>();
     this.eventQueues.set(id, queue);
-    this.child.stdin?.write(`${JSON.stringify({ ...payload, id })}\n`);
+    this.child.stdin?.write(`${JSON.stringify({ ...payload, id })}\n`, error => {
+      if (error) queue.end(error);
+    });
     try { for await (const message of queue) { yield message; if (message.type === 'completed' || message.type === 'stopped' || message.type === 'failed' || message.type === 'interrupted') break; } }
     finally { this.eventQueues.delete(id); }
   }
@@ -325,8 +333,7 @@ class WorkerIpc {
     this.child.stdin?.end();
     const grace = new Promise(resolve => setTimeout(resolve, graceMs));
     await Promise.race([this.exitPromise, grace]);
-    this.signalGroup('SIGTERM');
-    await this.waitForGroupExit(500);
+    if (!await this.groupGone()) { this.signalGroup('SIGTERM'); await this.waitForGroupExit(500); }
     if (!await this.groupGone()) { this.signalGroup('SIGKILL'); await this.waitForGroupExit(1_000); }
     this.exitConfirmed = this.exited && await this.groupGone();
   }
