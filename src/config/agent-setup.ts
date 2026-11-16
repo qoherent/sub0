@@ -82,6 +82,29 @@ export class SetupRefusedError extends Error {
   }
 }
 
+/** The agent file could not be written: the file system refused the write; the original is untouched. */
+export class SetupWriteError extends Error {
+  readonly code = 'write_failed';
+  constructor(
+    file: string,
+    readonly cause: NodeJS.ErrnoException,
+  ) {
+    super(`could not write ${file}: ${cause.code} (${errnoReason(cause)})`);
+    this.name = 'SetupWriteError';
+  }
+}
+
+/** A failure the operating system reported for a file system call, as opposed to a programming error. */
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string' && typeof (err as NodeJS.ErrnoException).syscall === 'string';
+}
+
+/** The short reason of a Node fs error, e.g. "permission denied" from "EACCES: permission denied, open '…'". */
+function errnoReason(err: NodeJS.ErrnoException): string {
+  const match = /^[A-Z0-9_]+: ([^,]+)/.exec(err.message);
+  return match ? match[1]!.trim() : `${err.syscall} failed`;
+}
+
 export interface TierState {
   tier: string;
   host: string;
@@ -365,7 +388,12 @@ export function applyChanges(
   if (preview.refusals.length > 0) throw new SetupRefusedError(preview.refusals);
   if (preview.invalid !== undefined) throw new LoadError(preview.invalid);
   if (preview.nothingToChange) return { ...preview, written: false };
-  writeAtomic(agentFile, preview.text);
+  try {
+    writeAtomic(agentFile, preview.text);
+  } catch (err) {
+    if (isErrnoException(err)) throw new SetupWriteError(path.relative(projectRoot, agentFile), err);
+    throw err;
+  }
   return { ...preview, written: true };
 }
 

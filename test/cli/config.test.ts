@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/cli.js';
 import { getAgent } from '../../src/config/agent-config.js';
 import { DEFAULT_YAML, FAKE_PI_COMMAND, fakePiEnv, makeProject, piKernel, tempDir } from '../helpers.js';
@@ -165,6 +165,33 @@ describe('subzero config', () => {
     expect(doc).toMatchObject({ ok: false, code: 'refused_change', message: expect.stringMatching(/medium/) });
     expect(doc.refusals).toEqual(preview.refusals);
     expect(readFileSync(agentFile(root), 'utf8')).toBe(DEFAULT_YAML);
+  });
+
+  describe('when the agent file cannot be written', () => {
+    const locked: string[] = [];
+    afterEach(() => {
+      for (const dir of locked.splice(0)) chmodSync(dir, 0o755);
+    });
+
+    it.skipIf(process.getuid?.() === 0)('apply into a read-only .agents exits 1 with a write_failed refusal and leaves no temp file', async () => {
+      const root = makeProject();
+      const dir = path.dirname(agentFile(root));
+      const { run, json } = cli(root);
+      const flags = ['--tier', 'small=local/q:low'];
+      expect(await run('config', 'preview', ...flags)).toBe(0);
+      const { fingerprint } = json();
+      const before = readdirSync(dir);
+      chmodSync(dir, 0o500);
+      locked.push(dir);
+      expect(await run('config', 'apply', '--expect', fingerprint, ...flags)).toBe(1);
+      expect(json()).toMatchObject({
+        ok: false,
+        code: 'write_failed',
+        message: expect.stringMatching(/^could not write \.agents\/subzero\.yaml: EACCES/),
+      });
+      expect(readFileSync(agentFile(root), 'utf8')).toBe(DEFAULT_YAML);
+      expect(readdirSync(dir)).toEqual(before);
+    });
   });
 
   it('prints a load error as JSON and exits 1', async () => {

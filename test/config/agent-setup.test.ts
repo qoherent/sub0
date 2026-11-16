@@ -10,13 +10,15 @@ import {
   readSetupState,
   SetupConflictError,
   SetupRefusedError,
+  SetupWriteError,
   type Change,
   type SetupStarterSpec,
 } from '../../src/config/agent-setup.js';
 import { makeProject, tempDir } from '../helpers.js';
 
-// Test seams: a fixed random suffix for the temp file name, and a failing write or rename.
-const seam = vi.hoisted(() => ({ random: undefined as string | undefined, fail: undefined as 'write' | 'rename' | undefined }));
+// Test seams: a fixed random suffix for the temp file name, and a failing write or rename
+// (an fs error as Node raises it) or a write that hits a programming error.
+const seam = vi.hoisted(() => ({ random: undefined as string | undefined, fail: undefined as 'write' | 'rename' | 'bug' | undefined }));
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
   return {
@@ -31,12 +33,13 @@ vi.mock('node:fs', async (importOriginal) => {
     writeFileSync: (...args: Parameters<typeof actual.writeFileSync>) => {
       if (seam.fail === 'write' && typeof args[0] === 'number') {
         actual.writeFileSync(args[0], 'part');
-        throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+        throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC', syscall: 'write' });
       }
+      if (seam.fail === 'bug' && typeof args[0] === 'number') throw new TypeError('not a fs error');
       return actual.writeFileSync(...args);
     },
     renameSync: (...args: Parameters<typeof actual.renameSync>) => {
-      if (seam.fail === 'rename') throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+      if (seam.fail === 'rename') throw Object.assign(new Error('EIO: i/o error, rename'), { code: 'EIO', syscall: 'rename' });
       return actual.renameSync(...args);
     },
   };
@@ -563,12 +566,33 @@ ${AGENTS}`;
       const changes: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/new', thinking: 'low' }];
       const preview = previewChanges(root, changes, STARTER);
       seam.fail = fail;
-      expect(() => applyChanges(root, changes, preview.fingerprint, STARTER)).toThrow(fail === 'write' ? /ENOSPC/ : /EIO/);
+      let thrown: unknown;
+      try {
+        applyChanges(root, changes, preview.fingerprint, STARTER);
+      } catch (err) {
+        thrown = err;
+      }
       seam.fail = undefined;
+      expect(thrown).toBeInstanceOf(SetupWriteError);
+      expect(thrown).toMatchObject({
+        code: 'write_failed',
+        message: fail === 'write' ? 'could not write .agents/subzero.yaml: ENOSPC (no space left on device)' : 'could not write .agents/subzero.yaml: EIO (i/o error)',
+      });
       expect(read(root)).toBe(HAND_WRITTEN);
       expect(lstatSync(fileOf(root)).isFile()).toBe(true);
       expect(otherFiles(root)).toEqual([]);
     }
+  });
+
+  it('lets a write that fails with a programming error through as itself, still cleaning up', () => {
+    const root = makeProject(HAND_WRITTEN);
+    const changes: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/new', thinking: 'low' }];
+    const preview = previewChanges(root, changes, STARTER);
+    seam.fail = 'bug';
+    expect(() => applyChanges(root, changes, preview.fingerprint, STARTER)).toThrow(TypeError);
+    seam.fail = undefined;
+    expect(read(root)).toBe(HAND_WRITTEN);
+    expect(otherFiles(root)).toEqual([]);
   });
 
   it('never follows a symlink sitting at the temp file name', () => {

@@ -15,6 +15,7 @@ import {
   readSetupState,
   SetupConflictError,
   SetupRefusedError,
+  SetupWriteError,
   type Change,
   type SetupApplyResult,
   type SetupPreview,
@@ -61,7 +62,8 @@ export function isSetupError(err: unknown): boolean {
     err instanceof SetupServiceError ||
     err instanceof ChangeSetError ||
     err instanceof SetupConflictError ||
-    err instanceof SetupRefusedError
+    err instanceof SetupRefusedError ||
+    err instanceof SetupWriteError
   );
 }
 
