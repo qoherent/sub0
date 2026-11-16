@@ -17,11 +17,12 @@ import {
   FALLBACK_AGENT,
   flowYaml,
   GENERAL_AGENT,
+  isRecord,
+  isThinkingLevel,
   LoadError,
-  MissingAgentFileError,
   modelEndpoint,
   parseCatalog,
-  readAgentText,
+  readTextOrNull,
   spliceAgents,
   spliceTiers,
   THINKING_LEVELS,
@@ -170,15 +171,6 @@ function agentFileOf(projectRoot: string): string {
   return path.join(projectRoot, AGENT_FILE);
 }
 
-function readTextOrNull(agentFile: string): string | null {
-  try {
-    return readAgentText(agentFile);
-  } catch (err) {
-    if (err instanceof MissingAgentFileError) return null;
-    throw err;
-  }
-}
-
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
@@ -276,10 +268,6 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
   return { status: loaded.status, ...snapshot };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function nonEmpty(value: unknown, what: string): string {
   if (typeof value !== 'string' || value.trim() === '' || /[\r\n]/.test(value)) {
     throw new ChangeSetError(`${what} must be a non-empty one-line string`);
@@ -311,11 +299,11 @@ export function normalizeChangeSet(changes: readonly Change[]): Change[] {
       case 'setTier': {
         const tier = nonEmpty(raw.tier, 'a tier name');
         const model = nonEmpty(raw.model, `the model of tier "${tier}"`);
-        if (typeof raw.thinking !== 'string' || !(THINKING_LEVELS as readonly string[]).includes(raw.thinking)) {
+        if (!isThinkingLevel(raw.thinking)) {
           throw new ChangeSetError(`tier "${tier}": thinking must be one of ${THINKING_LEVELS.join(', ')}`);
         }
         once(`tier:${tier}`, `tier "${tier}"`);
-        out.push({ op: 'setTier', tier, model, thinking: raw.thinking as ThinkingLevel });
+        out.push({ op: 'setTier', tier, model, thinking: raw.thinking });
         break;
       }
       case 'unsetTier': {
@@ -431,8 +419,8 @@ function plan(agentFile: string, text: string | null, changes: Change[], starter
       }
     }
   }
-  const blocking = !finalTiers.has(DEFAULT_TIER);
-  if (blocking) refusals.push({ change: null, message: 'the medium tier is required: choose a model for it' });
+  const noMediumTier = !finalTiers.has(DEFAULT_TIER);
+  if (noMediumTier) refusals.push({ change: null, message: 'the medium tier is required: choose a model for it' });
 
   const used = overrideEndpoints(catalog);
   for (const t of finalTiers.values()) used.add(modelEndpoint(t.model));
@@ -503,14 +491,14 @@ function plan(agentFile: string, text: string | null, changes: Change[], starter
     if (keptLimits.includes(endpoint)) edits.push(replaceScalar(first.doc, ['endpoints', endpoint, 'parallel'], parallel));
   }
   // Pass 2 adds new entries to the edited text.
-  const second = createSplicer(applyEdits(original, edits));
+  const second = edits.length === 0 ? first : createSplicer(applyEdits(original, edits));
   spliceTiers(second, Object.fromEntries([...setTiers].filter(([name]) => !catalog.tiers.has(name))));
   spliceAgents(second, starterAgents);
   spliceLimits(second, Object.fromEntries([...setLimits].filter(([e]) => !keptLimits.includes(e))));
   const next = second.result();
 
   let invalid: string | undefined;
-  if (!blocking) {
+  if (!noMediumTier) {
     try {
       const result = parseCatalog(next, agentFile);
       const tiersMatch = result.tiers.size === finalTiers.size && [...finalTiers].every(([n, t]) => {
@@ -573,16 +561,11 @@ function applyEdits(text: string, edits: Edit[]): string {
   return next;
 }
 
-/** A scalar as it is written in a flow or block value. */
-function scalarText(value: string | number): string {
-  return flowYaml([value]).slice(2, -2);
-}
-
 function replaceScalar(doc: Document, keys: string[], value: string | number): Edit {
   const node = doc.getIn(keys, true);
   const range = rangeOf(node);
   if (!isScalar(node) || range === undefined) throw new LoadError(`agent file: ${keys.join('.')} is not a plain value setup can edit`);
-  return { start: range[0], end: range[1], text: scalarText(value) };
+  return { start: range[0], end: range[1], text: yamlKey(value) };
 }
 
 /** Replace the fields of a tier that change, keeping the rest of its text. */
@@ -726,10 +709,10 @@ function unifiedDiff(before: string | null, after: string, context = 2): string 
   });
   const out = [`--- ${before === null ? '/dev/null' : AGENT_FILE}`, `+++ ${AGENT_FILE}`];
   for (const [from, to] of hunks) {
-    const before = ops.slice(0, from);
+    const preceding = ops.slice(0, from);
     const hunk = ops.slice(from, to);
-    const aStart = before.filter((o) => o.op !== '+').length;
-    const bStart = before.filter((o) => o.op !== '-').length;
+    const aStart = preceding.filter((o) => o.op !== '+').length;
+    const bStart = preceding.filter((o) => o.op !== '-').length;
     const aLen = hunk.filter((o) => o.op !== '+').length;
     const bLen = hunk.filter((o) => o.op !== '-').length;
     out.push(`@@ -${aLen === 0 ? aStart : aStart + 1},${aLen} +${bLen === 0 ? bStart : bStart + 1},${bLen} @@`);

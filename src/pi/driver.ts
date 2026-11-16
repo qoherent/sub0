@@ -62,7 +62,7 @@ const LIST_TIMEOUT_MS = 30_000;
 // A cold local model may need this long to load before it answers.
 const CHECK_TIMEOUT_MS = 120_000;
 /** The one prompt a model check sends. */
-export const CHECK_PROMPT = 'Reply with the single word: ok';
+const CHECK_PROMPT = 'Reply with the single word: ok';
 /** What pi prints on stderr when it does not know a model, as an error or a warning. */
 const UNKNOWN_MODEL = /model\b.*\bnot found/i;
 const NO_MODELS =
@@ -390,38 +390,11 @@ class PiProbe {
   }
 
   private signal(signal: NodeJS.Signals): void {
-    const pid = this.child.pid;
-    if (pid === undefined) return;
-    if (this.exited) {
-      // After pi is reaped its id is safe to use only while its group has members.
-      if (!groupHasMembers(pid)) return;
-      try {
-        process.kill(-pid, signal);
-      } catch {
-        // the group is already gone
-      }
-      return;
-    }
-    for (const target of [pid, ...descendants(pid)]) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-          // already gone
-        }
-      }
-    }
+    signalProcessTree(this.child.pid, this.exited, signal);
   }
 
-  private async exitedWithin(ms: number): Promise<boolean> {
-    if (this.exited) return true;
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
-    const result = await Promise.race([this.exit.then(() => true as const), timedOut]);
-    clearTimeout(timer);
-    return result;
+  private exitedWithin(ms: number): Promise<boolean> {
+    return waitForExit(this.exit, this.exited, ms);
   }
 }
 
@@ -466,7 +439,7 @@ function hostModel(model: any, index: number): HostModel {
  * the thinking level map does not mark null, and xhigh or max only when the map
  * gives them a value. THINKING_LEVELS has pi-ai's order, off to max.
  */
-export function supportedThinkingLevels(reasoning: boolean, thinkingLevelMap: unknown): ThinkingLevel[] {
+function supportedThinkingLevels(reasoning: boolean, thinkingLevelMap: unknown): ThinkingLevel[] {
   if (!reasoning) return ['off'];
   const map = typeof thinkingLevelMap === 'object' && thinkingLevelMap !== null ? (thinkingLevelMap as Record<string, unknown>) : {};
   return THINKING_LEVELS.filter((level) => {
@@ -878,13 +851,8 @@ class PiChildRun {
     await this.exit;
   }
 
-  private async exitedWithin(ms: number): Promise<boolean> {
-    if (this.exited) return true;
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
-    const result = await Promise.race([this.exit!.then(() => true as const), timedOut]);
-    clearTimeout(timer);
-    return result;
+  private exitedWithin(ms: number): Promise<boolean> {
+    return waitForExit(this.exit!, this.exited, ms);
   }
 
   /**
@@ -892,53 +860,68 @@ class PiChildRun {
    * spawns detached shells, which a signal to pi's own group does not reach.
    */
   private signalTree(signal: NodeJS.Signals): void {
-    const pid = this.child?.pid;
-    if (pid === undefined || this.exited) return this.signalGroup(signal);
-    const targets = [pid, ...descendants(pid)];
-    for (const target of targets) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-          // already gone
-        }
-      }
-    }
+    signalProcessTree(this.child?.pid, this.exited, signal);
   }
 
   /** Signal the groups of pi's descendants, not pi itself, while pi is alive. */
   private signalDescendants(signal: NodeJS.Signals): void {
     const pid = this.child?.pid;
     if (pid === undefined || this.exited) return;
-    for (const target of descendants(pid)) {
+    signalTargets(descendants(pid), signal);
+  }
+
+  /** Signal pi's own process group. */
+  private signalGroup(signal: NodeJS.Signals): void {
+    signalOwnGroup(this.child?.pid, this.exited, signal);
+  }
+}
+
+/** True once exit settles within ms; true at once when the process has already exited. */
+async function waitForExit(exit: Promise<unknown>, exited: boolean, ms: number): Promise<boolean> {
+  if (exited) return true;
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
+  const result = await Promise.race([exit.then(() => true as const), timedOut]);
+  clearTimeout(timer);
+  return result;
+}
+
+/** Signal each target's process group, or the target alone when it leads no group. */
+function signalTargets(targets: readonly number[], signal: NodeJS.Signals): void {
+  for (const target of targets) {
+    try {
+      process.kill(-target, signal);
+    } catch {
       try {
-        process.kill(-target, signal);
+        process.kill(target, signal);
       } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-          // already gone
-        }
+        // already gone
       }
     }
   }
+}
 
-  /**
-   * Signal pi's own process group. After pi is reaped its id is safe to use only
-   * while a member of the group is still alive.
-   */
-  private signalGroup(signal: NodeJS.Signals): void {
-    const pid = this.child?.pid;
-    if (pid === undefined) return;
-    if (this.exited && !groupHasMembers(pid)) return;
-    try {
-      process.kill(-pid, signal);
-    } catch {
-      // the group is already gone
-    }
+/**
+ * Signal a process's own group. After the process is reaped its id is safe to use
+ * only while a member of the group is still alive.
+ */
+function signalOwnGroup(pid: number | undefined, exited: boolean, signal: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  if (exited && !groupHasMembers(pid)) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // the group is already gone
   }
+}
+
+/**
+ * Signal a live process's group and the group of every descendant; once it has
+ * exited, only its own group, under signalOwnGroup's guard.
+ */
+function signalProcessTree(pid: number | undefined, exited: boolean, signal: NodeJS.Signals): void {
+  if (pid === undefined || exited) return signalOwnGroup(pid, exited, signal);
+  signalTargets([pid, ...descendants(pid)], signal);
 }
 
 function failed(failureKind: 'skill_mismatch' | 'error', message: string): ChildOutcome {

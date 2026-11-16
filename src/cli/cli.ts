@@ -19,20 +19,28 @@ import path from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import {
   addStarterEntries,
+  isThinkingLevel,
   LoadError,
   StarterHostConflictError,
   THINKING_LEVELS,
   TierError,
   UnknownAgentError,
   UnresolvedRootError,
-  type ThinkingLevel,
 } from '../config/agent-config.js';
-import { ChangeSetError, SetupConflictError, SetupRefusedError, type Change } from '../config/agent-setup.js';
+import type { Change } from '../config/agent-setup.js';
 import { isTaskId } from '../core/ids.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { DelegationService, EmptyBriefError, type DelegationServiceOptions } from '../service/delegation-service.js';
-import { SetupService, SetupServiceError, type ModelCheckInput } from '../service/setup-service.js';
-import { describeEvent, formatResult, formatStatusLine, listingStatus, statusFacts, withNotice } from '../service/status-text.js';
+import { isSetupError, parseStarterOptions, SetupService, setupRefusalBody, type ModelCheckInput } from '../service/setup-service.js';
+import {
+  describeEvent,
+  formatResult,
+  formatStarterResult,
+  formatStatusLine,
+  listingStatus,
+  statusFacts,
+  withNotice,
+} from '../service/status-text.js';
 
 export interface CliIo {
   out: (text: string) => void;
@@ -99,8 +107,8 @@ export async function runCli(argv: string[], io: CliIo, options: CliOptions): Pr
     }
   } catch (err) {
     // config prints its refusals as JSON on stdout, including a root that does not resolve.
-    if (command === 'config' && (knownError(err) || configError(err))) {
-      io.out(json(refusal(err as Error)));
+    if (command === 'config' && (knownError(err) || isSetupError(err))) {
+      io.out(json(setupRefusalBody(err as Error)));
       return 1;
     }
     if (knownError(err)) {
@@ -110,9 +118,6 @@ export async function runCli(argv: string[], io: CliIo, options: CliOptions): Pr
     throw err;
   }
 }
-
-const DEFAULT_INIT_TIMEOUT = 1200;
-const DEFAULT_INIT_THINKING: ThinkingLevel = 'medium';
 
 async function init(service: DelegationService, args: string[], io: CliIo, options: CliOptions): Promise<number> {
   const parsed = parseNamed(args, { host: { type: 'string' }, timeout: { type: 'string' }, thinking: { type: 'string' } });
@@ -127,16 +132,12 @@ async function init(service: DelegationService, args: string[], io: CliIo, optio
     return 2;
   }
   const { host: hostOption, timeout: timeoutOption, thinking: thinkingOption } = parsed.values;
-  const timeout = timeoutOption === undefined ? DEFAULT_INIT_TIMEOUT : Number(timeoutOption);
-  if (timeoutOption !== undefined && (timeoutOption.trim() === '' || !(timeout > 0))) {
-    io.err(`subzero: --timeout must be a positive number of seconds (got "${timeoutOption}")`);
+  const starter = parseStarterOptions({ thinking: thinkingOption, timeout: timeoutOption });
+  if ('error' in starter) {
+    io.err(`subzero: ${starter.error}`);
     return 2;
   }
-  const thinking = thinkingOption ?? DEFAULT_INIT_THINKING;
-  if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
-    io.err(`subzero: --thinking must be one of ${THINKING_LEVELS.join(', ')} (got "${thinking}")`);
-    return 2;
-  }
+  const { thinking, timeout } = starter;
 
   const supported = options.kernel.supportedHosts();
   if (supported.length === 0) {
@@ -164,18 +165,12 @@ async function init(service: DelegationService, args: string[], io: CliIo, optio
   const result = addStarterEntries(service.projectRoot!, {
     host,
     model,
-    thinking: thinking as ThinkingLevel,
+    thinking,
     timeout,
     generalTools: tools.general,
     fallbackTools: tools.fallback,
   });
-  const name = (entry: string) => (entry === 'medium' ? 'the medium tier' : `the ${entry} agent`);
-  if (result.added.length === 0) {
-    io.out('all three entries (the medium tier, the general agent and the fallback agent) are already there; nothing changed');
-    return 0;
-  }
-  io.out(`added ${result.added.map(name).join(', ')}`);
-  if (result.present.length > 0) io.out(`already there: ${result.present.map(name).join(', ')}`);
+  for (const line of formatStarterResult(result)) io.out(line);
   return 0;
 }
 
@@ -188,29 +183,8 @@ function parseNamed<T extends Record<string, { type: 'string' }>>(args: string[]
   }
 }
 
-/** Errors the setup service reports for a request it refuses; config prints them as JSON. */
-function configError(err: unknown): boolean {
-  return (
-    err instanceof SetupServiceError ||
-    err instanceof ChangeSetError ||
-    err instanceof SetupConflictError ||
-    err instanceof SetupRefusedError
-  );
-}
-
 function json(value: unknown): string {
   return JSON.stringify(value, null, 2);
-}
-
-/** The JSON a refused config command prints: the error's code, its one-line reason and any refusals. */
-function refusal(err: Error): Record<string, unknown> {
-  const code = (err as { code?: unknown }).code;
-  return {
-    ok: false,
-    code: typeof code === 'string' ? code : 'error',
-    message: err.message,
-    ...(err instanceof SetupRefusedError ? { refusals: err.refusals } : {}),
-  };
 }
 
 /** A malformed config argument: a usage error, exit 2. */
@@ -223,10 +197,10 @@ function modelAndThinking(spec: string, what: string): ModelCheckInput {
   const model = spec.slice(0, colon);
   const thinking = spec.slice(colon + 1);
   if (model.trim() === '') throw new ConfigUsageError(`${what} "${spec}" needs a model before the thinking level`);
-  if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
+  if (!isThinkingLevel(thinking)) {
     throw new ConfigUsageError(`${what} "${spec}": the thinking level must be one of ${THINKING_LEVELS.join(', ')} (got "${thinking}")`);
   }
-  return { model, thinking: thinking as ThinkingLevel };
+  return { model, thinking };
 }
 
 /** Split `<name>=<value>` at the first equals sign; both parts must be non-empty. */

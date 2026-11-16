@@ -16,6 +16,10 @@ export const AGENT_FILE = path.join('.agents', 'subzero.yaml');
 export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return (THINKING_LEVELS as readonly unknown[]).includes(value);
+}
+
 export const DEFAULT_TIER = 'medium';
 export const GENERAL_AGENT = 'general';
 export const FALLBACK_AGENT = 'fallback';
@@ -207,7 +211,7 @@ const tierFieldSchemas = {
   thinking: z.enum(THINKING_LEVELS),
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -225,6 +229,16 @@ export function readAgentText(agentFile: string): string {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') throw new MissingAgentFileError(agentFile);
     throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
+  }
+}
+
+/** The agent file's text, or null when there is no file. */
+export function readTextOrNull(agentFile: string): string | null {
+  try {
+    return readAgentText(agentFile);
+  } catch (err) {
+    if (err instanceof MissingAgentFileError) return null;
+    throw err;
   }
 }
 
@@ -519,12 +533,7 @@ export interface StarterResult {
  */
 export function addStarterEntries(projectRoot: string, spec: StarterSpec): StarterResult {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  let text: string | null = null;
-  try {
-    text = readAgentText(agentFile);
-  } catch (err) {
-    if (!(err instanceof LoadError) || !/is missing/.test(err.message)) throw err;
-  }
+  const text = readTextOrNull(agentFile);
 
   if (text !== null) {
     parseCatalog(text, agentFile, { allowMissingStarter: true });
@@ -652,8 +661,8 @@ export function createSplicer(original: string): Splicer {
   };
 }
 
-/** A map key as it is written in the agent file. */
-export function yamlKey(key: string): string {
+/** A map key or a scalar as it is written in the agent file. */
+export function yamlKey(key: string | number): string {
   return flowYaml([key]).slice(2, -2);
 }
 

@@ -3,6 +3,7 @@
 // The one owner of the wording of a task's state: every reply that tells a parent
 // or a person whether a child has started, and every result text, comes through
 // here, so that no front end imports another front end for it.
+import type { StarterResult } from '../config/agent-config.js';
 import { isUnavailable, type DomainEvent, type Measure, type Result, type SessionUsage } from '../core/types.js';
 import type { CollectReply, DelegateReply, TaskListing } from './delegation-service.js';
 
@@ -120,4 +121,15 @@ export function completionNotice(taskId: string, status: string, live: TaskListi
 
 export function stopNotice(taskId: string): string {
   return `task ${taskId} was stopped; no action is needed.`;
+}
+
+/** What `init <model>` reports about the starter entries: one line each. */
+export function formatStarterResult(result: StarterResult): string[] {
+  if (result.added.length === 0) {
+    return ['all three entries (the medium tier, the general agent and the fallback agent) are already there; nothing changed'];
+  }
+  const name = (entry: string) => (entry === 'medium' ? 'the medium tier' : `the ${entry} agent`);
+  const lines = [`added ${result.added.map(name).join(', ')}`];
+  if (result.present.length > 0) lines.push(`already there: ${result.present.map(name).join(', ')}`);
+  return lines;
 }

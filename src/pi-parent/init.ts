@@ -10,10 +10,11 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { parseArgs } from 'node:util';
 import { Type } from 'typebox';
-import { addStarterEntries, LoadError, StarterHostConflictError, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
-import { ChangeSetError, DEFAULT_SETUP_TIMEOUT, SetupConflictError, SetupRefusedError, type Change } from '../config/agent-setup.js';
+import { addStarterEntries, LoadError, StarterHostConflictError, type ThinkingLevel } from '../config/agent-config.js';
+import { SetupConflictError, SetupRefusedError, type Change } from '../config/agent-setup.js';
 import type { Kernel } from '../kernel/kernel.js';
-import { SetupService, SetupServiceError } from '../service/setup-service.js';
+import { isSetupError, parseStarterOptions, SetupService, SetupServiceError, setupRefusalBody } from '../service/setup-service.js';
+import { formatStarterResult } from '../service/status-text.js';
 import GUIDE from '../../skills/init/guided-init.md?raw';
 
 export const INIT_TOOL_NAMES = [
@@ -26,7 +27,9 @@ export const INIT_TOOL_NAMES = [
 ] as const;
 
 const OTHER = 'Other…';
-const QUICK_USAGE = 'Usage: /subzero init [<model> [--thinking <level>] [--timeout <seconds>]]';
+/** The syntax of `/subzero init`, shared with the `/subzero` usage line. */
+export const INIT_SYNTAX = 'init [<model> [--thinking <level>] [--timeout <seconds>]]';
+const QUICK_USAGE = `Usage: /subzero ${INIT_SYNTAX}`;
 
 /** How each guide step maps to a pi tool, appended to the guide in the kickoff message. */
 const PI_MAPPING = `## In pi
@@ -43,7 +46,7 @@ The init tools are on only for this run, and they switch off when the run ends. 
 In step 8: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed.`;
 
 /** The user message `/subzero init` sends: the shared guide followed by the pi mapping. */
-export const INIT_KICKOFF = `Run subzero's guided init for this project, following this guide.\n\n${GUIDE.trim()}\n\n${PI_MAPPING}\n`;
+const INIT_KICKOFF = `Run subzero's guided init for this project, following this guide.\n\n${GUIDE.trim()}\n\n${PI_MAPPING}\n`;
 
 export interface PiInitOptions {
   kernel: Kernel;
@@ -72,18 +75,10 @@ const reply = (value: unknown, isError = false) => ({
 /** A refused setup call as the CLI's `config` commands print it: code, one-line reason and any refusals. */
 function refusal(err: unknown) {
   const error = err instanceof Error ? err : new Error(String(err));
-  const code = (error as { code?: unknown }).code;
-  return reply({
-    ok: false,
-    code: typeof code === 'string' ? code : error instanceof LoadError ? 'load_error' : 'error',
-    message: error.message,
-    ...(error instanceof SetupRefusedError ? { refusals: error.refusals } : {}),
-  }, true);
+  return reply(setupRefusalBody(error), true);
 }
 
-const known = (err: unknown) =>
-  err instanceof SetupServiceError || err instanceof ChangeSetError || err instanceof SetupConflictError ||
-  err instanceof SetupRefusedError || err instanceof LoadError || err instanceof StarterHostConflictError;
+const known = (err: unknown) => isSetupError(err) || err instanceof LoadError || err instanceof StarterHostConflictError;
 
 /** The host the starter entries are written for, chosen as `subzero init` chooses it. */
 function starterHost(kernel: Kernel): string {
@@ -223,16 +218,9 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
     }
     const [model, ...extra] = parsed.positionals;
     if (model === undefined || extra.length) { say(ctx, QUICK_USAGE); return; }
-    const { thinking = 'medium', timeout: timeoutOption } = parsed.values;
-    const timeout = timeoutOption === undefined ? DEFAULT_SETUP_TIMEOUT : Number(timeoutOption);
-    if (timeoutOption !== undefined && (timeoutOption.trim() === '' || !(timeout > 0))) {
-      say(ctx, `--timeout must be a positive number of seconds (got "${timeoutOption}")`, 'error');
-      return;
-    }
-    if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
-      say(ctx, `--thinking must be one of ${THINKING_LEVELS.join(', ')} (got "${thinking}")`, 'error');
-      return;
-    }
+    const starter = parseStarterOptions(parsed.values);
+    if ('error' in starter) { say(ctx, starter.error, 'error'); return; }
+    const { thinking, timeout } = starter;
     try {
       const host = starterHost(options.kernel);
       // A missing prerequisite stops init before anything is written.
@@ -244,17 +232,10 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
         return;
       }
       const result = addStarterEntries(await options.projectRoot(), {
-        host, model, thinking: thinking as ThinkingLevel, timeout, generalTools: tools.general, fallbackTools: tools.fallback,
+        host, model, thinking, timeout, generalTools: tools.general, fallbackTools: tools.fallback,
       });
-      const name = (entry: string) => (entry === 'medium' ? 'the medium tier' : `the ${entry} agent`);
-      if (result.added.length === 0) {
-        say(ctx, 'all three entries (the medium tier, the general agent and the fallback agent) are already there; nothing changed');
-        return;
-      }
-      options.refreshTierText();
-      const lines = [`added ${result.added.map(name).join(', ')}`];
-      if (result.present.length) lines.push(`already there: ${result.present.map(name).join(', ')}`);
-      say(ctx, lines.join('\n'));
+      if (result.added.length > 0) options.refreshTierText();
+      say(ctx, formatStarterResult(result).join('\n'));
     } catch (err) {
       say(ctx, (err as Error).message, 'error');
     }

@@ -7,7 +7,7 @@ import { TIER_WORDS } from '../config/tier-words.js';
 import type { Kernel } from '../kernel/kernel.js';
 import type { DelegationService, TaskListing } from '../service/delegation-service.js';
 import { describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
-import { registerPiInit } from './init.js';
+import { INIT_SYNTAX, registerPiInit } from './init.js';
 import { mapPiRequest } from './request.js';
 import { sendCompletion, sendStopped } from './notices.js';
 import { clashWarning, SessionWidget } from './ui.js';
@@ -18,7 +18,7 @@ const describe = (reply: Parameters<typeof describeTaskReply>[0]) =>
   withNotice(describeTaskReply(reply, undefined, names), 'notice' in reply ? reply.notice : undefined);
 const formatSessionListing = (tasks: TaskListing[]) =>
   tasks.length ? tasks.map((task) => `${task.taskId} · ${task.agent} · ${listingStatus(task)}`).join('\n') : 'no tasks';
-const USAGE = 'Usage: /subzero [attach <id> | cancel [id] | init [<model> [--thinking <level>] [--timeout <seconds>]]]';
+const USAGE = `Usage: /subzero [attach <id> | cancel [id] | ${INIT_SYNTAX}]`;
 const BASE_DESCRIPTION = 'Delegate an isolated task. Await background tasks before using their results.';
 
 /** The `subagent` description: each tier phrase, configured or not, from the project's agent file. */
@@ -211,13 +211,14 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
   pi.registerCommand('subzero', {
     description: 'List or cancel subzero tasks for this session, or set subzero up with init.',
     async handler(args, ctx) {
-      const [first, ...rest] = args.trim().split(/\s+/);
+      const words = args.trim().split(/\s+/);
+      const [first, ...rest] = words;
       if (first === 'init') {
         if (!init) { ctx.ui.notify('subzero init is not available in this session'); return; }
         await init.command(rest, ctx);
         return;
       }
-      const [action, id, ...extra] = args.trim().split(/\s+/);
+      const [action, id, ...extra] = words;
       if (extra.length) { ctx.ui.notify(USAGE); return; }
       if (action === 'attach') {
         if (!id) { ctx.ui.notify('Usage: /subzero attach <id>'); return; }

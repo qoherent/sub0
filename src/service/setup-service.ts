@@ -6,12 +6,15 @@
 // driver of the host; the conversation itself lives in the shared guide text. Every
 // operation acts on the project root the service was made with, never the process's
 // working directory, and every result is plain JSON.
-import { THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
+import { isThinkingLevel, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
 import {
   applyChanges,
+  ChangeSetError,
   DEFAULT_SETUP_TIMEOUT,
   previewChanges,
   readSetupState,
+  SetupConflictError,
+  SetupRefusedError,
   type Change,
   type SetupApplyResult,
   type SetupPreview,
@@ -50,6 +53,47 @@ export class SetupServiceError extends Error {
     super(message);
     this.name = 'SetupServiceError';
   }
+}
+
+/** Whether the setup service refused a request, as opposed to failing. */
+export function isSetupError(err: unknown): boolean {
+  return (
+    err instanceof SetupServiceError ||
+    err instanceof ChangeSetError ||
+    err instanceof SetupConflictError ||
+    err instanceof SetupRefusedError
+  );
+}
+
+/** A refused request as both parents report it: the error's code, its one-line reason and any refusals. */
+export function setupRefusalBody(err: Error): Record<string, unknown> {
+  const code = (err as { code?: unknown }).code;
+  return {
+    ok: false,
+    code: typeof code === 'string' ? code : 'error',
+    message: err.message,
+    ...(err instanceof SetupRefusedError ? { refusals: err.refusals } : {}),
+  };
+}
+
+/**
+ * The thinking level and timeout of `init <model>`, from its optional flags: thinking
+ * defaults to medium, the timeout to DEFAULT_SETUP_TIMEOUT. An error is one line
+ * without a prefix, for the caller to report.
+ */
+export function parseStarterOptions(options: {
+  thinking?: string | undefined;
+  timeout?: string | undefined;
+}): { thinking: ThinkingLevel; timeout: number } | { error: string } {
+  const { thinking = 'medium', timeout: timeoutOption } = options;
+  const timeout = timeoutOption === undefined ? DEFAULT_SETUP_TIMEOUT : Number(timeoutOption);
+  if (timeoutOption !== undefined && (timeoutOption.trim() === '' || !(timeout > 0))) {
+    return { error: `--timeout must be a positive number of seconds (got "${timeoutOption}")` };
+  }
+  if (!isThinkingLevel(thinking)) {
+    return { error: `--thinking must be one of ${THINKING_LEVELS.join(', ')} (got "${thinking}")` };
+  }
+  return { thinking, timeout };
 }
 
 export interface ModelsResult {
@@ -139,7 +183,7 @@ export class SetupService {
       if (typeof model !== 'string' || model.trim() === '' || /[\r\n]/.test(model)) {
         throw new SetupServiceError('invalid_check', `model ${i + 1} must be a non-empty one-line model name`);
       }
-      if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
+      if (!isThinkingLevel(thinking)) {
         throw new SetupServiceError('invalid_check', `the thinking level of ${model} must be one of ${THINKING_LEVELS.join(', ')}`);
       }
     }
