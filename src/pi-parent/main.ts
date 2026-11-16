@@ -14,5 +14,5 @@ export default function subzero(pi: ExtensionAPI): void {
   registerPiExtension(pi, (ctx) => new DelegationService({
     kernel, env: { SUBZERO_PROJECT_DIR: ctx.cwd }, roots: () => [],
     warn: (message) => { if (ctx.hasUI) ctx.ui.notify(message, 'warning'); else process.stderr.write(`subzero: ${message}\n`); },
-  }), () => driver.killAll(), fileURLToPath(import.meta.url));
+  }), () => driver.killAll(), fileURLToPath(import.meta.url), kernel);
 }

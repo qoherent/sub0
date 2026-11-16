@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url';
 import { Type } from 'typebox';
 import { configuredTierNames } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
+import type { Kernel } from '../kernel/kernel.js';
 import type { DelegationService, TaskListing } from '../service/delegation-service.js';
 import { describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
+import { registerPiInit } from './init.js';
 import { mapPiRequest } from './request.js';
 import { sendCompletion, sendStopped } from './notices.js';
 import { clashWarning, SessionWidget } from './ui.js';
@@ -16,8 +18,24 @@ const describe = (reply: Parameters<typeof describeTaskReply>[0]) =>
   withNotice(describeTaskReply(reply, undefined, names), 'notice' in reply ? reply.notice : undefined);
 const formatSessionListing = (tasks: TaskListing[]) =>
   tasks.length ? tasks.map((task) => `${task.taskId} · ${task.agent} · ${listingStatus(task)}`).join('\n') : 'no tasks';
+const USAGE = 'Usage: /subzero [attach <id> | cancel [id] | init [<model> [--thinking <level>] [--timeout <seconds>]]]';
+const BASE_DESCRIPTION = 'Delegate an isolated task. Await background tasks before using their results.';
 
-export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: ExtensionContext) => DelegationService, killRemaining: () => void = () => {}, ownFile = fileURLToPath(import.meta.url)): void {
+/** The `subagent` description: each tier phrase, configured or not, from the project's agent file. */
+function tierDescription(root: string): string {
+  try {
+    const tiers = configuredTierNames(root);
+    return ['Delegate an isolated task. Await background tasks with subzero_await before using their results.',
+      ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier)
+        ? `${phrase} (${tier}): pass model: "${tier}".`
+        : `${phrase} (${tier}): not configured, omit model.`),
+    ].join('\n');
+  } catch {
+    return BASE_DESCRIPTION;
+  }
+}
+
+export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: ExtensionContext) => DelegationService, killRemaining: () => void = () => {}, ownFile = fileURLToPath(import.meta.url), kernel?: Kernel): void {
   let service: DelegationService | undefined;
   let sessionId = '';
   let projectRoot = '';
@@ -25,7 +43,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
   let stopping: Promise<void> | undefined;
   let widget: SessionWidget | undefined;
   let warning: string | undefined;
-  let description = 'Delegate an isolated task. Await background tasks before using their results.';
+  let description = BASE_DESCRIPTION;
   const getService = () => {
     if (!service) throw new Error('subzero session has not started');
     return service;
@@ -52,16 +70,9 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     projectRoot = ctx.cwd;
     session = { closed: false };
     widget = new SessionWidget(service, sessionId, ctx);
-    description = 'Delegate an isolated task. Await background tasks before using their results.';
+    description = BASE_DESCRIPTION;
     await service.start();
-    try {
-      const tiers = configuredTierNames(ctx.cwd);
-      description = ['Delegate an isolated task. Await background tasks with subzero_await before using their results.',
-        ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier)
-          ? `${phrase} (${tier}): pass model: "${tier}".`
-          : `${phrase} (${tier}): not configured, omit model.`),
-      ].join('\n');
-    } catch {}
+    description = tierDescription(ctx.cwd);
     pi.setActiveTools(pi.getActiveTools());
     warning = clashWarning(pi, ownFile);
     if (warning) {
@@ -184,11 +195,30 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
       });
     },
   });
+  // Guided init and its quick path; the tier text is rebuilt after a write, so new tiers show at once.
+  const init = kernel && registerPiInit(pi, {
+    kernel,
+    projectRoot: async () => {
+      const svc = getService();
+      await svc.start();
+      return svc.projectRoot ?? projectRoot;
+    },
+    refreshTierText: () => {
+      description = tierDescription(projectRoot);
+      pi.setActiveTools(pi.getActiveTools());
+    },
+  });
   pi.registerCommand('subzero', {
-    description: 'List or cancel subzero tasks for this session.',
+    description: 'List or cancel subzero tasks for this session, or set subzero up with init.',
     async handler(args, ctx) {
+      const [first, ...rest] = args.trim().split(/\s+/);
+      if (first === 'init') {
+        if (!init) { ctx.ui.notify('subzero init is not available in this session'); return; }
+        await init.command(rest, ctx);
+        return;
+      }
       const [action, id, ...extra] = args.trim().split(/\s+/);
-      if (extra.length) { ctx.ui.notify('Usage: /subzero [attach <id> | cancel [id]]'); return; }
+      if (extra.length) { ctx.ui.notify(USAGE); return; }
       if (action === 'attach') {
         if (!id) { ctx.ui.notify('Usage: /subzero attach <id>'); return; }
         const attach = await getService().attachCommand(id);
@@ -215,7 +245,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         if (!ctx.hasUI) process.stderr.write(`subzero: ${count} tasks cancelled\n`);
         return;
       }
-      if (action) { ctx.ui.notify('Usage: /subzero [attach <id> | cancel [id]]'); return; }
+      if (action) { ctx.ui.notify(USAGE); return; }
       const tasks = await getService().list(sessionId);
       const listing = formatSessionListing(tasks);
       ctx.ui.notify(warning ? `${listing}\n${warning}` : listing);
