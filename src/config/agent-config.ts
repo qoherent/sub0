@@ -214,7 +214,8 @@ export function loadAgentFile(projectRoot: string): AgentCatalog {
   return parseCatalog(readAgentText(agentFile), agentFile);
 }
 
-function readAgentText(agentFile: string): string {
+/** The agent file's text; a missing file raises MissingAgentFileError. */
+export function readAgentText(agentFile: string): string {
   try {
     return readFileSync(agentFile, 'utf8');
   } catch (err) {
@@ -224,7 +225,16 @@ function readAgentText(agentFile: string): string {
   }
 }
 
-function parseCatalog(text: string, agentFile: string, allowMissingStarter = false): AgentCatalog {
+export interface ParseOptions {
+  /** Load a file without the medium tier, general or fallback (what init repairs). */
+  allowMissingStarter?: boolean;
+  /** Load a file whose endpoint limit no model belongs to (what guided init drops). */
+  allowUnusedLimits?: boolean;
+}
+
+/** Validate agent file text with the load rules delegation uses. */
+export function parseCatalog(text: string, agentFile: string, options: ParseOptions = {}): AgentCatalog {
+  const allowMissingStarter = options.allowMissingStarter === true;
   const malformed = (detail: string) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
   let parsed: unknown;
   try {
@@ -282,7 +292,7 @@ function parseCatalog(text: string, agentFile: string, allowMissingStarter = fal
     }
   }
   for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint)) {
+    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
       throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
     }
   }
@@ -514,7 +524,7 @@ export function addStarterEntries(projectRoot: string, spec: StarterSpec): Start
   }
 
   if (text !== null) {
-    parseCatalog(text, agentFile, true);
+    parseCatalog(text, agentFile, { allowMissingStarter: true });
   }
 
   const original = text ?? '';
@@ -534,95 +544,150 @@ export function addStarterEntries(projectRoot: string, spec: StarterSpec): Start
   note('fallback', hasFallback);
   if (result.added.length === 0) return result;
 
-  // Existing text is never re-rendered: new lines are spliced in after the last
-  // entry of a block map, or appended to the end of the file.
-  const flow = (value: unknown) => stringifyYaml(value, { collectionStyle: 'flow', lineWidth: 0 }).trimEnd();
-  const agentLines = (name: string, tools: string[], indent: string) =>
-    `${indent}${name}:\n${indent}  tools: ${flow(tools)}\n${indent}  timeout: ${spec.timeout}\n`;
-  const defaultLine = (indent: string) =>
-    `${indent}${DEFAULT_TIER}: ${flow({ host: spec.host, model: spec.model, thinking: spec.thinking })}\n`;
-
-  const inserts: { at: number; text: string }[] = [];
-  let appended = '';
-  const mapAt = (keys: string[]) => {
-    const node = doc.getIn(keys, true);
-    if (node === undefined || node === null) return undefined;
-    if (!isMap(node) || node.flow === true || node.items.length === 0 || node.range === null || node.range === undefined) {
-      throw new LoadError(`agent file: ${keys.join('.')} must be a block-style map for init to add entries to it`);
-    }
-    const first = (node.items[0]!.key as { range: [number, number, number] }).range[0];
-    return { end: node.range[1], indent: ' '.repeat(first - (original.lastIndexOf('\n', first - 1) + 1)) };
-  };
-  const insert = (at: number, body: string) => inserts.push({ at, text: (at > 0 && original[at - 1] !== '\n' ? '\n' : '') + body });
-  const insertInline = (keys: string[], entries: Record<string, unknown>): boolean => {
-    const node = doc.getIn(keys, true);
-    if (node === undefined || node === null) return false;
-    const range = (node as { range?: [number, number, number] | null }).range;
-    if (range === undefined || range === null) return false;
-    const rendered = flow(entries);
-    if (isMap(node) && node.flow === true) {
-      const contents = rendered.slice(1, -1).trim();
-      const source = original.slice(range[0], range[1]);
-      if (source.includes('\n')) {
-        const last = node.items.at(-1)?.value as { range?: [number, number, number] } | undefined;
-        if (last?.range !== undefined) {
-          const afterLast = original.slice(last.range[1], range[1] - 1).split('#', 1)[0]!;
-          if (!afterLast.includes(',')) inserts.push({ at: last.range[1], text: ',' });
-        }
-        const close = range[1] - 1;
-        const lineStart = original.lastIndexOf('\n', close - 1) + 1;
-        const indent = original.slice(lineStart, close).match(/^\s*/)?.[0] ?? '';
-        inserts.push({ at: close, text: `  ${contents}\n${indent}` });
-        return true;
-      }
-      const trailingComma = original.slice(range[0], range[1] - 1).trimEnd().endsWith(',');
-      inserts.push({ at: range[1] - 1, text: `${node.items.length && !trailingComma ? ', ' : ' '}${contents} ` });
-      return true;
-    }
-    if (typeof node === 'object' && 'value' in node && node.value === null) {
-      inserts.push({ at: range[0], text: ` ${rendered}` });
-      return true;
-    }
-    return false;
-  };
-
-  if (!hasDefault) {
-    const tierEntry = { [DEFAULT_TIER]: { host: spec.host, model: spec.model, thinking: spec.thinking } };
-    if (!insertInline(['models', 'tiers'], tierEntry) && !(!doc.hasIn(['models', 'tiers']) && insertInline(['models'], { tiers: tierEntry }))) {
-      const tiers = mapAt(['models', 'tiers']);
-      const models = tiers === undefined ? mapAt(['models']) : undefined;
-      if (tiers !== undefined) insert(tiers.end, defaultLine(tiers.indent));
-      else if (models !== undefined) insert(models.end, `${models.indent}tiers:\n${defaultLine(`${models.indent}  `)}`);
-      else appended += `models:\n  tiers:\n${defaultLine('    ')}`;
-    }
-  }
+  const splicer = createSplicer(original);
+  if (!hasDefault) spliceTiers(splicer, { [DEFAULT_TIER]: { host: spec.host, model: spec.model, thinking: spec.thinking } });
   if (!hasGeneral || !hasFallback) {
-    const entries: Record<string, unknown> = {};
-    if (!hasGeneral) entries[GENERAL_AGENT] = { tools: spec.generalTools, timeout: spec.timeout };
-    if (!hasFallback) entries[FALLBACK_AGENT] = { tools: spec.fallbackTools, timeout: spec.timeout };
-    if (!insertInline(['agents'], entries)) {
-      const agentsAt = mapAt(['agents']);
-      const indent = agentsAt?.indent ?? '  ';
-      let agentBody = '';
-      if (!hasGeneral) agentBody += agentLines(GENERAL_AGENT, spec.generalTools, indent);
-      if (!hasFallback) agentBody += agentLines(FALLBACK_AGENT, spec.fallbackTools, indent);
-      if (agentsAt !== undefined) insert(agentsAt.end, agentBody);
-      else if (doc.has('agents')) {
-        throw new LoadError('agent file: agents must be a map for init to add entries to it');
-      } else appended += `agents:\n${agentBody}`;
-    }
+    const agents: Record<string, StarterAgent> = {};
+    if (!hasGeneral) agents[GENERAL_AGENT] = { tools: spec.generalTools, timeout: spec.timeout };
+    if (!hasFallback) agents[FALLBACK_AGENT] = { tools: spec.fallbackTools, timeout: spec.timeout };
+    spliceAgents(splicer, agents);
   }
-
-  let next = original;
-  for (const { at, text: body } of inserts.sort((x, y) => y.at - x.at)) next = next.slice(0, at) + body + next.slice(at);
-  if (appended !== '') {
-    if (next !== '' && !next.endsWith('\n')) next += '\n';
-    next += (next === '' ? '' : '\n') + appended;
-  }
+  const next = splicer.result();
   parseCatalog(next, agentFile); // entries that do not load are never written
   mkdirSync(path.dirname(agentFile), { recursive: true });
   writeFileSync(agentFile, next);
   return result;
+}
+
+/** One YAML value rendered on one line, in flow style. */
+export function flowYaml(value: unknown): string {
+  return stringifyYaml(value, { collectionStyle: 'flow', lineWidth: 0 }).trimEnd();
+}
+
+/**
+ * Text edits planned against one parse of the agent file. Existing text is never
+ * re-rendered: new entries go inline into a flow-style or empty map, after the last
+ * entry of a block map, or to the end of the file.
+ */
+export interface Splicer {
+  readonly original: string;
+  readonly doc: Document;
+  /** Add entries inline to the flow-style or empty value at keys; false when there is none. */
+  insertInline(keys: string[], entries: Record<string, unknown>): boolean;
+  /** Where to add lines to the block map at keys, and their indent; undefined when it is missing. */
+  mapAt(keys: string[]): { end: number; indent: string } | undefined;
+  /** Insert lines at an offset of the original, starting a new line when needed. */
+  insert(at: number, body: string): void;
+  /** Lines to add at the end of the file, after a blank line. */
+  append(body: string): void;
+  /** The original with every planned edit applied. */
+  result(): string;
+}
+
+export function createSplicer(original: string): Splicer {
+  const doc: Document = parseDocument(original);
+  const inserts: { at: number; text: string }[] = [];
+  let appended = '';
+  return {
+    original,
+    doc,
+    mapAt(keys) {
+      const node = doc.getIn(keys, true);
+      if (node === undefined || node === null) return undefined;
+      if (!isMap(node) || node.flow === true || node.items.length === 0 || node.range === null || node.range === undefined) {
+        throw new LoadError(`agent file: ${keys.join('.')} must be a block-style map for init to add entries to it`);
+      }
+      const first = (node.items[0]!.key as { range: [number, number, number] }).range[0];
+      return { end: node.range[1], indent: ' '.repeat(first - (original.lastIndexOf('\n', first - 1) + 1)) };
+    },
+    insert(at, body) {
+      inserts.push({ at, text: (at > 0 && original[at - 1] !== '\n' ? '\n' : '') + body });
+    },
+    insertInline(keys, entries) {
+      const node = doc.getIn(keys, true);
+      if (node === undefined || node === null) return false;
+      const range = (node as { range?: [number, number, number] | null }).range;
+      if (range === undefined || range === null) return false;
+      const rendered = flowYaml(entries);
+      if (isMap(node) && node.flow === true) {
+        const contents = rendered.slice(1, -1).trim();
+        const source = original.slice(range[0], range[1]);
+        if (source.includes('\n')) {
+          const last = node.items.at(-1)?.value as { range?: [number, number, number] } | undefined;
+          if (last?.range !== undefined) {
+            const afterLast = original.slice(last.range[1], range[1] - 1).split('#', 1)[0]!;
+            if (!afterLast.includes(',')) inserts.push({ at: last.range[1], text: ',' });
+          }
+          const close = range[1] - 1;
+          const lineStart = original.lastIndexOf('\n', close - 1) + 1;
+          const indent = original.slice(lineStart, close).match(/^\s*/)?.[0] ?? '';
+          inserts.push({ at: close, text: `  ${contents}\n${indent}` });
+          return true;
+        }
+        const trailingComma = original.slice(range[0], range[1] - 1).trimEnd().endsWith(',');
+        inserts.push({ at: range[1] - 1, text: `${node.items.length && !trailingComma ? ', ' : ' '}${contents} ` });
+        return true;
+      }
+      if (typeof node === 'object' && 'value' in node && node.value === null) {
+        inserts.push({ at: range[0], text: ` ${rendered}` });
+        return true;
+      }
+      return false;
+    },
+    append(body) {
+      appended += body;
+    },
+    result() {
+      let next = original;
+      for (const { at, text: body } of [...inserts].sort((x, y) => y.at - x.at)) next = next.slice(0, at) + body + next.slice(at);
+      if (appended !== '') {
+        if (next !== '' && !next.endsWith('\n')) next += '\n';
+        next += (next === '' ? '' : '\n') + appended;
+      }
+      return next;
+    },
+  };
+}
+
+/** A map key as it is written in the agent file. */
+export function yamlKey(key: string): string {
+  return flowYaml([key]).slice(2, -2);
+}
+
+/** Plan new tiers into models.tiers, creating models or tiers when missing. */
+export function spliceTiers(s: Splicer, tiers: Record<string, ModelTier>): void {
+  if (Object.keys(tiers).length === 0) return;
+  const lines = (indent: string) =>
+    Object.entries(tiers)
+      .map(([name, tier]) => `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}\n`)
+      .join('');
+  if (s.insertInline(['models', 'tiers'], tiers)) return;
+  if (!s.doc.hasIn(['models', 'tiers']) && s.insertInline(['models'], { tiers })) return;
+  const tiersAt = s.mapAt(['models', 'tiers']);
+  const models = tiersAt === undefined ? s.mapAt(['models']) : undefined;
+  if (tiersAt !== undefined) s.insert(tiersAt.end, lines(tiersAt.indent));
+  else if (models !== undefined) s.insert(models.end, `${models.indent}tiers:\n${lines(`${models.indent}  `)}`);
+  else s.append(`models:\n  tiers:\n${lines('    ')}`);
+}
+
+export interface StarterAgent {
+  tools: string[];
+  /** Seconds. */
+  timeout: number;
+}
+
+/** Plan new agent entries (no skills, no description) into agents, creating it when missing. */
+export function spliceAgents(s: Splicer, agents: Record<string, StarterAgent>): void {
+  if (Object.keys(agents).length === 0) return;
+  if (s.insertInline(['agents'], agents)) return;
+  const agentsAt = s.mapAt(['agents']);
+  const indent = agentsAt?.indent ?? '  ';
+  const body = Object.entries(agents)
+    .map(([name, a]) => `${indent}${yamlKey(name)}:\n${indent}  tools: ${flowYaml(a.tools)}\n${indent}  timeout: ${a.timeout}\n`)
+    .join('');
+  if (agentsAt !== undefined) s.insert(agentsAt.end, body);
+  else if (s.doc.has('agents')) throw new LoadError('agent file: agents must be a map for init to add entries to it');
+  else s.append(`agents:\n${body}`);
 }
 
 export interface RootSources {
