@@ -177,6 +177,100 @@ describe('pi /subzero init', () => {
     expect(initActive()).toHaveLength(6);
   });
 
+  it('refuses an init tool call before /subzero init', async () => {
+    const root = tempDir();
+    const { tool, text } = await session(root);
+    const reply = await tool('subzero_init_show');
+    expect(reply.isError).toBe(true);
+    expect(text(reply)).toContain('guided init is not running');
+    expect(existsSync(agentFile(root))).toBe(false);
+  });
+
+  it('refuses preview and apply after a confirmed apply and writes nothing more', async () => {
+    const root = tempDir();
+    const { fake, tool, text } = await session(root);
+    await fake.command('subzero', 'init');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }];
+    const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
+    fake.answers.confirm.push(true);
+    expect((await tool('subzero_init_apply', { changes, fingerprint })).isError).toBeFalsy();
+    const written = readFileSync(agentFile(root));
+    const again = [{ op: 'setTier', tier: 'small', model: 'local/other', thinking: 'low' }];
+    const preview = await tool('subzero_init_preview', { changes: again });
+    expect(preview.isError).toBe(true);
+    expect(text(preview)).toContain('guided init is not running');
+    fake.answers.confirm.push(true);
+    const apply = await tool('subzero_init_apply', { changes: again, fingerprint });
+    expect(apply.isError).toBe(true);
+    expect(text(apply)).toContain('guided init is not running');
+    expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toHaveLength(1);
+    expect(readFileSync(agentFile(root)).equals(written)).toBe(true);
+  });
+
+  it('refuses preview and apply after a declined apply and writes nothing', async () => {
+    const root = tempDir();
+    const { fake, tool, text } = await session(root);
+    await fake.command('subzero', 'init');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }];
+    const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
+    fake.answers.confirm.push(false);
+    expect(text(await tool('subzero_init_apply', { changes, fingerprint }))).toMatch(/declined/);
+    const preview = await tool('subzero_init_preview', { changes });
+    expect(preview.isError).toBe(true);
+    expect(text(preview)).toContain('guided init is not running');
+    fake.answers.confirm.push(true);
+    const apply = await tool('subzero_init_apply', { changes, fingerprint });
+    expect(apply.isError).toBe(true);
+    expect(text(apply)).toContain('guided init is not running');
+    expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toHaveLength(1);
+    expect(existsSync(agentFile(root))).toBe(false);
+  });
+
+  it('keeps the tools on for the run the kickoff starts', async () => {
+    const root = makeProject();
+    const { fake, tool, initActive } = await session(root);
+    await fake.command('subzero', 'init');
+    await fake.startRun({ prompt: String(fake.userMessages[0]) });
+    expect(initActive()).toHaveLength(6);
+    expect((await tool('subzero_init_show')).isError).toBeFalsy();
+  });
+
+  it('turns the tools off when a run other than the kickoff starts, as after a kickoff that never ran', async () => {
+    const root = tempDir();
+    const { fake, tool, text, initActive } = await session(root);
+    await fake.command('subzero', 'init');
+    expect(initActive()).toHaveLength(6);
+    // The kickoff failed before its run started (no model, no API key), so no agent_settled follows.
+    await fake.startRun({ prompt: 'fix the failing test in src/foo.ts' });
+    expect(initActive()).toEqual([]);
+    const shown = await tool('subzero_init_show');
+    expect(shown.isError).toBe(true);
+    expect(text(shown)).toContain('guided init is not running');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }];
+    const preview = await tool('subzero_init_preview', { changes });
+    expect(preview.isError).toBe(true);
+    expect(text(preview)).toContain('guided init is not running');
+    expect(existsSync(agentFile(root))).toBe(false);
+  });
+
+  it('turns the tools off when a custom message starts the next run instead of the kickoff', async () => {
+    const { fake, tool, initActive } = await session(tempDir());
+    await fake.command('subzero', 'init');
+    await fake.startRun({ message: { role: 'custom', customType: 'other', content: 'hi', display: true } });
+    expect(initActive()).toEqual([]);
+    expect((await tool('subzero_init_show')).isError).toBe(true);
+  });
+
+  it('turns the tools off when the kickoff prompt starts a run after another run already used up the start', async () => {
+    const { fake, tool, initActive } = await session(tempDir());
+    await fake.command('subzero', 'init');
+    const kickoff = String(fake.userMessages[0]);
+    await fake.startRun({ prompt: 'something else' });
+    await fake.startRun({ prompt: kickoff });
+    expect(initActive()).toEqual([]);
+    expect((await tool('subzero_init_show')).isError).toBe(true);
+  });
+
   it('ending the agent run turns the tools off', async () => {
     const { fake, initActive } = await session(tempDir());
     await fake.command('subzero', 'init');

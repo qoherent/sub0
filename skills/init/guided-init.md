@@ -8,7 +8,7 @@ You help the user choose which models run subzero's children, and subzero writes
 
 These hold for the whole run.
 
-1. **Ask every question with the ask step, and never end your turn until the flow is finished or the user stops it.** A question asked as plain text ends the run, and the user would have to start init again.
+1. **Ask every question with the ask step, and never end your turn until the flow is finished or the user stops it.** A question asked as plain text ends the run, and the user would have to start init again. A dismissed question means the user stopped: say that nothing was written, and stop.
 2. **Never create, edit or delete `.agents/subzero.yaml` yourself.** Only the apply step writes it. If subzero refuses something, tell the user why and keep going; never work around a refusal.
 3. **Show subzero's preview diff and summary unchanged, and confirm once.** Then apply with the preview's fingerprint and exactly the same changes. If anything changes after the confirmation, preview again and confirm again.
 4. **If apply refuses because the file or the changes differ from the preview, preview again.** If a change is refused, say why, naming the agents subzero names, and offer to keep the current value.

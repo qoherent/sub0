@@ -53,12 +53,21 @@ export function fakePi(root: string, mode: 'tui' | 'rpc' | 'json' | 'print' = 't
     for (const handler of handlers.get(event) ?? []) last = await handler(data, context);
     return last;
   };
+  /**
+   * Fires `before_agent_start` as pi does when a run is about to start: `messageType: 'user'` with the
+   * prompt text for a typed prompt or `pi.sendUserMessage()`, or `'custom'` with the starting message.
+   */
+  const startRun = (start: { prompt: string } | { message: unknown }) =>
+    emit('before_agent_start', {
+      type: 'before_agent_start', systemPrompt: '', systemPromptOptions: { selectedTools: [...active] },
+      ...('prompt' in start ? { messageType: 'user', prompt: start.prompt } : { messageType: 'custom', message: start.message }),
+    });
   /** Runs a `/name` command as if the user typed it. */
   const command = (name: string, args: string) =>
     (commands.get(name) as { handler: (args: string, ctx: ExtensionContext) => Promise<void> }).handler(args, context);
   return {
     api, context, tools, commands, messages, userMessages, notifications, widgets, registeredTools, registeredCommands,
-    answers, dialogs, emit, command,
+    answers, dialogs, emit, startRun, command,
     activeTools: () => [...active],
     setIdle: (value: boolean) => { idle = value; },
   };

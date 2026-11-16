@@ -5,8 +5,9 @@
 // one agent run and hands the agent the shared guide text. The tools are thin
 // wrappers over the setup service. Only the apply tool writes, and only after the
 // user confirms subzero's own diff in pi's dialog. The tools are off by default and
-// switch off again after a write, a declined confirmation, the end of the run or the
-// end of the session, so an agent can never reach them outside a user-started run.
+// switch off again after a write, a declined confirmation, the end of the run, the
+// start of any run other than the kickoff's, or the end of the session, so an agent can
+// never reach them outside a user-started run.
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { parseArgs } from 'node:util';
 import { Type } from 'typebox';
@@ -91,11 +92,14 @@ function starterHost(kernel: Kernel): string {
 
 export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit {
   let setup: SetupService | undefined;
+  /** Set when `/subzero init` sends its kickoff; the next run to start consumes it. */
+  let kickoffPending = false;
   const names = new Set<string>(INIT_TOOL_NAMES);
   const isOn = () => pi.getActiveTools().some((name) => names.has(name));
   const turnOn = () => pi.setActiveTools([...new Set([...pi.getActiveTools(), ...INIT_TOOL_NAMES])]);
   const turnOff = () => {
     setup = undefined;
+    kickoffPending = false;
     if (isOn()) pi.setActiveTools(pi.getActiveTools().filter((name) => !names.has(name)));
   };
   const service = () => {
@@ -113,6 +117,15 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
   pi.on('session_start', () => turnOff());
   pi.on('agent_settled', () => turnOff());
   pi.on('session_shutdown', () => turnOff());
+  // pi's sendUserMessage returns before the prompt runs and reports a failed start (no model,
+  // no API key) only as an extension error, so a kickoff that never starts a run leaves no
+  // agent_settled behind. The first run to start after `/subzero init` therefore decides: the
+  // kickoff's run keeps the tools, and any other run turns them off before it can see them.
+  pi.on('before_agent_start', (event) => {
+    const isKickoff = kickoffPending && event.messageType === 'user' && event.prompt.includes(INIT_KICKOFF);
+    kickoffPending = false;
+    if (!isKickoff) turnOff();
+  });
 
   const changeSchema = Type.Object({
     op: Type.String({ description: 'setTier, unsetTier, setLimit or clearLimit' }),
@@ -257,6 +270,9 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
       return;
     }
     turnOn();
+    kickoffPending = true;
+    // Only a synchronous throw (a stale extension runtime) lands here; a kickoff that fails
+    // later never starts its run, and the before_agent_start handler turns the tools off.
     try {
       pi.sendUserMessage(INIT_KICKOFF);
     } catch (err) {
