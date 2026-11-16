@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { ChildDriver, ChildPort } from '../../src/core/types.js';
+import type { ChildDriver, ChildPort, HostModel } from '../../src/core/types.js';
 import { Kernel, UnsupportedHostError } from '../../src/kernel/kernel.js';
 
 const SRC = path.resolve(import.meta.dirname, '..', '..', 'src');
@@ -97,10 +97,33 @@ describe('Kernel', () => {
     expect(() => kernel.prerequisites('x')).toThrow(/"x".*supported hosts: pi/s);
   });
 
+  it('offers the model listing and model check of a host only when its driver has them', async () => {
+    const kernel = new Kernel();
+    const models: HostModel[] = [
+      { name: 'local/qwen', endpoint: 'local', reasoning: false, thinkingLevels: ['off'], input: ['text'] },
+    ];
+    const listModels = async () => models;
+    const checkModel = async () => ({ ok: true }) as const;
+    kernel.registerChildDriver('pi', driver({ listModels, checkModel }));
+    kernel.registerChildDriver('bare', driver());
+    expect(kernel.listModels('pi')).toBe(listModels);
+    expect(await kernel.listModels('pi')?.()).toEqual(models);
+    expect(kernel.checkModel('pi')).toBe(checkModel);
+    expect(await kernel.checkModel('pi')?.({ model: 'local/qwen', thinking: 'off' })).toEqual({ ok: true });
+    expect(kernel.listModels('bare')).toBeUndefined();
+    expect(kernel.checkModel('bare')).toBeUndefined();
+  });
+
   it('refuses every lookup for an unsupported host with the same error', () => {
     const kernel = new Kernel();
     kernel.registerChildDriver('pi', driver());
-    for (const ask of [() => kernel.attachCommand('x'), () => kernel.sessionExport('x'), () => kernel.starterTools('x')]) {
+    for (const ask of [
+      () => kernel.attachCommand('x'),
+      () => kernel.sessionExport('x'),
+      () => kernel.starterTools('x'),
+      () => kernel.listModels('x'),
+      () => kernel.checkModel('x'),
+    ]) {
       expect(ask).toThrow(UnsupportedHostError);
       expect(ask).toThrow(/"x".*supported hosts: pi/s);
     }

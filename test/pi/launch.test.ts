@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getAgent } from '../../src/config/agent-config.js';
-import { attachCommand, launchArgs } from '../../src/pi/launch.js';
+import { attachCommand, childRpcArgs, launchArgs } from '../../src/pi/launch.js';
 import { makeProject } from '../helpers.js';
 
 describe('launch spec', () => {
@@ -16,6 +16,13 @@ describe('launch spec', () => {
       '--name', 'subzero:helper:sz-abcdef',
     ]);
     expect(args).not.toContain('--session');
+  });
+
+  it('builds the children\'s RPC isolation flags in one place, which every child run starts with', () => {
+    expect(childRpcArgs()).toEqual(['--mode', 'rpc', '--offline', '-na', '-ne', '-nc', '-np', '--no-themes', '-ns']);
+    const root = makeProject();
+    const args = launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: [], sessionsFolder: '/s' });
+    expect(args.slice(0, childRpcArgs().length)).toEqual(childRpcArgs());
   });
 
   it('builds the attach command without --mode rpc and without --session', () => {

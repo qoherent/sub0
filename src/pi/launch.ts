@@ -13,16 +13,28 @@ export interface LaunchInputs {
 }
 
 /**
- * The exact flag set of a child run. --session is never added: pi 0.87 exits when
- * it is combined with --session-id.
+ * The flags every pi run of subzero starts with: RPC mode, offline, and the
+ * resource isolation of a child (no project trust, extensions, context files,
+ * prompt templates, themes or discovered skills). Child runs, the model listing
+ * and the model check all take them from here.
  */
-export function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }: LaunchInputs): string[] {
+export function childRpcArgs(): string[] {
   return [
     '--mode', 'rpc',
     '--offline',
     '-na', '-ne', '-nc', '-np',
     '--no-themes',
     '-ns',
+  ];
+}
+
+/**
+ * The exact flag set of a child run. --session is never added: pi 0.87 exits when
+ * it is combined with --session-id.
+ */
+export function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }: LaunchInputs): string[] {
+  return [
+    ...childRpcArgs(),
     ...overlaySkills.flatMap((folder) => ['--skill', folder]),
     '--model', agent.model,
     '--thinking', agent.thinking,

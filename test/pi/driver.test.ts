@@ -3,7 +3,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getAgent, type AgentDefinition } from '../../src/config/agent-config.js';
 import type { ChildOutcome, DomainEvent } from '../../src/core/types.js';
-import { PiDriver } from '../../src/pi/driver.js';
+import { PiDriver, type PiDriverOptions } from '../../src/pi/driver.js';
+import { childRpcArgs } from '../../src/pi/launch.js';
 import type { ChildRunRequest } from '../../src/core/types.js';
 import { DEFAULT_YAML, FAKE_PI_COMMAND, fakePiEnv, isAlive, makeProject, tempDir, until } from '../helpers.js';
 
@@ -362,5 +363,238 @@ describe('PiDriver', () => {
       expect(message).toMatch(/pi did not run/);
       expect(message).toMatch(/install pi and run `subzero init` again/);
     });
+  });
+});
+
+const MODELS = [
+  {
+    id: 'qwen',
+    name: 'Qwen',
+    api: 'openai-completions',
+    provider: 'local',
+    baseUrl: 'http://localhost:8080/v1',
+    reasoning: true,
+    thinkingLevelMap: { xhigh: 'xhigh' },
+    input: ['text'],
+    contextWindow: 131072,
+    maxTokens: 8192,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  },
+  {
+    id: 'model',
+    name: 'Cloud model',
+    api: 'anthropic-messages',
+    provider: 'cloud',
+    baseUrl: 'https://cloud.example',
+    reasoning: false,
+    input: ['text', 'image'],
+    contextWindow: 200000,
+    maxTokens: 16384,
+    cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  },
+];
+
+function modelDriver(scenario: Record<string, unknown> = {}, options: Partial<PiDriverOptions> = {}) {
+  const fake = fakePiEnv(scenario);
+  const driver = new PiDriver({ piCommand: FAKE_PI_COMMAND, env: fake.env, killWaitMs: 300, log: () => {}, ...options });
+  return { fake, driver };
+}
+
+const levelsOf = async (model: Record<string, unknown>) => {
+  const [listed] = await modelDriver({ models: [{ id: 'm', provider: 'p', ...model }] }).driver.listModels();
+  return listed!.thinkingLevels;
+};
+
+describe('PiDriver model listing', () => {
+  it('maps each model pi offers to its subzero name, endpoint, thinking levels, limits, input kinds and cost', async () => {
+    const models = await modelDriver({ models: MODELS }).driver.listModels();
+    expect(models).toEqual([
+      {
+        name: 'local/qwen',
+        endpoint: 'local',
+        reasoning: true,
+        thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+        contextWindow: 131072,
+        maxTokens: 8192,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      },
+      {
+        name: 'cloud/model',
+        endpoint: 'cloud',
+        reasoning: false,
+        thinkingLevels: ['off'],
+        contextWindow: 200000,
+        maxTokens: 16384,
+        input: ['text', 'image'],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+      },
+    ]);
+  });
+
+  it('offers only off for a model without reasoning (AE6)', async () => {
+    expect(await levelsOf({ reasoning: false, thinkingLevelMap: { xhigh: 'xhigh', max: 'max' } })).toEqual(['off']);
+  });
+
+  it('offers off to high for a reasoning model whose map marks xhigh and max null', async () => {
+    expect(await levelsOf({ reasoning: true, thinkingLevelMap: { xhigh: null, max: null } })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+  });
+
+  it('offers off to high for a reasoning model with no map, and adds xhigh or max only when the map gives them a value', async () => {
+    expect(await levelsOf({ reasoning: true })).toEqual(['off', 'minimal', 'low', 'medium', 'high']);
+    expect(await levelsOf({ reasoning: true, thinkingLevelMap: { xhigh: 'xhigh' } })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+    expect(await levelsOf({ reasoning: true, thinkingLevelMap: { max: 'max' } })).toEqual(['off', 'minimal', 'low', 'medium', 'high', 'max']);
+  });
+
+  it('leaves out a level below xhigh that the map marks null', async () => {
+    expect(await levelsOf({ reasoning: true, thinkingLevelMap: { minimal: null, low: 'low' } })).toEqual(['off', 'low', 'medium', 'high']);
+  });
+
+  it('keeps the endpoint to the text before the first slash of the name', async () => {
+    const [model] = await modelDriver({ models: [{ id: 'org/model', provider: 'router', reasoning: false }] }).driver.listModels();
+    expect(model).toMatchObject({ name: 'router/org/model', endpoint: 'router', input: [] });
+    expect(model!.cost).toBeUndefined();
+  });
+
+  it('runs the configured pi command with the children\'s environment and isolation flags, offline and without a session', async () => {
+    const { driver, fake } = modelDriver({ models: MODELS });
+    await driver.listModels();
+    const [start] = fake.log();
+    expect(start.argv).toEqual([...childRpcArgs(), '--no-session']);
+    expect(start.env).toEqual({ PI_OFFLINE: '1', PI_TELEMETRY: '0' });
+    expect(commandsSent(fake.log())).toEqual(['get_available_models']);
+    await until(() => !isAlive(start.pid));
+  });
+
+  it('fails with a timeout error, not a hang, when pi never answers, and leaves no pi running', async () => {
+    const { driver, fake } = modelDriver({ hangModels: true, ignoreStdinEnd: true }, { listTimeoutMs: 300 });
+    await expect(driver.listModels()).rejects.toThrow(/pi did not list its models within/);
+    await until(() => !isAlive(fake.log()[0].pid));
+  });
+
+  it('fails naming pi provider setup when pi offers no models', async () => {
+    await expect(modelDriver({ models: [] }).driver.listModels()).rejects.toThrow(/pi provider/);
+  });
+
+  it('fails, never returning an empty list, when pi exits before it answers', async () => {
+    const { driver } = modelDriver({ exitBeforeReady: { code: 2, stderr: 'config is broken\n' } });
+    await expect(driver.listModels()).rejects.toThrow(/exited.*code 2.*config is broken/);
+  });
+
+  it('fails when pi prints a line that is not JSON', async () => {
+    await expect(modelDriver({ modelsRaw: 'this is not json\n' }).driver.listModels()).rejects.toThrow(/not JSON/);
+  });
+
+  it('fails when the model list is malformed', async () => {
+    await expect(modelDriver({ models: 'nope' }).driver.listModels()).rejects.toThrow(/malformed/);
+    await expect(modelDriver({ models: [{ provider: 'local' }] }).driver.listModels()).rejects.toThrow(/malformed/);
+  });
+
+  it('fails with pi\'s reason when pi refuses the request', async () => {
+    await expect(modelDriver({ refuseModels: 'no catalog' }).driver.listModels()).rejects.toThrow(/no catalog/);
+  });
+
+  it('fails naming the command when pi cannot start', async () => {
+    const missing = path.join(tempDir(), 'no-such-pi');
+    await expect(new PiDriver({ piCommand: [missing] }).listModels()).rejects.toThrow(/could not start pi/);
+  });
+});
+
+describe('PiDriver model check', () => {
+  it('reports answered for a model that replies, from a one-turn run with the children\'s flags, no tools and no session', async () => {
+    const { driver, fake } = modelDriver();
+    expect(await driver.checkModel({ model: 'local/qwen', thinking: 'high' })).toEqual({ ok: true });
+    const [start] = fake.log();
+    expect(start.argv).toEqual([...childRpcArgs(), '--model', 'local/qwen', '--thinking', 'high', '--no-tools', '--no-session']);
+    expect(start.env).toEqual({ PI_OFFLINE: '1', PI_TELEMETRY: '0' });
+    const prompts = fake.log().filter((l) => l.command === 'prompt');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].message).toMatch(/\S/);
+    await until(() => !isAlive(start.pid));
+  });
+
+  it('reports failed with the unknown-model kind for a model pi does not know (AE7)', async () => {
+    const { driver } = modelDriver({ unknownModels: ['nowhere/missing'] });
+    expect(await driver.checkModel({ model: 'nowhere/missing', thinking: 'off' })).toEqual({
+      ok: false,
+      kind: 'unknown_model',
+      message: 'unknown model: nowhere/missing',
+    });
+  });
+
+  it('reports the unknown-model kind when pi only warns and the turn then errors', async () => {
+    const turn = [
+      { emit: { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '404 model' } } },
+      { emit: { type: 'agent_settled' } },
+    ];
+    const { driver } = modelDriver({ turn, stderrAtStart: 'Warning: Model "qwen9" not found for provider "local". Using custom model id.\n' });
+    const result = await driver.checkModel({ model: 'local/qwen9', thinking: 'off' });
+    expect(result).toMatchObject({ ok: false, kind: 'unknown_model' });
+    expect((result as { message: string }).message).toMatch(/^unknown model: local\/qwen9: 404 model$/);
+  });
+
+  it('reports failed with pi\'s reason on one line when the turn errors', async () => {
+    const turn = [
+      { emit: { type: 'message_end', message: { role: 'assistant', content: [], stopReason: 'error', errorMessage: '401 Unauthorized:\ninvalid key' } } },
+      { emit: { type: 'agent_settled' } },
+    ];
+    expect(await modelDriver({ turn }).driver.checkModel({ model: 'cloud/model', thinking: 'low' })).toEqual({
+      ok: false,
+      kind: 'failed',
+      message: '401 Unauthorized: invalid key',
+    });
+  });
+
+  it('reports failed with the stderr reason when pi exits on an auth error', async () => {
+    const turn = [{ exit: 1, stderr: 'Error: No API key found for provider "cloud".\nRun /login.\n' }];
+    const result = await modelDriver({ turn }).driver.checkModel({ model: 'cloud/model', thinking: 'low' });
+    expect(result).toMatchObject({ ok: false, kind: 'failed' });
+    expect((result as { message: string }).message).toMatch(/No API key found for provider "cloud"/);
+    expect((result as { message: string }).message).not.toMatch(/\n/);
+  });
+
+  it('reports failed when the run settles without an assistant message', async () => {
+    const result = await modelDriver({ turn: [{ emit: { type: 'agent_settled' } }] }).driver.checkModel({ model: 'local/qwen', thinking: 'off' });
+    expect(result).toEqual({ ok: false, kind: 'failed', message: 'no assistant message' });
+  });
+
+  it('reports a timeout when pi never settles, and leaves no pi running', async () => {
+    const { driver, fake } = modelDriver({ turn: [{ hang: true }], ignoreAbort: true, ignoreStdinEnd: true, ignoreSigterm: true }, { checkTimeoutMs: 300 });
+    const result = await driver.checkModel({ model: 'local/qwen', thinking: 'off' });
+    expect(result).toMatchObject({ ok: false, kind: 'timeout' });
+    expect((result as { message: string }).message).toMatch(/no answer within/);
+    await until(() => !isAlive(fake.log()[0].pid));
+  });
+
+  it('kills pi when the check is aborted, and no process stays running', async () => {
+    const { driver, fake } = modelDriver({ turn: [{ hang: true }], ignoreAbort: true, ignoreStdinEnd: true, ignoreSigterm: true });
+    const controller = new AbortController();
+    const pending = driver.checkModel({ model: 'local/qwen', thinking: 'off', signal: controller.signal });
+    await until(() => commandsSent(fake.log()).includes('prompt'));
+    controller.abort();
+    expect(await pending).toEqual({ ok: false, kind: 'cancelled', message: 'the check was cancelled' });
+    await until(() => !isAlive(fake.log()[0].pid));
+  });
+
+  it('starts no pi when the signal is already aborted', async () => {
+    const { driver, fake } = modelDriver();
+    const controller = new AbortController();
+    controller.abort();
+    expect(await driver.checkModel({ model: 'local/qwen', thinking: 'off', signal: controller.signal })).toMatchObject({ ok: false, kind: 'cancelled' });
+    expect(fake.log()).toEqual([]);
+  });
+
+  it('runs in the given project root', async () => {
+    const root = tempDir();
+    const { driver, fake } = modelDriver();
+    await driver.checkModel({ model: 'local/qwen', thinking: 'off', projectRoot: root });
+    expect(fake.log()[0].cwd).toBe(root);
+  });
+
+  it('reports failed naming the command when pi cannot start', async () => {
+    const missing = path.join(tempDir(), 'no-such-pi');
+    const result = await new PiDriver({ piCommand: [missing] }).checkModel({ model: 'local/qwen', thinking: 'off' });
+    expect(result).toMatchObject({ ok: false, kind: 'failed' });
+    expect((result as { message: string }).message).toMatch(/could not start pi/);
   });
 });

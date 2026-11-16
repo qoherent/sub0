@@ -2,7 +2,7 @@
 //
 // The host-neutral shapes of a task. Nothing here names pi: a child driver fills
 // them in through the child port.
-import type { AgentDefinition } from '../config/agent-config.js';
+import type { AgentDefinition, ThinkingLevel } from '../config/agent-config.js';
 
 export type ChildRunState = 'Pending' | 'Starting' | 'Live' | 'Settled' | 'Failed' | 'Cancelled';
 export const ENDED_STATES: ReadonlySet<ChildRunState> = new Set(['Settled', 'Failed', 'Cancelled']);
@@ -138,10 +138,57 @@ export interface StarterTools {
  */
 export type PrerequisitesCheck = () => string | undefined;
 
+/** Prices of a model in US dollars per million tokens, as its host reports them. */
+export interface ModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** One model a child host offers, as a choice for a tier. */
+export interface HostModel {
+  /** The model as a tier names it: `provider/id`. */
+  name: string;
+  /** The text of the name before its first slash. */
+  endpoint: string;
+  reasoning: boolean;
+  /** The thinking levels the model accepts; `['off']` for a model without reasoning. */
+  thinkingLevels: ThinkingLevel[];
+  contextWindow?: number;
+  maxTokens?: number;
+  /** The input kinds the model takes, such as text and image. */
+  input: string[];
+  cost?: ModelCost;
+}
+
+/**
+ * The models a child of the host can use. Rejects with a one-line reason, and
+ * never resolves to an empty list.
+ */
+export type ListModels = (options?: { projectRoot?: string }) => Promise<HostModel[]>;
+
+export interface ModelCheckRequest {
+  /** The model as a tier names it: `provider/id`. */
+  model: string;
+  thinking: ThinkingLevel;
+  /** Where the check runs, as a child would; defaults to the current folder. */
+  projectRoot?: string;
+  /** Aborting ends the check and stops its process. */
+  signal?: AbortSignal;
+}
+
+export type ModelCheckFailure = 'unknown_model' | 'timeout' | 'failed' | 'cancelled';
+export type ModelCheckResult = { ok: true } | { ok: false; kind: ModelCheckFailure; message: string };
+
+/** Sends one fixed prompt to a model as a child would, and reports whether it answered. */
+export type CheckModel = (request: ModelCheckRequest) => Promise<ModelCheckResult>;
+
 /**
  * A child driver: its child port, and whatever else it offers. A caller asks for
- * the attach command, session export, starter tools and prerequisites check
- * through the driver of the host, and never assumes a driver offers them.
+ * the attach command, session export, starter tools, prerequisites check, model
+ * listing and model check through the driver of the host, and never assumes a
+ * driver offers them.
  */
 export interface ChildDriver {
   port: ChildPort;
@@ -149,4 +196,6 @@ export interface ChildDriver {
   sessionExport?: SessionExport;
   starterTools?: () => StarterTools;
   prerequisites?: PrerequisitesCheck;
+  listModels?: ListModels;
+  checkModel?: CheckModel;
 }
