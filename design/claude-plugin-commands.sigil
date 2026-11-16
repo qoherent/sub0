@@ -3,23 +3,32 @@
   session cancel, stop notice,
 }
 @design/kernel.sigil from Kernel import { parent adapter, parent host }
+@design/cli.sigil from Cli import { config commands }
+@design/agent-config.sigil from AgentConfig import {
+  agent file, starter entries, change set, setup preview, preview fingerprint,
+}
 @design/task-core.sigil from TaskCore import { task id }
 
 component ClaudePluginCommands {
   goal {
     Let a person who works in the Claude Code parent host stop their
-    subzero tasks with a command they type that only the person can invoke.
+    subzero tasks and set subzero up with commands they type that only the
+    person can invoke.
   }
 
   state {
     ClaudePluginCommands is the parent adapter part of the plugin that gives
     the
     Claude Code parent host its commands, which are plugin skills that a person
-    types. It runs no code of its own: each command asks Claude Code to call a
-    tool of ClaudeMcpServer.
+    types. It runs no code of its own: the cancel command asks Claude Code to
+    call a tool of ClaudeMcpServer, and the init command asks it to run
+    commands of Cli.
 
     The *cancel command* is the plugin skill /subzero:cancel. It takes an
     optional task id.
+
+    The *init command* is the plugin skill /subzero:init. It takes an optional
+    model with the named options of subzero init.
   }
 
   logic {
@@ -32,6 +41,19 @@ component ClaudePluginCommands {
     On the cancel command with a task id, call the cancel tool with that
     task id,
     which cancels that one task and reports it, which ends the flow.
+
+    On the init command with a model, run subzero init with its arguments and
+    show the output unchanged, which ends the flow.
+
+    On the init command with no model, read the shared guide text and follow
+    it within one turn, running the config commands for its steps and asking
+    every question through AskUserQuestion, because the grants of the
+    init command last only for the turn that invoked it. Show the
+    setup preview of the change set unchanged, confirm it once through
+    AskUserQuestion, and run subzero config apply with its preview fingerprint
+    and the same change set. After a write that creates the agent file or adds
+    or removes a model tier, say to start a new Claude Code session, because
+    its routing text is built once per session, which ends the flow.
   }
 
   constraints {
@@ -46,6 +68,13 @@ component ClaudePluginCommands {
     The cancel command must pre-approve the cancel tool for its own invocation,
     so that a person who types it gets no approval prompt and needs no rule
     from the user or the project.
+
+    The init command must be invoked only by the person, and it must
+    pre-approve subzero init and each of the config commands, the apply
+    included, only for its own invocation, so that no write of the agent file
+    is pre-approved outside an init command that a person typed. It must never
+    create, edit or delete the agent file itself, and it must stop, writing
+    nothing, when a command is denied or fails.
   }
 
   cases {
@@ -57,6 +86,10 @@ component ClaudePluginCommands {
 
     The model asks to invoke the cancel command and Claude Code refuses it,
     because only the person may invoke it.
+
+    The init command with a model in a project with no agent file writes the
+    starter entries. The init command with no model, where the person declines
+    the setup preview, writes nothing.
   }
 
   interface {
@@ -64,6 +97,11 @@ component ClaudePluginCommands {
     an
     optional task id, so that it cancels the one task or every task of the
     current parent session id, and reports what it cancelled.
+
+    Offer the init command to a person in the Claude Code parent host, with an
+    optional model, so that it writes the starter entries, or runs a guided
+    setup that writes the agent file only after the person confirms the
+    setup preview.
   }
 
   decisions {
@@ -72,5 +110,9 @@ component ClaudePluginCommands {
     in its own component and not in ClaudeMcpServer because it is a plugin
     skill,
     and a later command of the plugin joins it here without growing the server.
+    The init command runs the config commands of Cli and not a tool of
+    ClaudeMcpServer, so that the plugin skill can name each one in its allowed
+    tools and pre-approve the write only for a run that a person started, with
+    one confirmation after subzero shows its own setup preview.
   }
 }

@@ -1,9 +1,9 @@
 @design/task-core.sigil from TaskCore import {
   child driver, child port, attach command, session export, starter tools,
-  prerequisites check,
+  prerequisites check, model listing, model check,
 }
 @design/delegation-service.sigil from DelegationService import {
-  delegation, session cancel, completion notice, stop notice,
+  delegation, session cancel, completion notice, stop notice, guided setup,
 }
 
 component Kernel {
@@ -63,14 +63,18 @@ component Kernel {
 
     A parent adapter must reach the core only through the delegation of
     DelegationService and the task operations it offers, such as collect,
-    cancel, session cancel, the completion notice, the stop notice and listing,
+    cancel, session cancel, the completion notice, the stop notice, listing
+    and the guided setup,
     and
     through
     AgentConfig
-    for what it shows or decides, such as
-    the agent file, each routable tier and the error texts,
+    for what it shows, decides or writes, such as
+    the agent file, each routable tier, the starter entries and the error
+    texts,
     and through Kernel only to list the supported child hosts that it gives
-    AgentConfig,
+    AgentConfig and, for an init that a person starts, to ask for the
+    prerequisites check and the starter tools of a child host and to hand
+    Kernel to the guided setup of DelegationService,
     and it must never be given a child driver. A parent adapter of one
     parent host may depend on another parent adapter of the same parent host,
     and
@@ -81,8 +85,9 @@ component Kernel {
     import
     from one. A core service reaches a child driver only through the child port
     that Kernel provides for a child host, and the attach command, the
-    session export and
-    the starter tools and the prerequisites check that it offers.
+    session export,
+    the starter tools, the prerequisites check, the model listing and the
+    model check that it offers.
   }
 
   cases {
@@ -145,8 +150,9 @@ component Kernel {
 
     Provide the child port of the child driver registered for a child host, and
     its
-    attach command, its session export, its starter tools and its
-    prerequisites check when that child driver offers them, and return an error
+    attach command, its session export, its starter tools, its
+    prerequisites check, its model listing and its model check when that
+    child driver offers them, and return an error
     that names the
     child host and lists every
     supported child host when no

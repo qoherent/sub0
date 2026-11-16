@@ -1,17 +1,20 @@
 @design/delegation-service.sigil from DelegationService import {
   delegation, brief text, session cancel, completion notice, stop notice,
-  status line, result text, queued task, collect tool,
+  status line, result text, queued task, collect tool, guided setup,
+  setup operations,
 }
 @design/agent-config.sigil from AgentConfig import {
   tier word, tier text, unmatched tier text, agent alias, agent file,
   project root, SUBZERO_PROJECT_DIR, load error, general agent, model tier,
-  medium tier, parallel limit, working directory,
+  medium tier, parallel limit, working directory, starter entries, change set,
+  setup preview, preview fingerprint,
 }
 @design/kernel.sigil from Kernel import {
   parent adapter, parent host, child host, entry point,
 }
 @design/task-core.sigil from TaskCore import {
-  task id, attach command, child driver, transcript,
+  task id, attach command, child driver, transcript, starter tools,
+  prerequisites check,
 }
 @design/task-store.sigil from TaskStore import { parent session id, task record }
 
@@ -68,9 +71,18 @@ component PiExtension {
     parent host has a user interface.
 
     The */subzero command* lists the tasks of the session core, prints the
-    attach command of one task, and cancels every task of the session core or
+    attach command of one task, cancels every task of the session core or
     one
-    by its task id.
+    by its task id, and sets subzero up with init.
+
+    The *init tools* are the six tools subzero_init_show, subzero_init_models,
+    subzero_init_ask, subzero_init_check, subzero_init_preview and
+    subzero_init_apply. Each wraps one of the setup operations of the
+    guided setup, except subzero_init_ask, which asks the user a question in
+    the user interface of pi and returns the answer. They are registered
+    inactive, and only a *guided init* turns them on: the agent run that the
+    /subzero command with init and no model starts with the shared guide text
+    and the mapping of its steps to the init tools.
 
     The *pi-subagents* extension is the existing pi extension that also gives
     the pi
@@ -154,6 +166,30 @@ component PiExtension {
     only
     the count of cancelled tasks.
 
+    On the /subzero command with init and a model, with the optional named
+    options thinking and timeout, ask Kernel for the prerequisites check and
+    the starter tools of the child host, which is the one supported child host
+    or else pi, and ask AgentConfig to add the starter entries under the
+    project root of the session core, as subzero init does on the command line.
+    Rebuild the description of the subagent tool from the agent file when it
+    added any, and show which it added, which ends the flow.
+
+    On the /subzero command with init and no model, refuse when pi has no user
+    interface or the agent is running. Otherwise make the guided setup with the
+    project root of the session core, turn the init tools on and send the
+    guide text as a user message, which starts the guided init and ends the
+    flow.
+
+    On a call of subzero_init_apply, build the setup preview of its change set
+    again, and refuse it, writing nothing, when the preview fingerprint
+    differs, when it holds a refused change or when it would not load.
+    Otherwise show its diff and summary in the confirmation dialog of pi. When
+    the user declines, write nothing and turn the init tools off. When the user
+    confirms, apply the change set with that preview fingerprint, rebuild the
+    description of the subagent tool from the agent file and turn the
+    init tools off, which ends the flow. The init tools are also turned off
+    when the agent run settles and at the start and the end of a pi session.
+
     When a turn of the pi session settles as aborted by the user, run a
     session cancel for the session core, which ends the flow.
 
@@ -191,10 +227,18 @@ component PiExtension {
     load error, and a name that the agent file does not hold must still run the
     fallback agent.
 
-    PiExtension must reach the core only through the session core and
-    AgentConfig,
+    PiExtension must reach the core only through the session core,
+    AgentConfig and, for init, the guided setup and the prerequisites check
+    and the starter tools that Kernel provides,
     and it must never be given a child driver: its entry point holds each
     child driver, and it names no child host.
+
+    The init tools must be active only during a guided init that the user
+    started with the /subzero command, which only the user can run, so that the
+    parent model cannot reach them at any other time. subzero_init_apply must
+    write the agent file only after the user confirms the diff of its
+    setup preview in the confirmation dialog of pi, and it must refuse and
+    write nothing when pi has no user interface.
 
     The subagent tool must run in pi's parallel execution mode, so that several
     calls
@@ -284,6 +328,14 @@ component PiExtension {
 
     Each task that the subagent tool starts is in the task record under the
     parent session id of the pi session, and the subzero command line lists it.
+
+    With pi idle and a user interface, the /subzero command with init turns on
+    the init tools and starts a guided init. When the user declines the diff
+    that subzero_init_apply shows, nothing is written and the init tools are
+    off. When the user confirms it, the agent file is written, the description
+    of the subagent tool names the new model tiers in the same pi session, and
+    the init tools are off. When pi has no user interface, the /subzero command
+    with init and no model writes nothing and says to give a model.
   }
 
   interface {
@@ -309,7 +361,7 @@ component PiExtension {
     Show the session widget while pi has a user interface, show any
     clash warning in
     every pi session, and offer the /subzero command to list, attach and cancel
-    tasks.
+    tasks and to run init with a model or as a guided init.
 
     Be registered with Kernel as the parent adapter pi by the entry point of
     the pi package, which also creates the Kernel and registers the child driver of
@@ -320,7 +372,7 @@ component PiExtension {
     builds the
     session core at the start of each pi session, and hands PiExtension only
     that
-    session core.
+    session core and, for init, the Kernel.
   }
 
   decisions {
@@ -367,7 +419,12 @@ component PiExtension {
     commands,
     are always the ones that the agent file names. Installing the pi package is
     the
-    opt-in that accepts this. Capping the tools of a child to the active tools
+    opt-in that accepts this. The init tools exist only for a guided init, and
+    subzero_init_apply asks for the confirmation itself, because pi has no
+    permission gate on a tool and the pi package has no command line. pi builds
+    the description of the subagent tool at the start of a session, so it is
+    rebuilt after a write and the new model tiers route without a new session.
+    Capping the tools of a child to the active tools
     of the
     pi session is left for a later change.
   }

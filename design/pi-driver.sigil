@@ -2,7 +2,7 @@
   task id, brief, child run, failure kind, domain event, child port, session usage,
     launch spec, attach command, child session, session export, child driver,
     child working directory,
-    starter tools, prerequisites check,
+    starter tools, prerequisites check, model listing, model check,
 }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, skill folder, project root, timeout, thinking level,
@@ -237,12 +237,30 @@ component PiDriver {
     names pi, says whether it was not found or did not run, and says to install
     pi and run subzero init again.
 
+    Offer a model listing that asks pi for get_available_models with the
+    configured pi command, the environment and the isolation flags of a
+    child run and no saved session, so that a model that a child run cannot
+    reach is not listed. Give each model the thinking levels it accepts: only
+    off for a model that does not reason, and otherwise each level from off to
+    high that its thinking level map does not mark null, and xhigh or max only
+    when the map gives them a value. Fail with a one-line reason when pi does
+    not answer within 30 seconds, and with a reason that says to set up a pi
+    provider when pi lists no model.
+
+    Offer a model check that starts pi with the same command, environment and
+    flags, the model, the thinking level, no tools and no saved session, sends
+    one fixed prompt and reports that the model answered when the turn settles
+    without an error. Report unknown_model when pi does not know the model,
+    timeout when no answer comes within 120 seconds, cancelled when the caller
+    aborts it, and failed with the reason from pi otherwise, and end the pi
+    process in every case.
+
     Register with the driver registry of Kernel as the child driver for the
     child host pi
     when an entry point of a process registers it, and offer the
     attach command,
-    the session export, the starter tools and the prerequisites check through
-    it.
+    the session export, the starter tools, the prerequisites check, the
+    model listing and the model check through it.
     The starter tools are the tool list read, bash, edit, write, grep, find and
     ls for a general agent, and the tool list read, grep, find and ls for a
     fallback agent.

@@ -1,13 +1,14 @@
 @design/task-core.sigil from TaskCore import {
   task, task id, brief, child run, result, domain event, child port,
   child run state, enqueue time, start time, child driver, transcript, attach command,
-  launch spec,
+  launch spec, model listing, model check, prerequisites check, starter tools,
 }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, project root, load error, tool list,
   unresolved root error, model endpoint, parallel limit, general agent,
   model tier, tier error, agent file, timeout, agents map, fallback agent,
-  working directory, medium tier,
+  working directory, medium tier, setup state, change set, setup preview,
+  preview fingerprint,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
@@ -95,6 +96,14 @@ component DelegationService {
     (empty) for an empty summary, and the usage with the duration when
     the result holds usage. A notice goes on the line after the first one, so
     the task id still comes first.
+
+    The *guided setup* is the part of DelegationService that a front end
+    reaches during an init that a person starts. It is made with Kernel, the
+    project root that a DelegationService resolved and an optional child host,
+    and it offers five *setup operations*, which list the models, show the
+    setup state, check models, preview a change set and apply it. Its
+    child host is the one named, or else the one supported child host when the
+    driver registry lists exactly one.
   }
 
   logic {
@@ -197,6 +206,22 @@ component DelegationService {
     front end that made the delegation, which ends that flow. A task that a
     session cancel or a cancel ended gets the stop notice instead.
 
+    On a listing of the models in the guided setup, run the
+    prerequisites check of the child driver of its child host when it offers
+    one, and return its message as the error when it gives one. Then return
+    the model listing of that child driver, or an error when it offers none or
+    the listing fails, which ends the flow. On a show, read the setup state
+    from AgentConfig, marking each model tier listed or not from the
+    model listing when the listing succeeds and otherwise giving the reason it
+    failed, and return it with the warning of what configuring the model tier
+    large moves off the parent host, which ends the flow. On a check, run the
+    model check of that child driver for each model, one after another, and
+    return one result for each model in the order asked, which ends the flow.
+    On a preview or an apply, hand the change set and, for an apply, the
+    preview fingerprint to AgentConfig, with that child host, the
+    starter tools of that child driver and a timeout of 1200 seconds, and
+    return the setup preview, which ends the flow.
+
     On shutdown, cancel every task in the live task registry, wait up to a
     deadline for their child runs to end, and record each task whose child run
     was then still running as cancelled, so that no task record stays running
@@ -275,18 +300,28 @@ component DelegationService {
     delegation from a command line process or from another session is not
     counted, and nothing may signal or lock across processes to enforce it.
 
+    The guided setup must write the agent file only through an apply of
+    AgentConfig with the preview fingerprint of a setup preview, and must use
+    the project root that a DelegationService resolved and never the
+    working directory of its process. It must run one model check at a time,
+    so that a single model endpoint is not overloaded, and it must make no
+    delegation, task or task record, because the models it checks are not in
+    the agent file yet.
+
     A child run that is Pending must be returned with its queue place and its
     enqueue time and never with a start time, and the time it waits must not
     count toward its timeout.
 
     DelegationService depends on TaskCore for the task, on the driver registry
     of
-    Kernel for the child port of the child host of an agent definition, on
+    Kernel for the child port of the child host of an agent definition and,
+    for the guided setup, for the model listing, the model check, the
+    prerequisites check and the starter tools of a child host, on
     AgentConfig
     for the agent definition, the general agent, the fallback agent, the
-    tier error
-    and the project root, and on TaskStore for the task record, the
-    task status and the start-up sweep. It must not depend on any particular
+    tier error, the project root and the setup preview, and on TaskStore for
+    the task record, the task status and the start-up sweep. It must not
+    depend on any particular
     child driver or parent adapter, and it names no child host, because more of
     both will
     come and
@@ -457,6 +492,12 @@ component DelegationService {
 
     Shut down by cancelling every task in the live task registry and recording
     each one that outlives the deadline as cancelled.
+
+    Offer the guided setup to a parent adapter and to the command line, with
+    the setup operations that give the model listing, the setup state with
+    each model tier marked listed, the model check of each chosen model, the
+    setup preview of a change set and its apply, and each refusal with a code
+    and a one-line reason, so that every front end shows the same result.
   }
 
   decisions {
@@ -501,5 +542,13 @@ component DelegationService {
     of
     its parent host and ordering a listing stay with the front end that needs
     them.
+
+    The guided setup lives here, beside the delegation, so that the Claude Code
+    parent host, through the command line, and the pi parent host reach the
+    same setup operations and cannot drift apart. The conversation of a guided
+    init, its questions, suggestions and warnings, lives in one guide text that
+    both parent adapters follow, and not in the service. A model check is a
+    one-turn run of the child driver and not a delegation, because a
+    delegation needs an agent entry and makes a task record.
   }
 }

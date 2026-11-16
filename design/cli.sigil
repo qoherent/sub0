@@ -1,5 +1,5 @@
 @design/delegation-service.sigil from DelegationService import {
-  delegation, brief text, reply budget,
+  delegation, brief text, reply budget, guided setup, setup operations,
 }
 @design/task-core.sigil from TaskCore import {
     task, task id, brief, result, transcript, launch spec, attach command,
@@ -11,6 +11,9 @@
 }
 @design/kernel.sigil from Kernel import {
   driver registry, parent adapter, supported child host, entry point, child host,
+}
+@design/agent-config.sigil from AgentConfig import {
+  change set, preview fingerprint, stale preview error, unresolved root error,
 }
 @design/task-store.sigil from TaskStore import {
     task record, task status, parent session id, start-up sweep,
@@ -101,7 +104,20 @@ component Cli {
     refusing with a message that names the child host when that child driver
     offers
     none,
-    and say that an abandoned task has no result. Each
+    and say that an abandoned task has no result.
+
+    On subzero init with no model, print a usage error that says to run
+    /subzero:init in Claude Code or /subzero init in pi for a guided setup,
+    because a terminal has no parent model to run it, and exit with code 2,
+    writing nothing. On one of the config commands, make the guided setup of
+    DelegationService with the project root that the delegation service
+    resolved and the option host, and run the one of its setup operations
+    that has the name of the command.
+    Split each model from its thinking level at the last colon, because a model
+    can hold a colon. Print one JSON document on stdout: ok true with the
+    result, or ok false with a code, a one-line message and any refused change,
+    exiting 1, also for the unresolved root error and the load error. A
+    malformed argument is a usage error on stderr that exits 2. Each
     command ends by printing its output and exiting.
   }
 
@@ -124,7 +140,8 @@ component Cli {
     owner abandoned. It must also be refused with a message that no launch spec
     was recorded when the task record has none.
 
-    Cli depends on DelegationService for the delegation, the status line and
+    Cli depends on DelegationService for the delegation, the guided setup,
+    the status line and
     the result text that it prints, on TaskStore for the
     task record, on TaskCore for the launch spec, the attach command and the
     session export, on AgentConfig for the agent file, the starter entries and
@@ -180,15 +197,33 @@ component Cli {
     three entries are already there. With a general agent already in the file,
     it
     adds only the fallback agent and leaves the general agent as it was.
+
+    Subzero init with no model, or with only the option thinking, prints the
+    usage error that names /subzero:init and /subzero init, exits 2 and writes
+    nothing. Subzero config preview --tier
+    medium=ollama/qwen2.5-coder:7b:medium previews the medium tier on the
+    model ollama/qwen2.5-coder:7b at the thinking level medium. Subzero config
+    apply with a preview fingerprint from before the agent file changed prints
+    ok false with the code of the stale preview error, exits 1 and writes
+    nothing.
   }
 
   interface {
-    Offer five commands: subzero init with a model and the named options
+    Offer six commands: subzero init with a model and the named options
     host, which names the child host,
-    timeout and thinking, subzero run with a brief and the named option agent,
+    timeout and thinking, subzero config, subzero run with a brief and the
+    named option agent,
     which may be left out,
     subzero tasks, subzero attach with a task id,
     and subzero show with a task id.
+
+    Offer the *config commands* subzero config models, show, check, preview
+    and apply, each with the option host, for the init command of the
+    Claude Code parent host. Check takes one or more models, each written
+    <model>:<thinking>. Preview and apply take a change set as repeated flags:
+    --tier <tier>=<model>:<thinking>, --unset <tier>, --limit <endpoint>=<n>
+    and --no-limit <endpoint>, and apply also takes the preview fingerprint of
+    that preview as --expect.
 
     Make the child session of a task, its transcript and its task record
     reachable
