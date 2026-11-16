@@ -18,3 +18,10 @@ export function mapRequest(agent: string | undefined, tierText: string | undefin
   const name = value.startsWith('tier:') ? explicit : configuredTiers.includes(value) ? value : tierForPhrase(value);
   return { agent: mappedAgent, tier: name ? { kind: 'tier', name } : { kind: 'unmatched', value } };
 }
+
+/**
+ * What configuring `large` moves off Claude, told before `large` is set. The one
+ * source of this sentence; README "What configuring a large tier changes" explains it.
+ */
+export const LARGE_TIER_WARNING =
+  "Setting large sends compound-engineering's session-model reviewers and plain subagent requests to the child model instead of Claude.";
