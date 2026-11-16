@@ -2,6 +2,9 @@
 //
 //   subzero init <model> [--host H] [--timeout S] [--thinking L]
 //                                    add the medium tier, general and fallback entries
+//   subzero config models|show|check|preview|apply
+//                                    guided setup through the setup service, one JSON
+//                                    document on stdout per command
 //   subzero run [--agent A] <brief...>  delegate, wait and print the result (no --agent: general)
 //   subzero tasks                    list every task
 //   subzero attach <task id>         reopen the child session in the pi terminal interface
@@ -13,7 +16,7 @@
 // Kernel it passes in, and attach and show ask that registry.
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import {
   addStarterEntries,
   LoadError,
@@ -24,9 +27,11 @@ import {
   UnresolvedRootError,
   type ThinkingLevel,
 } from '../config/agent-config.js';
+import { ChangeSetError, SetupConflictError, SetupRefusedError, type Change } from '../config/agent-setup.js';
 import { isTaskId } from '../core/ids.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { DelegationService, EmptyBriefError, type DelegationServiceOptions } from '../service/delegation-service.js';
+import { SetupService, SetupServiceError, type ModelCheckInput } from '../service/setup-service.js';
 import { describeEvent, formatResult, formatStatusLine, listingStatus, statusFacts, withNotice } from '../service/status-text.js';
 
 export interface CliIo {
@@ -34,12 +39,25 @@ export interface CliIo {
   err: (text: string) => void;
 }
 
+const CHANGE_FLAGS = '[--tier <tier>=<model>:<thinking>]... [--unset <tier>]... [--limit <endpoint>=<n>]... [--no-limit <endpoint>]...';
+
 const USAGE = `usage:
   subzero init <model> [--host <host>] [--timeout <seconds>] [--thinking <level>]
+  subzero config models [--host <host>]
+  subzero config show [--host <host>]
+  subzero config check [--host <host>] <model>:<thinking>...
+  subzero config preview [--host <host>] ${CHANGE_FLAGS}
+  subzero config apply --expect <fingerprint> [--host <host>] ${CHANGE_FLAGS}
   subzero run [--agent <agent>] <brief...>
   subzero tasks
   subzero attach <task id>
-  subzero show <task id> [-o <file.html>]`;
+  subzero show <task id> [-o <file.html>]
+thinking levels: ${THINKING_LEVELS.join(', ')}; a model and its level split at the last colon`;
+
+/** init with no model: the guided flow needs an agent, which a terminal does not have. */
+const INIT_NEEDS_MODEL =
+  'subzero: init needs a model in a terminal. For guided setup, run /subzero:init in Claude Code or /subzero init in pi; ' +
+  'or run subzero init <model> here.';
 
 function knownError(err: unknown): boolean {
   return (
@@ -65,6 +83,8 @@ export async function runCli(argv: string[], io: CliIo, options: CliOptions): Pr
     switch (command) {
       case 'init':
         return await init(service, rest, io, options);
+      case 'config':
+        return await config(service, rest, io, options);
       case 'run':
         return await run(service, rest, io);
       case 'tasks':
@@ -78,6 +98,11 @@ export async function runCli(argv: string[], io: CliIo, options: CliOptions): Pr
         return 2;
     }
   } catch (err) {
+    // config prints its refusals as JSON on stdout, including a root that does not resolve.
+    if (command === 'config' && (knownError(err) || configError(err))) {
+      io.out(json(refusal(err as Error)));
+      return 1;
+    }
     if (knownError(err)) {
       io.err(`subzero: ${(err as Error).message}`);
       return 1;
@@ -92,7 +117,12 @@ const DEFAULT_INIT_THINKING: ThinkingLevel = 'medium';
 async function init(service: DelegationService, args: string[], io: CliIo, options: CliOptions): Promise<number> {
   const parsed = parseNamed(args, { host: { type: 'string' }, timeout: { type: 'string' }, thinking: { type: 'string' } });
   const [model, ...extra] = parsed?.positionals ?? [];
-  if (parsed === null || model === undefined || model === '' || extra.length > 0) {
+  if (parsed !== null && (model === undefined || model === '')) {
+    io.err(INIT_NEEDS_MODEL);
+    io.err(USAGE);
+    return 2;
+  }
+  if (parsed === null || model === undefined || extra.length > 0) {
     io.err(USAGE);
     return 2;
   }
@@ -156,6 +186,166 @@ function parseNamed<T extends Record<string, { type: 'string' }>>(args: string[]
   } catch {
     return null;
   }
+}
+
+/** Errors the setup service reports for a request it refuses; config prints them as JSON. */
+function configError(err: unknown): boolean {
+  return (
+    err instanceof SetupServiceError ||
+    err instanceof ChangeSetError ||
+    err instanceof SetupConflictError ||
+    err instanceof SetupRefusedError
+  );
+}
+
+function json(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+/** The JSON a refused config command prints: the error's code, its one-line reason and any refusals. */
+function refusal(err: Error): Record<string, unknown> {
+  const code = (err as { code?: unknown }).code;
+  return {
+    ok: false,
+    code: typeof code === 'string' ? code : 'error',
+    message: err.message,
+    ...(err instanceof SetupRefusedError ? { refusals: err.refusals } : {}),
+  };
+}
+
+/** A malformed config argument: a usage error, exit 2. */
+class ConfigUsageError extends Error {}
+
+/** Split `<model>:<thinking>` at the last colon, since model ids can hold colons. */
+function modelAndThinking(spec: string, what: string): ModelCheckInput {
+  const colon = spec.lastIndexOf(':');
+  if (colon === -1) throw new ConfigUsageError(`${what} "${spec}" needs a thinking level: <model>:<thinking>`);
+  const model = spec.slice(0, colon);
+  const thinking = spec.slice(colon + 1);
+  if (model.trim() === '') throw new ConfigUsageError(`${what} "${spec}" needs a model before the thinking level`);
+  if (!(THINKING_LEVELS as readonly string[]).includes(thinking)) {
+    throw new ConfigUsageError(`${what} "${spec}": the thinking level must be one of ${THINKING_LEVELS.join(', ')} (got "${thinking}")`);
+  }
+  return { model, thinking: thinking as ThinkingLevel };
+}
+
+/** Split `<name>=<value>` at the first equals sign; both parts must be non-empty. */
+function nameAndValue(flag: string, arg: string, shape: string): [string, string] {
+  const eq = arg.indexOf('=');
+  const name = eq === -1 ? '' : arg.slice(0, eq);
+  const value = eq === -1 ? '' : arg.slice(eq + 1);
+  if (name.trim() === '' || value === '') throw new ConfigUsageError(`${flag} "${arg}" must have the form ${shape}`);
+  return [name, value];
+}
+
+function nonEmptyArg(flag: string, arg: string): string {
+  if (arg.trim() === '') throw new ConfigUsageError(`${flag} needs a non-empty name`);
+  return arg;
+}
+
+/** The change set the repeated change flags spell, in flag order. */
+function parseChanges(values: { tier?: string[]; unset?: string[]; limit?: string[]; 'no-limit'?: string[] }): Change[] {
+  const changes: Change[] = [];
+  for (const arg of values.tier ?? []) {
+    const [tier, spec] = nameAndValue('--tier', arg, '<tier>=<model>:<thinking>');
+    changes.push({ op: 'setTier', tier, ...modelAndThinking(spec, `--tier ${tier}`) });
+  }
+  for (const arg of values.unset ?? []) changes.push({ op: 'unsetTier', tier: nonEmptyArg('--unset', arg) });
+  for (const arg of values.limit ?? []) {
+    const [endpoint, n] = nameAndValue('--limit', arg, '<endpoint>=<n>');
+    if (!/^[1-9][0-9]*$/.test(n) || !Number.isSafeInteger(Number(n))) {
+      throw new ConfigUsageError(`--limit "${arg}": the limit must be a positive whole number`);
+    }
+    changes.push({ op: 'setLimit', endpoint, parallel: Number(n) });
+  }
+  for (const arg of values['no-limit'] ?? []) changes.push({ op: 'clearLimit', endpoint: nonEmptyArg('--no-limit', arg) });
+  return changes;
+}
+
+const HOST_OPTION = { host: { type: 'string' } } as const;
+const CHANGE_OPTIONS = {
+  ...HOST_OPTION,
+  tier: { type: 'string', multiple: true },
+  unset: { type: 'string', multiple: true },
+  limit: { type: 'string', multiple: true },
+  'no-limit': { type: 'string', multiple: true },
+} as const;
+const APPLY_OPTIONS = { ...CHANGE_OPTIONS, expect: { type: 'string' } } as const;
+
+/**
+ * subzero config: the setup service's five operations, for the Claude Code init skill.
+ * Each prints one JSON document on stdout: `ok: true` and the result, or `ok: false`,
+ * a code and the reason (exit 1). A malformed argument is a usage error on stderr (exit 2).
+ */
+async function config(service: DelegationService, args: string[], io: CliIo, options: CliOptions): Promise<number> {
+  const [sub, ...rest] = args;
+  const parse = <O extends ParseArgsOptionsConfig>(opts: O, positionals: boolean) => {
+    let parsed;
+    try {
+      parsed = parseArgs({ args: rest, options: opts, allowPositionals: true, strict: true });
+    } catch (err) {
+      throw new ConfigUsageError((err as Error).message);
+    }
+    if (!positionals && parsed.positionals.length > 0) {
+      throw new ConfigUsageError(`config ${sub} takes no arguments (got "${parsed.positionals[0]}")`);
+    }
+    return parsed;
+  };
+  const setup = (host: string | undefined) =>
+    new SetupService({ kernel: options.kernel, projectRoot: service.projectRoot!, ...(host !== undefined ? { host } : {}) });
+
+  try {
+    switch (sub) {
+      case 'models': {
+        const { values } = parse(HOST_OPTION, false);
+        return ok(io, await setup(values.host).models());
+      }
+      case 'show': {
+        const { values } = parse(HOST_OPTION, false);
+        return ok(io, await setup(values.host).show());
+      }
+      case 'check': {
+        const { values, positionals } = parse(HOST_OPTION, true);
+        if (positionals.length === 0) throw new ConfigUsageError('config check needs at least one <model>:<thinking>');
+        const models = positionals.map((spec) => modelAndThinking(spec, 'model'));
+        // Ctrl-C cancels the running check; the rest are reported cancelled.
+        const abort = new AbortController();
+        const onSigint = () => abort.abort();
+        process.on('SIGINT', onSigint);
+        try {
+          return ok(io, await setup(values.host).check(models, abort.signal));
+        } finally {
+          process.off('SIGINT', onSigint);
+        }
+      }
+      case 'preview': {
+        const { values } = parse(CHANGE_OPTIONS, false);
+        const { text: _text, ...preview } = setup(values.host).preview(parseChanges(values));
+        return ok(io, preview);
+      }
+      case 'apply': {
+        const { values } = parse(APPLY_OPTIONS, false);
+        if (values.expect === undefined || values.expect === '') {
+          throw new ConfigUsageError('config apply needs --expect <fingerprint> from config preview');
+        }
+        const { text: _text, ...applied } = setup(values.host).apply(parseChanges(values), values.expect);
+        return ok(io, applied);
+      }
+      default:
+        io.err(USAGE);
+        return 2;
+    }
+  } catch (err) {
+    if (!(err instanceof ConfigUsageError)) throw err;
+    io.err(`subzero: ${err.message}`);
+    io.err(USAGE);
+    return 2;
+  }
+}
+
+function ok(io: CliIo, result: object): number {
+  io.out(json({ ok: true, ...result }));
+  return 0;
 }
 
 async function run(service: DelegationService, args: string[], io: CliIo): Promise<number> {

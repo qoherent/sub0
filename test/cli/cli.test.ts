@@ -250,6 +250,31 @@ describe('Cli', () => {
       expect(readFileSync(agentFile(root), 'utf8')).toBe(text);
     });
 
+    it('prints exactly what it added for a model alone (AE1)', async () => {
+      const root = tempDir();
+      const { run, out, err } = cli(root);
+      expect(await run('init', 'local/qwen')).toBe(0);
+      expect(out).toEqual(['added the medium tier, the general agent, the fallback agent']);
+      expect(err).toEqual([]);
+      expect(getAgent(root, 'general')).toMatchObject({ model: 'local/qwen', thinking: 'medium' });
+    });
+
+    it('without a model, points to the guided init of both parents and writes nothing', async () => {
+      const root = tempDir();
+      const { run, out, err } = cli(root);
+      expect(await run('init')).toBe(2);
+      const message = err.join('\n');
+      expect(message).toContain('/subzero:init');
+      expect(message).toContain('/subzero init');
+      expect(message).toMatch(/Claude Code/);
+      expect(message).toMatch(/\bpi\b/);
+      err.length = 0;
+      expect(await run('init', '--thinking', 'high')).toBe(2);
+      expect(err.join('\n')).toContain('/subzero:init');
+      expect(out).toEqual([]);
+      expect(existsSync(agentFile(root))).toBe(false);
+    });
+
     it('refuses without a model, with a bad timeout or a bad thinking level, writing nothing', async () => {
       const root = tempDir();
       const { run, err } = cli(root);
