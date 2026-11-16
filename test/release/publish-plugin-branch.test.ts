@@ -20,6 +20,7 @@ const BRANCH_FILES = [
   'hooks/hooks.json',
   'package.json',
   'skills/init/SKILL.md',
+  'skills/init/guided-init.md',
   'skills/cancel/SKILL.md',
   'skills/tasks/SKILL.md',
 ].sort();
