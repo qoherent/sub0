@@ -59,9 +59,11 @@ describe('AgentConfig load', () => {
   it('requires medium, general and fallback and defaults a request to medium', () => {
     const complete = `${MEDIUM_TIERS}agents:\n${GENERAL}${FALLBACK}`;
     expect(getAgent(makeProject(complete), undefined).model).toBe('r9700/Qwen3.8');
-    expect(() => loadAgentFile(makeProject(complete.replace('    medium: { host: pi, model: r9700/Qwen3.8, thinking: low }\n', '')))).toThrow(/medium/);
-    expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`))).toThrow(/general/);
-    expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${GENERAL}`))).toThrow(/fallback/);
+    // Each message names the init command of both parents.
+    const init = '; run /subzero:init in Claude Code or /subzero init in pi';
+    expect(() => loadAgentFile(makeProject(complete.replace('    medium: { host: pi, model: r9700/Qwen3.8, thinking: low }\n', '')))).toThrow(`the medium tier is required in models.tiers${init}`);
+    expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`))).toThrow(`the general agent is required${init}`);
+    expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${GENERAL}`))).toThrow(`the fallback agent is required${init}`);
   });
   it('loads a valid agent on the default tier with absolute skill folders', () => {
     const root = project(VALID);
@@ -123,6 +125,7 @@ describe('AgentConfig load', () => {
     const root = tempDir();
     expect(() => loadAgentFile(root)).toThrow(LoadError);
     expect(() => loadAgentFile(root)).toThrow(/missing/);
+    expect(() => loadAgentFile(root)).toThrow(/; run \/subzero:init in Claude Code or \/subzero init in pi$/);
     mkdirSync(path.join(root, '.agents'));
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'agents: [unclosed');
     expect(() => loadAgentFile(root)).toThrow(/malformed/);

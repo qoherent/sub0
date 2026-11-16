@@ -94,32 +94,52 @@ pi install git:github.com/qoherent/sub0@pi
 
 For a local checkout, run `npm run release:pi:build` and load the staged
 extension with `pi -e ./dist-pi-package/dist/pi-extension.js`. Set up the
-project first with `sh bin/subzero init <model>` from the checkout, or with
-`/subzero:init <model>` in Claude Code. The pi `subagent` tool runs in the
-background by default and reports completed results; `/subzero` shows tasks and
+project from inside pi with `/subzero init` (see
+[Set up a model](#set-up-a-model)). The pi `subagent` tool runs in the background
+by default and reports completed results; `/subzero` shows tasks and
 `/subzero cancel` stops a task or the session's tasks. On Claude, use
 `/subzero:cancel` to stop the current session's tasks.
 
 ## Set up a model
 
-Open Claude Code in the project where you want routing, then run the init command
-with the model name that pi lists, as `provider/model`:
+Open Claude Code in the project where you want routing, then run the init
+command with no arguments:
+
+```text
+/subzero:init
+```
+
+This is guided setup. It lists the models pi offers and suggests a model and a
+thinking level for each tier: `small`, `medium` and `large`. You choose each
+one; only `medium` is required. Then it asks how many children may run at once
+on each model server the chosen models use, and offers to check that each
+chosen model answers a one-turn prompt. Last it shows the change to
+`.agents/subzero.yaml` as a diff and writes it only after you confirm. Claude
+Code may ask you to allow its commands the first time. If pi is not installed,
+it says so and writes nothing.
+
+In pi, with the [pi extension](#install-the-pi-extension) loaded, run
+`/subzero init` instead. It is the same guided setup, with pi's own dialogs.
+
+If you already know the model, the quick path takes the model name that pi
+lists, as `provider/model`:
 
 ```text
 /subzero:init <model>
 ```
 
-For example `/subzero:init local/qwen`. Claude Code may ask you to allow the
-command once. It writes `.agents/subzero.yaml` with a `medium` tier on that model,
-a `general` agent that can read, write and run commands, and a read-only `fallback`
-agent. Optional arguments are `--timeout <seconds>` (default 1200) and
+For example `/subzero:init local/qwen`, or `/subzero init local/qwen` in pi. It
+writes `.agents/subzero.yaml` with a `medium` tier on that model, a `general`
+agent that can read, write and run commands, and a read-only `fallback` agent.
+Optional arguments are `--timeout <seconds>` (default 1200) and
 `--thinking <level>` (default medium). If pi is not installed, it says so and
 writes nothing. In an existing file, init adds missing starter entries and
 keeps existing settings; it refuses incompatible or invalid entries. Empty or
 flow-style maps are rewritten to add missing entries.
 
-Compound-engineering asks for the tiers `small`, `medium` and `large`. The starter
-`medium` tier routes mid-tier work; add the other tiers to route them as well:
+Compound-engineering asks for the tiers `small`, `medium` and `large`. The
+`medium` tier routes mid-tier work, and `small` and `large` route theirs when
+they are set. A tier in the file looks like this:
 
 ```yaml
 models:
@@ -127,8 +147,11 @@ models:
     medium: { host: pi, model: local/qwen, thinking: medium }
 ```
 
-Start a new Claude Code session in the project, so the session-start hook reads
-the file. Add `small` or `large` the same way to route those tiers too; read
+After init creates the file or adds or removes a tier, start a new Claude Code
+session in the project, so the session-start hook reads the file. pi refreshes
+its tier text in place, so it needs no new session. To add `small` or `large`
+later, run `/subzero:init` (or `/subzero init` in pi) again and choose them, or
+add them to the file by hand; read
 [what a `large` tier changes](#what-configuring-a-large-tier-changes) first.
 
 Every key of the file, how a request picks its model, the checks the file must

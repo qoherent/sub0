@@ -93,6 +93,9 @@ export interface RoutableTier extends ModelTier {
   tier: string;
 }
 
+/** How a load error tells the user to set up the agent file, in either parent. */
+const RUN_INIT = '; run /subzero:init in Claude Code or /subzero init in pi';
+
 export class LoadError extends Error {
   readonly code: string = 'load_error';
   constructor(message: string) {
@@ -103,7 +106,7 @@ export class LoadError extends Error {
 
 export class MissingAgentFileError extends LoadError {
   constructor(agentFile: string) {
-    super(`agent file is missing: ${agentFile}; run subzero init`);
+    super(`agent file is missing: ${agentFile}${RUN_INIT}`);
     this.name = 'MissingAgentFileError';
   }
 }
@@ -111,7 +114,7 @@ export class MissingAgentFileError extends LoadError {
 /** The one load error that `init` repairs by adding the medium tier. */
 export class MissingDefaultTierError extends LoadError {
   constructor() {
-    super('the medium tier is required in models.tiers; run subzero init');
+    super(`the medium tier is required in models.tiers${RUN_INIT}`);
     this.name = 'MissingDefaultTierError';
   }
 }
@@ -299,8 +302,8 @@ export function parseCatalog(text: string, agentFile: string, options: ParseOpti
 
   if (!allowMissingStarter) {
     if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
-    if (!entries.has(GENERAL_AGENT)) throw new LoadError('the general agent is required; run subzero init');
-    if (!entries.has(FALLBACK_AGENT)) throw new LoadError('the fallback agent is required; run subzero init');
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
   }
 
   return { agentFile, entries, tiers, routing, limits };

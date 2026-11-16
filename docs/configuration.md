@@ -3,8 +3,10 @@
 subzero reads one file per project, `.agents/subzero.yaml`. It says which models
 the children run on, which agents you can ask for by name, and how routing
 behaves. This page is the full reference for that file, for version
-`0.1.0-preview.1`. The README has the short path: install, run
-`/subzero:init <model>`.
+`0.1.0-preview.1`. The README has the short path: install, then run
+`/subzero:init` in Claude Code or `/subzero init` in pi. You do not have to
+write the file by hand; see
+[Writing the file with init](#writing-the-file-with-init).
 
 What is documented here is what the code accepts today. The design in
 [design.md](design.md) §4 describes more (layering, skill manifests, endpoint
@@ -88,7 +90,7 @@ models:
 | `thinking` | yes | One of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. It is passed to pi's `--thinking`. |
 
 Rules:
-- `medium` is required. `subzero init` adds it for you.
+- `medium` is required. `init` adds it for you.
 - A tier name is free text. The names `small`, `medium` and `large` have a
   meaning for routing (below); other names work only when a request names them.
 - A tier whose host has no child driver still loads. It fails only when a
@@ -228,17 +230,52 @@ before adding it.
 
 ## Writing the file with `init`
 
+Run init with no model for guided setup: `/subzero:init` in Claude Code, or
+`/subzero init` in pi. It works the same in both:
+
+- It shows what the file holds now, and what it will repair, such as a missing
+  `fallback` agent. A file that fails to load for another reason is refused;
+  fix it by hand or move it aside.
+- It lists the models the child host offers (for pi, what `pi --list-models`
+  shows) and suggests a model and a thinking level for `small`, `medium` and
+  `large`. A tier that is set keeps its model unless you change it. You can
+  leave `small` and `large` unset, or remove them. Tiers with other names are
+  left alone.
+- It asks the `parallel` limit of each endpoint the chosen tiers use.
+- It offers to check that each chosen model answers a one-turn prompt.
+- It shows the change as a diff and writes it only after you confirm. A new file
+  also gets the `general` and `fallback` agents.
+
+After a write that creates the file or adds or removes a tier, start a new
+Claude Code session so the routing text names the new tiers. pi refreshes its
+`subagent` tier text in place.
+
+In Claude Code the init skill does its work through `subzero config` commands
+(`models`, `show`, `check`, `preview` and `apply`), which print one JSON
+document each. They are the interface the skill uses, not a reference for
+users. `config apply` writes only with the fingerprint of a matching
+`config preview`. In pi the same steps are tools that are on only during a
+`/subzero init` run.
+
+The quick path takes a model and writes only the starter entries:
+
 ```sh
 /subzero:init <model> [--host pi] [--timeout 1200] [--thinking medium]
 ```
 
-`init` adds a `medium` tier (with that host, model and thinking), a `general`
-agent with the full tool list and a read-only `fallback` agent, each only when the
-file lacks it. It preserves existing entries and lines, except that it rewrites
-an empty or flow-style map when adding entries to it. It refuses and writes
+In pi it is `/subzero init <model> [--timeout 1200] [--thinking medium]`, and in
+a terminal `subzero init <model>` with the same options as in Claude Code.
+`subzero init` with no model in a terminal is a usage error, because guided
+setup needs an agent to run it.
+
+`init <model>` adds a `medium` tier (with that host, model and thinking), a
+`general` agent with the full tool list and a read-only `fallback` agent, each
+only when the file lacks it. It preserves existing entries and lines, except
+that it rewrites an empty or flow-style map when adding entries to it. It
+refuses and writes
 nothing when the pi check fails, the existing file fails to load for a reason
 other than missing starter entries, or the medium tier is on another host.
-Add `small` or `large` by hand when needed.
+To add `small` or `large` afterwards, run guided init, or add them by hand.
 
 ## Environment variables
 
@@ -288,7 +325,7 @@ These appear in design.md but are not read by this preview.
 
 | Message (start) | Cause and fix |
 |---|---|
-| `agent file is missing` | There is no `.agents/subzero.yaml` under the project root. Run `/subzero:init <model>`. |
+| `agent file is missing` | There is no `.agents/subzero.yaml` under the project root. Run `/subzero:init` in Claude Code or `/subzero init` in pi. |
 | `agent file is malformed` | The YAML does not parse, or a top-level section has the wrong type. The message says where. |
 | `the medium tier is required in models.tiers` | The file has no `medium` tier. Add one, or run `init`. |
 | `agent "<name>": description is required` | A named agent has no description. |

@@ -59,6 +59,21 @@ describe('README.md', () => {
     for (const skill of ['init', 'tasks']) expect(existsSync(path.join(REPO, 'skills', skill, 'SKILL.md'))).toBe(true);
   });
 
+  it('makes guided init the first-run path in both parents and keeps init <model> as the quick path', () => {
+    const setup = section(README_RAW, 'Set up a model');
+    // The bare command, in its own block, comes before the quick path with a model.
+    const guided = setup.search(/`{3}text \/subzero:init `{3}/);
+    expect(guided).toBeGreaterThanOrEqual(0);
+    expect(setup.indexOf('/subzero:init <model>')).toBeGreaterThan(guided);
+    expect(setup).toMatch(/guided setup/i);
+    expect(setup).toMatch(/`\/subzero init` instead/);
+    expect(setup).toMatch(/quick path/i);
+    expect(setup).toMatch(/diff[^.]*only after you confirm/i);
+    expect(setup).toMatch(/new Claude Code session/);
+    expect(setup).toMatch(/pi refreshes/);
+    expect(setup).toMatch(/to add `small` or `large` later, run `\/subzero:init`/i);
+  });
+
   it('documents the pi package and removing the competing extension', () => {
     expect(README).toContain('pi install git:github.com/qoherent/sub0@pi');
     expect(README).toMatch(/remove pi-subagents.{0,100}settings\.json/i);

@@ -113,9 +113,9 @@ describe('docs/configuration.md', () => {
       expect(DOC, fragment).toContain(quoted.split(' ').slice(0, 3).join(' '));
     });
 
-    it('a missing file reads "agent file is missing"', () => {
-      expect(() => loadAgentFile(tempDir('subzero-configdoc-'))).toThrow('agent file is missing');
-      expect(DOC).toContain('agent file is missing');
+    it('a missing file reads "agent file is missing" and names init in both parents', () => {
+      expect(() => loadAgentFile(tempDir('subzero-configdoc-'))).toThrow(/agent file is missing.*\/subzero:init in Claude Code or \/subzero init in pi/);
+      expect(DOC).toMatch(/`agent file is missing` \|[^|]*`\/subzero:init` in Claude Code or `\/subzero init` in pi/);
     });
 
     it('an unknown agent and an unknown tier read as the table says', () => {
@@ -124,6 +124,18 @@ describe('docs/configuration.md', () => {
       expect(() => resolveAgent(catalog, 'a', { tier: 'huge' })).toThrow(/unknown tier "huge"/);
       expect(() => resolveAgent(catalog, 'a', { supportedHosts: ['codex'] })).toThrow(/runs on the host "pi"/);
     });
+  });
+
+  it('presents guided init in both parents first, then the quick path, and names the config commands', () => {
+    const start = DOC.indexOf('## Writing the file with `init`');
+    const init = DOC.slice(start, DOC.indexOf('## Environment variables'));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(init).toMatch(/guided setup: `\/subzero:init` in Claude Code, or `\/subzero init` in pi/);
+    expect(init.indexOf('/subzero:init <model>')).toBeGreaterThan(init.indexOf('guided setup'));
+    expect(init).toMatch(/only after you confirm/);
+    for (const command of ['models', 'show', 'check', 'preview', 'apply']) expect(init).toContain(`\`${command}\``);
+    expect(init).toContain('`subzero config`');
+    expect(init).toMatch(/add `small` or `large` afterwards, run guided init/i);
   });
 
   it('links only to files that exist, and carries no dash pileups or banned words', () => {

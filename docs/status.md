@@ -48,10 +48,10 @@ The test suite, typecheck and release build are run locally for this branch.
 | TaskStore | [task-store.sigil](../design/task-store.sigil) | `src/store/` | `.agents/subzero/` (owner-only, self-ignoring), `index.jsonl`, task records, `abandoned` status. |
 | PiDriver | [pi-driver.sigil](../design/pi-driver.sigil) | `src/pi/` | `pi --mode rpc` with skill isolation (`--no-skills --skill`, `-ne`, `-nc`), skill verification, timeouts, typed failures, cancel, attach, HTML export, `pi --version` prerequisite check. |
 | ClaudeMcpServer | [claude-mcp-server.sigil](../design/claude-mcp-server.sigil) | `src/mcp/` | Four MCP tools (`delegate`, `tasks`, `await`, `cancel`), progress notifications, the 48,000-character reply budget, parent session id per session. It reports the `package.json` version, which the build stamps into the bundle. |
-| PiExtension | [pi-extension.sigil](../design/pi-extension.sigil) | `src/pi-parent/` | pi as a second parent host: `subagent`, `subzero_await`, `subzero_tasks`, `subzero_cancel`, `/subzero`, and a session core for each pi session. |
+| PiExtension | [pi-extension.sigil](../design/pi-extension.sigil) | `src/pi-parent/` | pi as a second parent host: `subagent`, `subzero_await`, `subzero_tasks`, `subzero_cancel`, `/subzero`, `/subzero init` with its run-scoped init tools, and a session core for each pi session. |
 | ClaudePluginCommands | [claude-plugin-commands.sigil](../design/claude-plugin-commands.sigil) | `skills/cancel/` | The user-only `/subzero:cancel` plugin skill. |
 | ClaudeRoutingHooks | [claude-routing-hooks.sigil](../design/claude-routing-hooks.sigil) | `src/routing/` | SessionStart routing text; PreToolUse redirect on `Agent\|Task` with readiness marker, deny memory, pass-back, fork and `isolation` exemptions. |
-| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `run`, `tasks`, `attach`, `show`. |
+| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `config`, `run`, `tasks`, `attach`, `show`. |
 | SigilWiring | [sigil-wiring.sigil](../design/sigil-wiring.sigil) | `examples/sigil/` | The agent file and README of the sigil experiment. |
 | SpikeHarness | [spike-harness.sigil](../design/spike-harness.sigil) | `bench/`, [spike-results.md](spike-results.md) | The measurement harness, scorer and results table. |
 
@@ -114,6 +114,19 @@ The distribution work added:
 - `Cli`: `init` writes the `medium` tier; `SigilWiring`: the example file holds `medium`, `general`, `fallback`.
 - `PiExtension` and `ClaudePluginCommands` are built (see the table above).
 - The plan for this work is [plans/2026-11-11-1012-feat-pi-parent-extension-plan.md](plans/2026-11-11-1012-feat-pi-parent-extension-plan.md).
+
+**Guided init (2026-11-16)**
+- `/subzero:init` with no model in Claude Code and `/subzero init` in pi run the
+  same guided setup: they list the child host's models, suggest a model for
+  `small`, `medium` and `large`, ask each endpoint's `parallel` limit, offer a
+  one-turn reachability check, and write `.agents/subzero.yaml` only after the
+  user confirms subzero's diff. `init <model>` stays as the quick path.
+- One setup service serves both parents. Claude Code reaches it through the
+  `subzero config` commands; pi through init tools that are on only during a
+  `/subzero init` run.
+- `subzero init` with no model in a terminal is a usage error that names both
+  parent commands. Load errors that said "run subzero init" now name them too.
+- The plan for this work is [plans/2026-11-16-1601-feat-guided-subzero-init-plan.md](plans/2026-11-16-1601-feat-guided-subzero-init-plan.md).
 
 **Decisions waiting on the user**
 - Answered and implemented 2026-11-12: `subzero init` writes a `medium` tier,
@@ -178,7 +191,8 @@ From the tiered routing plan:
 - tiers in a user-level config file.
 
 From the distribution plan:
-- a guided `/subzero:setup` and automatic installation of pi;
+- automatic installation of pi (the guided `/subzero:setup` it also deferred is
+  now built as guided `init`; see above);
 - a preview channel beside a stable one;
 - an npm package and a CLI usable outside Claude Code;
 - a central directory listing;

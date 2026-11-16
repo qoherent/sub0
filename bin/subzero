@@ -1,7 +1,7 @@
 #!/bin/sh
 # subzero launcher: the one way the plugin starts Node.
 #
-#   subzero <command> ...             run dist/cli.js (init, run, tasks, attach, show)
+#   subzero <command> ...             run dist/cli.js (init, config, run, tasks, attach, show)
 #   subzero --bundle server|hook|agent-hook|wake-hook [args]
 #                                     run that bundle (MCP server and the two hooks)
 #
