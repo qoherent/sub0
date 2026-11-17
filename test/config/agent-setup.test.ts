@@ -422,7 +422,60 @@ ${AGENTS}`;
     expect(read(root)).toContain(AGENTS);
   });
 
-  it('covers AE3: moving medium off the only tier on local drops endpoints.local, listed by preview and apply', () => {
+  describe('removing several entries of one flow-style map', () => {
+    const M = 'medium: { host: pi, model: local/m, thinking: low }';
+    const S = 'small: { host: pi, model: local/s, thinking: low }';
+    const T = 'tiny: { host: pi, model: local/t, thinking: off }';
+    const L = 'large: { host: pi, model: local/l, thinking: high }';
+    const unset = (...tiers: string[]): Change[] => tiers.map((tier) => ({ op: 'unsetTier', tier }));
+
+    it.each([
+      ['the last two (medium, small, large; unset small and large)', `{ ${M}, ${S}, ${L} }`, unset('small', 'large'), `{ ${M} }`, ['medium']],
+      ['a middle and the last entry', `{ ${M}, ${S}, ${T}, ${L} }`, unset('small', 'large'), `{ ${M}, ${T} }`, ['medium', 'tiny']],
+      ['two adjacent entries before the last', `{ ${M}, ${S}, ${T}, ${L} }`, unset('small', 'tiny'), `{ ${M}, ${L} }`, ['medium', 'large']],
+      ['every entry but the first', `{ ${M}, ${S}, ${T}, ${L} }`, unset('small', 'tiny', 'large'), `{ ${M} }`, ['medium']],
+      ['the entries around medium', `{ ${S}, ${M}, ${L} }`, unset('small', 'large'), `{ ${M} }`, ['medium']],
+      ['the last two of a multi-line map', `{\n      ${M},\n      ${S},\n      ${L}\n    }`, unset('small', 'large'), `{\n      ${M}\n    }`, ['medium']],
+    ])('removes %s', (_name, tiers, changes, kept, names) => {
+      const text = `models:\n  tiers: ${tiers}\n${AGENTS}`;
+      const root = makeProject(text);
+      const preview = previewChanges(root, changes, STARTER);
+      expect(preview.refusals).toEqual([]);
+      expect(preview.invalid).toBeUndefined();
+      expect(preview.text).toBe(`models:\n  tiers: ${kept}\n${AGENTS}`);
+      expect(applyChanges(root, changes, preview.fingerprint, STARTER).written).toBe(true);
+      expect([...loadAgentFile(root).tiers.keys()]).toEqual(names);
+    });
+
+    it.each([
+      ['a cleared limit and the orphaned limit after it', [{ op: 'clearLimit', endpoint: 'google' }], '{ local: { parallel: 1 }, cloud: { parallel: 4 } }', ['local', 'cloud']],
+      ['the orphaned limit and a cleared last limit', [{ op: 'clearLimit', endpoint: 'cloud' }], '{ local: { parallel: 1 }, google: { parallel: 2 } }', ['local', 'google']],
+      ['three limits after the first', [{ op: 'clearLimit', endpoint: 'google' }, { op: 'clearLimit', endpoint: 'cloud' }], '{ local: { parallel: 1 } }', ['local']],
+    ] as [string, Change[], string, string[]][])('removes %s from a flow-style endpoints map', (_name, changes, kept, endpoints) => {
+      const tiers = `models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    small: { host: pi, model: google/g, thinking: low }\n    large: { host: pi, model: cloud/c, thinking: high }\n`;
+      const text = `endpoints: { local: { parallel: 1 }, google: { parallel: 2 }, old: { parallel: 3 }, cloud: { parallel: 4 } }\n${tiers}${AGENTS}`;
+      const root = makeProject(text);
+      const preview = previewChanges(root, changes, STARTER);
+      expect(preview.refusals).toEqual([]);
+      expect(preview.droppedLimits).toEqual(['old']);
+      expect(preview.invalid).toBeUndefined();
+      expect(preview.text).toBe(`endpoints: ${kept}\n${tiers}${AGENTS}`);
+      expect(applyChanges(root, changes, preview.fingerprint, STARTER).written).toBe(true);
+      expect([...loadAgentFile(root).limits.keys()]).toEqual(endpoints);
+    });
+
+    it('still removes adjacent entries of a block-style map line by line', () => {
+      const text = `models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n\n    # small\n    small: { host: pi, model: local/s, thinking: low }\n\n    large:\n      host: pi\n      model: local/l\n      thinking: high\n${AGENTS}`;
+      const root = makeProject(text);
+      const changes = unset('small', 'large');
+      const preview = previewChanges(root, changes, STARTER);
+      expect(preview.text).toBe(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n\n${AGENTS}`);
+      expect(applyChanges(root, changes, preview.fingerprint, STARTER).written).toBe(true);
+      expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium']);
+    });
+  });
+
+  it('covers AE3:moving medium off the only tier on local drops endpoints.local, listed by preview and apply', () => {
     const text = `endpoints:
   local:
     parallel: 1

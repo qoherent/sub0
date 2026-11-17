@@ -508,12 +508,11 @@ function plan(agentFile: string, text: string | null, changes: Change[], starter
   const first = createSplicer(original);
   const edits: Edit[] = [];
   for (const [name, tier] of setTiers) if (catalog.tiers.has(name)) edits.push(...replaceTier(first.doc, name, tier));
-  for (const name of unsetTiers) edits.push(deleteEntry(first, ['models', 'tiers'], name));
+  edits.push(...deleteEntries(first, ['models', 'tiers'], unsetTiers));
   const keptLimits = [...catalog.limits.keys()].filter((e) => !removedLimits.includes(e));
   if (removedLimits.length > 0) {
     // A map left with no entry goes whole; new limits then create it again.
-    if (keptLimits.length === 0) edits.push(deleteEntry(first, [], 'endpoints'));
-    else for (const endpoint of removedLimits) edits.push(deleteEntry(first, ['endpoints'], endpoint));
+    edits.push(...(keptLimits.length === 0 ? deleteEntries(first, [], ['endpoints']) : deleteEntries(first, ['endpoints'], removedLimits)));
   }
   for (const [endpoint, parallel] of setLimits) {
     if (keptLimits.includes(endpoint)) edits.push(replaceScalar(first.doc, ['endpoints', endpoint, 'parallel'], parallel));
@@ -627,32 +626,49 @@ function indentOf(line: string): number {
 }
 
 /**
- * Remove one entry of a map. In a block map its lines go, with the comment lines
- * directly above it at its indent; in a flow map its text and one separating comma go.
+ * Remove entries of one map. In a block map each entry's lines go, with the comment
+ * lines directly above it at its indent. In a flow map each run of adjacent removed
+ * entries goes as one range with one separating comma, so the edits never overlap.
  */
-function deleteEntry(s: Splicer, mapKeys: string[], key: string): Edit {
+function deleteEntries(s: Splicer, mapKeys: string[], keys: string[]): Edit[] {
+  if (keys.length === 0) return [];
   const text = s.original;
   const map = mapKeys.length === 0 ? s.doc.contents : s.doc.getIn(mapKeys, true);
-  if (!isMap(map)) throw new LoadError(`agent file: ${mapKeys.join('.') || 'the document'} must be a map for setup to remove "${key}"`);
+  if (!isMap(map)) throw new LoadError(`agent file: ${mapKeys.join('.') || 'the document'} must be a map for setup to remove "${keys[0]}"`);
   const items = map.items as Pair[];
-  const at = items.findIndex((p) => isScalar(p.key) && p.key.value === key);
-  const pair = items[at];
-  const keyRange = rangeOf(pair?.key);
-  if (pair === undefined || keyRange === undefined) throw new LoadError(`agent file: "${key}" was not found where setup expected it`);
-  const keyStart = keyRange[0];
-  const valueEnd = rangeOf(pair.value)?.[1] ?? keyRange[1];
-
-  if (map.flow === true) {
-    const next = items[at + 1];
-    if (next !== undefined) return { start: keyStart, end: rangeOf(next.key)![0], text: '' };
-    const prev = items[at - 1];
-    if (prev !== undefined) return { start: rangeOf(prev.value)?.[1] ?? rangeOf(prev.key)![1], end: valueEnd, text: '' };
-    let end = valueEnd;
-    while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
-    if (text[end] === ',') end++;
-    return { start: keyStart, end, text: '' };
+  const removed = new Map<number, string>();
+  for (const key of keys) {
+    const at = items.findIndex((p) => isScalar(p.key) && p.key.value === key);
+    if (at === -1 || rangeOf(items[at]!.key) === undefined) throw new LoadError(`agent file: "${key}" was not found where setup expected it`);
+    removed.set(at, key);
   }
+  const keyStart = (pair: Pair) => rangeOf(pair.key)![0];
+  const valueEnd = (pair: Pair) => rangeOf(pair.value)?.[1] ?? rangeOf(pair.key)![1];
 
+  if (map.flow !== true) return [...removed].map(([at, key]) => deleteBlockEntry(text, keyStart(items[at]!), key));
+
+  const edits: Edit[] = [];
+  for (let first = 0; first < items.length; first++) {
+    if (!removed.has(first)) continue;
+    let last = first;
+    while (removed.has(last + 1)) last++;
+    const next = items[last + 1];
+    const prev = items[first - 1];
+    if (next !== undefined) edits.push({ start: keyStart(items[first]!), end: keyStart(next), text: '' });
+    else if (prev !== undefined) edits.push({ start: valueEnd(prev), end: valueEnd(items[last]!), text: '' });
+    else {
+      let end = valueEnd(items[last]!);
+      while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
+      if (text[end] === ',') end++;
+      edits.push({ start: keyStart(items[first]!), end, text: '' });
+    }
+    first = last;
+  }
+  return edits;
+}
+
+/** The range of one block-map entry starting at keyStart: its lines and attached comments. */
+function deleteBlockEntry(text: string, keyStart: number, key: string): Edit {
   const lineStart = text.lastIndexOf('\n', keyStart - 1) + 1;
   if (text.slice(lineStart, keyStart).trim() !== '') {
     throw new LoadError(`agent file: "${key}" does not start its own line, so setup cannot remove it`);
