@@ -437,8 +437,12 @@ An agent definition can come from two kinds of places, which are merged in layer
        sessions/           # pi child sessions, gitignored
    ```
 
-   The user-level file is `~/.agents/subzero.yaml`, mirroring `~/.agents/skills`. It holds model
-   endpoints, keys, tiers and policy. `subzero init` writes the `.gitignore` entries.
+   The user-level file is `~/.agents/subzero.yaml`, mirroring `~/.agents/skills`. **Built** (see
+   [configuration.md](configuration.md#the-general-file-one-setup-for-every-project)): the file holds
+   only `models.tiers`, endpoint `parallel` limits and `routing`, and the workspace file is merged over
+   it by name, a workspace entry replacing the user entry whole, with `enabled: false` in the
+   workspace file as the opt-out. Agents and skills stay out of it. **Not built**: endpoint keys and
+   addresses, `subzero.local.yaml`, `subzero.lock` and skill manifests.
 2. **Skill manifest.** A skill can ship its own recommended agent definition in
    `<skill>/agents/subzero.yaml`. Codex already uses `agents/openai.yaml` inside a skill folder the same
    way. This is how a skill author says "this skill should run as a sub-agent, set up like this".
@@ -456,7 +460,9 @@ agent:
 ```
 
 **Precedence, lowest first:** skill manifest, then user config, then `.agents/subzero.yaml`, then
-`.agents/subzero.local.yaml`. Agents are merged by name, field by field, as compose does. The workspace can
+`.agents/subzero.local.yaml`. Built today: user config under `.agents/subzero.yaml`, merged by name as
+above. Not built: the skill manifest and `.agents/subzero.local.yaml` layers, and field-by-field
+agent merging. Agents are merged by name, field by field, as compose does. The workspace can
 override or turn off a skill-provided agent:
 
 ```yaml
