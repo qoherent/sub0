@@ -1064,6 +1064,35 @@ describe('AgentSetup scopes', () => {
     expect(previewChanges(two, unsetSmall, STARTER).text).toBe('models:\n  tiers: { large: { host: pi, model: cloud/l, thinking: low } }\n');
   });
 
+  it('writes a removal entry inside a whole-file flow map when its last own tier or limit overrides an inherited one', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const tier = makeProject('{ models: { tiers: { small: { host: pi, model: a/b, thinking: low } } } }\n');
+    const unset: Change[] = [{ op: 'unsetTier', tier: 'small' }];
+    const tierPreview = previewChanges(tier, unset, STARTER);
+    expect(tierPreview.invalid).toBeUndefined();
+    expect(tierPreview.refusals).toEqual([]);
+    expect(tierPreview.text).toMatch(/^\{.*small: null.*\}\s*$/s);
+    applyChanges(tier, unset, tierPreview.fingerprint, STARTER);
+    expect([...loadAgentFile(tier).tiers.keys()]).toEqual(['medium', 'large']);
+
+    const limit = makeProject('{ endpoints: { local: { parallel: 1 } } }\n');
+    const clear: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const limitPreview = previewChanges(limit, clear, STARTER);
+    expect(limitPreview.invalid).toBeUndefined();
+    expect(limitPreview.text).toMatch(/^\{.*local: null.*\}\s*$/s);
+    applyChanges(limit, clear, limitPreview.fingerprint, STARTER);
+    expect(loadAgentFile(limit).limits.size).toBe(0);
+
+    // A flow models or tiers inside a block file keeps working, with the removal entry written in the file.
+    for (const text of ['models: { tiers: { small: { host: pi, model: a/b, thinking: low } } }\n', 'models:\n  tiers: { small: { host: pi, model: a/b, thinking: low } }\n']) {
+      const root = makeProject(text);
+      const preview = previewChanges(root, unset, STARTER);
+      expect(preview.invalid, text).toBeUndefined();
+      applyChanges(root, unset, preview.fingerprint, STARTER);
+      expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium', 'large']);
+    }
+  });
+
   it('removes the whole general tiers section when the last general tier goes and the project has its own medium', () => {
     const general = useGeneralConfig('models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n');
     const root = makeProject('models:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: low }\n');

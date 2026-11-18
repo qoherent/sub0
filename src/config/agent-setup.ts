@@ -683,7 +683,9 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   for (const [name, tier] of setTiers) if (hasTier(name)) edits.push(...replaceTier(first.doc, name, tier));
   // An entry the file holds is deleted when removed, or when a removal entry gives way to a value; the project scope then writes a removal entry for an inherited tier.
   const goneTiers = [...unsetTiers.filter((t) => own.tiers.has(t)), ...[...setTiers.keys()].filter((t) => own.tiers.get(t) === false)];
-  if (goneTiers.length > 0 && [...own.tiers.keys()].every((t) => goneTiers.includes(t))) {
+  // A whole-file flow map keeps its sections: a section created again would land after its closing brace, and an emptied flow map is a valid empty map.
+  const blockRoot = isMap(first.doc.contents) && first.doc.contents.flow !== true;
+  if (blockRoot && goneTiers.length > 0 && [...own.tiers.keys()].every((t) => goneTiers.includes(t))) {
     // A tiers map left with no entry would be an empty value, which the loader rejects: it goes whole, and an emptied models with it. New tiers then create it again.
     const models = first.doc.get('models', true);
     const onlyTiers = isMap(models) && models.items.length === 1;
@@ -695,7 +697,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   const keptLimits = [...own.limits.keys()].filter((e) => !goneLimits.includes(e));
   if (goneLimits.length > 0) {
     // A map left with no entry goes whole; new limits then create it again.
-    edits.push(...(keptLimits.length === 0 ? deleteEntries(first, [], ['endpoints']) : deleteEntries(first, ['endpoints'], goneLimits)));
+    edits.push(...(keptLimits.length === 0 && blockRoot ? deleteEntries(first, [], ['endpoints']) : deleteEntries(first, ['endpoints'], goneLimits)));
   }
   for (const [endpoint, parallel] of setLimits) {
     if (hasLimit(endpoint)) edits.push(replaceScalar(first.doc, ['endpoints', endpoint, 'parallel'], parallel));
