@@ -3,12 +3,14 @@
   child run state, enqueue time, start time, child driver, transcript, attach command,
   launch spec, model listing, model check, prerequisites check, starter tools,
 }
+@design/cli.sigil from Cli import { subzero init }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, project root, load error, tool list,
   unresolved root error, model endpoint, parallel limit, general agent,
   model tier, tier error, agent file, timeout, agents map, fallback agent,
   working directory, medium tier, setup state, change set, setup preview,
-  preview fingerprint,
+  preview fingerprint, change set error, stale preview error, write error,
+  refused change,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
@@ -103,7 +105,16 @@ component DelegationService {
     and it offers five *setup operations*, which list the models, show the
     setup state, check models, preview a change set and apply it. Its
     child host is the one named, or else the one supported child host when the
-    driver registry lists exactly one.
+    driver registry lists exactly one. Otherwise it refuses with a message that
+    names the supported child hosts, or that no child host is registered when
+    the driver registry lists none.
+
+    The *guide text* is the one conversation, its steps, questions,
+    suggestions and warnings, that every parent adapter follows over the
+    setup operations during an init that a person starts. After the
+    stale preview error of an apply it previews the change set again, and
+    after any other setup refusal of an apply it ends the init, writing
+    nothing.
   }
 
   logic {
@@ -496,8 +507,14 @@ component DelegationService {
     Offer the guided setup to a parent adapter and to the command line, with
     the setup operations that give the model listing, the setup state with
     each model tier marked listed, the model check of each chosen model, the
-    setup preview of a change set and its apply, and each refusal with a code
-    and a one-line reason, so that every front end shows the same result.
+    setup preview of a change set and its apply, and each *setup refusal* with a
+    code
+    and a one-line reason, so that every front end shows the same result. A
+    setup refusal is any error of a setup operation: a change set error, the
+    stale preview error, the write error, the load error, a refused change or
+    a missing or unsupported child host. Offer the guide text to every
+    parent adapter, so that an init that a person starts asks the same
+    questions on every parent host.
   }
 
   decisions {
@@ -545,9 +562,11 @@ component DelegationService {
 
     The guided setup lives here, beside the delegation, so that the Claude Code
     parent host, through the command line, and the pi parent host reach the
-    same setup operations and cannot drift apart. The conversation of a guided
-    init, its questions, suggestions and warnings, lives in one guide text that
-    both parent adapters follow, and not in the service. A model check is a
+    same setup operations and cannot drift apart. The conversation of an init
+    that a person starts, its questions, suggestions and warnings, lives in
+    the guide text that
+    both parent adapters follow, and not in the setup operations. A model check is
+    a
     one-turn run of the child driver and not a delegation, because a
     delegation needs an agent entry and makes a task record.
   }

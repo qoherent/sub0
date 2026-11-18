@@ -1,5 +1,6 @@
 @design/delegation-service.sigil from DelegationService import {
   delegation, brief text, reply budget, guided setup, setup operations,
+  status line, result text, setup refusal,
 }
 @design/task-core.sigil from TaskCore import {
     task, task id, brief, result, transcript, launch spec, attach command,
@@ -14,6 +15,7 @@
 }
 @design/agent-config.sigil from AgentConfig import {
   change set, preview fingerprint, stale preview error, unresolved root error,
+  write error, refused change,
 }
 @design/task-store.sigil from TaskStore import {
     task record, task status, parent session id, start-up sweep,
@@ -107,7 +109,8 @@ component Cli {
     and say that an abandoned task has no result.
 
     On subzero init with no model, print a usage error that says to run
-    /subzero:init in Claude Code or /subzero init in pi for a guided setup,
+    /subzero:init in Claude Code or the /subzero command with init in pi for a
+    guided setup,
     because a terminal has no parent model to run it, and exit with code 2,
     writing nothing. On one of the config commands, make the guided setup of
     DelegationService with the project root that the delegation service
@@ -115,8 +118,10 @@ component Cli {
     that has the name of the command.
     Split each model from its thinking level at the last colon, because a model
     can hold a colon. Print one JSON document on stdout: ok true with the
-    result, or ok false with a code, a one-line message and any refused change,
-    exiting 1, also for the unresolved root error and the load error. A
+    result, or ok false with the code and the one-line message of the
+    setup refusal and any refused change,
+    exiting 1, also for the unresolved root error, the load error and the
+    write error. A
     malformed argument is a usage error on stderr that exits 2. Each
     command ends by printing its output and exiting.
   }
@@ -199,23 +204,26 @@ component Cli {
     adds only the fallback agent and leaves the general agent as it was.
 
     Subzero init with no model, or with only the option thinking, prints the
-    usage error that names /subzero:init and /subzero init, exits 2 and writes
+    usage error that names /subzero:init and the /subzero command with init,
+    exits 2 and writes
     nothing. Subzero config preview --tier
     medium=ollama/qwen2.5-coder:7b:medium previews the medium tier on the
     model ollama/qwen2.5-coder:7b at the thinking level medium. Subzero config
     apply with a preview fingerprint from before the agent file changed prints
     ok false with the code of the stale preview error, exits 1 and writes
-    nothing.
+    nothing. Subzero config apply on a project whose agent file the file system
+    refuses to write prints ok false with the code of the write error, exits 1
+    and leaves the agent file as it was.
   }
 
   interface {
-    Offer six commands: subzero init with a model and the named options
+    Offer six commands: *subzero init* with a model and the named options
     host, which names the child host,
-    timeout and thinking, subzero config, subzero run with a brief and the
-    named option agent,
+    timeout and thinking, *subzero config*, *subzero run* with a brief and
+    the named option agent,
     which may be left out,
-    subzero tasks, subzero attach with a task id,
-    and subzero show with a task id.
+    *subzero tasks*, *subzero attach* with a task id,
+    and *subzero show* with a task id.
 
     Offer the *config commands* subzero config models, show, check, preview
     and apply, each with the option host, for the init command of the

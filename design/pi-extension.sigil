@@ -1,16 +1,19 @@
 @design/delegation-service.sigil from DelegationService import {
   delegation, brief text, session cancel, completion notice, stop notice,
   status line, result text, queued task, collect tool, guided setup,
-  setup operations,
+  setup operations, guide text, setup refusal,
 }
 @design/agent-config.sigil from AgentConfig import {
   tier word, tier text, unmatched tier text, agent alias, agent file,
   project root, SUBZERO_PROJECT_DIR, load error, general agent, model tier,
   medium tier, parallel limit, working directory, starter entries, change set,
-  setup preview, preview fingerprint,
+  setup preview, preview fingerprint, refused change, fallback agent,
+  tier error, stale preview error, write error,
 }
+@design/cli.sigil from Cli import { subzero init }
 @design/kernel.sigil from Kernel import {
-  parent adapter, parent host, child host, entry point,
+  parent adapter, parent host, child host, entry point, driver registry,
+  supported child host,
 }
 @design/task-core.sigil from TaskCore import {
   task id, attach command, child driver, transcript, starter tools,
@@ -168,8 +171,10 @@ component PiExtension {
 
     On the /subzero command with init and a model, with the optional named
     options thinking and timeout, ask Kernel for the prerequisites check and
-    the starter tools of the child host, which is the one supported child host
-    or else pi, and ask AgentConfig to add the starter entries under the
+    the starter tools of the child host, which is the one supported child host,
+    refusing with a message that names the supported child hosts when the
+    driver registry lists several, and ask AgentConfig to add the starter entries
+    under the
     project root of the session core, as subzero init does on the command line.
     Rebuild the description of the subagent tool from the agent file when it
     added any, and show which it added, which ends the flow.
@@ -184,11 +189,24 @@ component PiExtension {
     again, and refuse it, writing nothing, when the preview fingerprint
     differs, when it holds a refused change or when it would not load.
     Otherwise show its diff and summary in the confirmation dialog of pi. When
-    the user declines, write nothing and turn the init tools off. When the user
-    confirms, apply the change set with that preview fingerprint, rebuild the
-    description of the subagent tool from the agent file and turn the
-    init tools off, which ends the flow. The init tools are also turned off
-    when the agent run settles and at the start and the end of a pi session.
+    the user declines, write nothing and turn the init tools off, which ends the
+    flow. When the user
+    confirms, apply the change set with that preview fingerprint. When the
+    apply writes, rebuild the description of the subagent tool from the
+    agent file and turn the init tools off, which ends the flow. When
+    AgentConfig refuses the apply with the stale preview error, return that
+    setup refusal and leave the init tools on, so that the guided init can
+    preview again, which ends the flow. When it refuses the apply with any
+    other setup refusal, the write error and the load error included, return
+    that setup refusal and turn the init tools off, which ends the flow. The
+    init tools are also turned off
+    when the agent run settles and at the start and the end of a pi session,
+    which ends the flow.
+
+    When an agent run starts, keep the init tools on only when it is the first
+    run after the /subzero command with init and its message carries the
+    guide text of that guided init, and otherwise turn the init tools off
+    before the run sees them, which ends the flow.
 
     When a turn of the pi session settles as aborted by the user, run a
     session cancel for the session core, which ends the flow.
@@ -235,7 +253,10 @@ component PiExtension {
 
     The init tools must be active only during a guided init that the user
     started with the /subzero command, which only the user can run, so that the
-    parent model cannot reach them at any other time. subzero_init_apply must
+    parent model cannot reach them at any other time. A guided init whose run
+    never starts must not leave the init tools on for a later run, and a call
+    of one of the init tools while no guided init runs must be refused and
+    change nothing. subzero_init_apply must
     write the agent file only after the user confirms the diff of its
     setup preview in the confirmation dialog of pi, and it must refuse and
     write nothing when pi has no user interface.
@@ -336,6 +357,11 @@ component PiExtension {
     of the subagent tool names the new model tiers in the same pi session, and
     the init tools are off. When pi has no user interface, the /subzero command
     with init and no model writes nothing and says to give a model.
+
+    When pi cannot start the run of a guided init because no model is
+    selected, the next agent run that the user starts begins with the
+    init tools off, and a call of subzero_init_show is refused and writes
+    nothing.
   }
 
   interface {

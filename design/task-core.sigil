@@ -2,6 +2,7 @@
   agent definition, tool list, thinking level, model endpoint, timeout,
   project root, general agent, fallback agent,
 }
+@design/delegation-service.sigil from DelegationService import { guided setup }
 @design/kernel.sigil from Kernel import {
   child host, parent model,
 }
@@ -235,11 +236,9 @@ component TaskCore {
     sends one fixed prompt to one model at one thinking level as a child run
     would and reports that the model answered, or that it did not with the
     kind unknown_model, timeout, failed or cancelled and a one-line reason. A
-    caller must ask for any of the six
-    through
-    the
-    child driver of the child host of the task or of the agent, and must not
-    assume
+    caller must ask for any of the six through the child driver of the
+    child host it works with, such as that of a task, an agent or the
+    guided setup, and must not assume
     that a child driver offers it.
   }
 

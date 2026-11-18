@@ -92,7 +92,7 @@ component AgentConfig {
     fallback agent included.
 
     A *setup preview* of a change set holds the change set in a canonical
-    order, each refused change with its reason and the agent entries that cause
+    order, each *refused change* with its reason and the agent entries that cause
     it, each parallel limit that the write drops because no model belongs to
     its model endpoint after it, the starter entries that the write adds, and a
     diff and a summary of the write. It also holds a *preview fingerprint* over
@@ -139,7 +139,7 @@ component AgentConfig {
     endpoints entry with the model tiers whose model belongs to it, whether
     only a tier override uses it and whether no model uses it, which ends the
     flow. A missing agent file gives a setup state with no file. A file that
-    fails to load only for a missing starter entry or a parallel limit that no
+    fails to load only for missing starter entries or a parallel limit that no
     model uses gives the setup state and that load error as what the write
     repairs, and any other load error gives a refused setup state that holds
     the load error unchanged.
@@ -153,7 +153,7 @@ component AgentConfig {
     model of a model tier or of a tier override belongs to, and refuse the
     whole change set when no medium tier would remain. Drop the parallel limit
     of each model endpoint that no model belongs to after the change, keep one
-    that only a tier override uses, add each missing starter entry, and load
+    that only a tier override uses, add the missing starter entries, and load
     the result with the agent-file schema, keeping its load error when it would
     not load. Return the setup preview and write nothing, which ends the flow.
 
@@ -163,6 +163,9 @@ component AgentConfig {
     when the setup preview holds a refused change or would not load, writing
     nothing. Write nothing when nothing changes, and otherwise write the result
     and return the setup preview with whether it wrote, which ends the flow.
+    When the file system refuses that write, leave the agent file as it was
+    and refuse with a *write error* that names the agent file and the cause the
+    file system gave, which ends the flow.
   }
 
   constraints {
@@ -231,21 +234,22 @@ component AgentConfig {
 
     When it writes the agent file, AgentConfig must leave every entry that the
     write does not change as it was, and leave each line that the write does
-    not change as it was, except when adding to an empty or flow-style map
+    not change as it was, except when adding to an empty or *flow-style map*
     requires rewriting that map. Adding the starter entries adds only the
     medium tier, the general agent or the fallback agent when the agent file
     does not hold it yet. A change set may replace a model tier, remove a
     model tier or an endpoints entry together with the comment lines directly
-    above it, and set a parallel limit, creating the endpoints map when it is
-    missing. AgentConfig must write nothing when the file exists and does not
-    load for a reason other than a missing starter entry or, for a change set,
+    above it, remove several entries of one map in the same write, and set a
+    parallel limit, creating the endpoints map when it is missing. AgentConfig must
+    write nothing when the file exists and does not
+    load for a reason other than missing starter entries or, for a change set,
     a parallel limit that no model uses, and must write only entries that load.
 
     An apply must write a change set only with the preview fingerprint of its
     setup preview, and must refuse with the stale preview error and write
     nothing when the agent file or the change set differs from what was
     previewed, including an agent file created or removed since. It writes
-    through a temporary file next to the agent file, created exclusively so
+    through a *temporary file* next to the agent file, created exclusively so
     that no existing path or symbolic link is followed, removed on any failure
     and then renamed over the agent file, so that a call that reads the
     agent file again sees the old file or the new one and never a part of one.
@@ -342,6 +346,12 @@ component AgentConfig {
     model endpoint r9700 to another model endpoint drops the endpoints entry of
     r9700 in the same write. An apply after the agent file changed since its
     setup preview is refused with the stale preview error and writes nothing.
+
+    With a tiers map that is a flow-style map and holds medium, small and
+    large, a
+    change set that removes small and large leaves only the medium tier, and
+    the agent file loads. An apply whose write the file system refuses returns
+    the write error and leaves the agent file as it was.
   }
 
   interface {
@@ -358,8 +368,8 @@ component AgentConfig {
     starter tools that the caller gives and a timeout, each only when the
     agent file does not hold it yet, with no skills, creating the agent file,
     its models map and its agents map when missing. Refuse with the load error
-    when the file exists and does not load for a reason other than a missing
-    starter entry, and refuse with an error that names both child hosts,
+    when the file exists and does not load for a reason other than missing
+    starter entries, and refuse with an error that names both child hosts,
     writing nothing, when the file already holds a medium tier whose child host
     differs from the child host that the caller gives.
 
@@ -371,8 +381,8 @@ component AgentConfig {
     timeout that the caller gives, and apply a change set with the
     preview fingerprint of its setup preview, writing the agent file only as
     that setup preview shows, or return the change set error, the
-    stale preview error, the refused changes or the load error and write
-    nothing.
+    stale preview error, the write error, each refused change or the
+    load error and leave the agent file as it was.
 
     List the routable tier names, the medium tier among them, with the
     child host and the model each one runs for the general agent, apart from

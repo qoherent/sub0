@@ -1,13 +1,16 @@
 @design/claude-mcp-server.sigil from ClaudeMcpServer import { cancel tool }
 @design/delegation-service.sigil from DelegationService import {
-  session cancel, stop notice,
+  session cancel, stop notice, setup refusal, guide text,
 }
 @design/kernel.sigil from Kernel import { parent adapter, parent host }
-@design/cli.sigil from Cli import { config commands }
+@design/cli.sigil from Cli import { config commands, subzero init }
+@design/claude-routing-hooks.sigil from ClaudeRoutingHooks import { routing text }
 @design/agent-config.sigil from AgentConfig import {
   agent file, starter entries, change set, setup preview, preview fingerprint,
+  refused change, stale preview error, write error, model tier, load error,
 }
 @design/task-core.sigil from TaskCore import { task id }
+@design/task-store.sigil from TaskStore import { parent session id }
 
 component ClaudePluginCommands {
   goal {
@@ -53,7 +56,8 @@ component ClaudePluginCommands {
     AskUserQuestion, and run subzero config apply with its preview fingerprint
     and the same change set. After a write that creates the agent file or adds
     or removes a model tier, say to start a new Claude Code session, because
-    its routing text is built once per session, which ends the flow.
+    the routing text is built when a Claude Code session starts, which ends
+    the flow.
   }
 
   constraints {
@@ -74,7 +78,12 @@ component ClaudePluginCommands {
     included, only for its own invocation, so that no write of the agent file
     is pre-approved outside an init command that a person typed. It must never
     create, edit or delete the agent file itself, and it must stop, writing
-    nothing, when a command is denied or fails.
+    nothing, when a command is denied or cannot run. A refused change must not
+    end the init command: it reports the refused change and leaves it out of
+    the change set. After the stale preview error it shows a new
+    setup preview and confirms it again. Any other setup refusal, the
+    load error of a refused setup state and the write error included, must
+    end it, writing nothing.
   }
 
   cases {
