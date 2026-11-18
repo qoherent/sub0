@@ -7,7 +7,7 @@ import type { ChildDriver, ModelCheckRequest, ModelCheckResult } from '../../src
 import { Kernel } from '../../src/kernel/kernel.js';
 import { PI_HOST } from '../../src/pi/driver.js';
 import { SetupService, SetupServiceError } from '../../src/service/setup-service.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
 
 const piModel = (provider: string, id: string) => ({
   id,
@@ -39,6 +39,7 @@ const STARTER = () => ({ general: ['read', 'bash'], fallback: ['read'] });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe('SetupService host choice', () => {
@@ -142,6 +143,21 @@ describe('SetupService.show', () => {
     expect(listModels).not.toHaveBeenCalled();
   });
 
+  it('shows both layers with a source on every tier and limit, and the entries this project overrides', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML.replace('medium: {', 'large: { host: pi, model: cloud/l, thinking: high }\n    medium: {'));
+    const { service } = fakePiService(makeProject(DEFAULT_YAML));
+    const shown = await service.show();
+    if (shown.state.status === 'refused') throw new Error('unexpected refused state');
+    expect(shown.state.tiers.map((t) => [t.tier, t.source])).toEqual([
+      ['large', 'general'],
+      ['medium', 'project'],
+      ['small', 'project'],
+      ['cloud', 'project'],
+    ]);
+    expect(shown.state.limits.map((l) => [l.endpoint, l.source])).toEqual([['local', 'project']]);
+    expect(shown.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
+  });
+
   it('reports no file for a project without an agent file', async () => {
     const { service } = fakePiService(tempDir());
     expect((await service.show()).state.status).toBe('no-file');
@@ -243,15 +259,28 @@ describe('SetupService.preview and apply', () => {
     expect(readFileSync(path.join(elsewhere, '.agents', 'subzero.yaml'), 'utf8')).toBe(DEFAULT_YAML);
   });
 
-  it('builds the starter entries from the host starter tools and the default timeout', () => {
+  it('previews a guided change as the changed tiers only: no starter entries, none added', () => {
     const root = tempDir();
     const service = new SetupService({ kernel: kernelWith({ starterTools: STARTER }), projectRoot: root });
     const changes = [{ op: 'setTier' as const, tier: 'medium', model: 'local/qwen', thinking: 'high' as const }];
     const preview = service.preview(changes);
-    expect(preview.addedStarter).toEqual(['medium', 'general', 'fallback']);
-    expect(preview.text).toMatch(/general:\n {4}tools: \[ ?read, bash ?\]\n {4}timeout: 1200\n/);
-    expect(preview.text).toMatch(/fallback:\n {4}tools: \[ ?read ?\]\n {4}timeout: 1200\n/);
+    expect(preview).not.toHaveProperty('addedStarter');
+    expect(preview.text).toBe('models:\n  tiers:\n    medium: { host: pi, model: local/qwen, thinking: high }\n');
     expect(service.apply(changes, preview.fingerprint).written).toBe(true);
+  });
+
+  it('takes the scope: the general file is previewed and written, the project file left alone', () => {
+    const general = path.join(tempDir(), '.agents', 'subzero.yaml');
+    vi.stubEnv('SUBZERO_GENERAL_CONFIG', general);
+    const root = makeProject(DEFAULT_YAML);
+    const service = new SetupService({ kernel: kernelWith({}), projectRoot: root });
+    const changes = [{ op: 'setTier' as const, tier: 'medium', model: 'local/everywhere', thinking: 'low' as const }];
+    const preview = service.preview(changes, 'general');
+    expect(preview).toMatchObject({ scope: 'general', agentFile: general, fileExists: false, overridden: { tiers: ['medium'], limits: [] } });
+    expect(() => service.apply(changes, preview.fingerprint)).toThrow(SetupConflictError);
+    expect(service.apply(changes, preview.fingerprint, 'general').written).toBe(true);
+    expect(readFileSync(general, 'utf8')).toBe('models:\n  tiers:\n    medium: { host: pi, model: local/everywhere, thinking: low }\n');
+    expect(readFileSync(path.join(root, '.agents', 'subzero.yaml'), 'utf8')).toBe(DEFAULT_YAML);
   });
 
   it('passes a stale preview refusal on', () => {
@@ -261,8 +290,8 @@ describe('SetupService.preview and apply', () => {
     expect(() => service.apply(changes, 'not-the-fingerprint')).toThrow(SetupConflictError);
   });
 
-  it('refuses a host whose driver offers no starter tools', () => {
+  it('needs no starter tools from the host for a guided preview', () => {
     const service = new SetupService({ kernel: kernelWith({}), projectRoot: makeProject() });
-    expect(() => service.preview([{ op: 'unsetTier', tier: 'small' }])).toThrow(expect.objectContaining({ code: 'no_starter_tools' }));
+    expect(service.preview([{ op: 'setTier', tier: 'large', model: 'local/qwen', thinking: 'low' }]).refusals).toEqual([]);
   });
 });

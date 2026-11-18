@@ -27,7 +27,7 @@ import {
   UnknownAgentError,
   UnresolvedRootError,
 } from '../config/agent-config.js';
-import type { Change } from '../config/agent-setup.js';
+import type { Change, SetupScope } from '../config/agent-setup.js';
 import { isTaskId } from '../core/ids.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { DelegationService, EmptyBriefError, type DelegationServiceOptions } from '../service/delegation-service.js';
@@ -54,8 +54,8 @@ const USAGE = `usage:
   subzero config models [--host <host>]
   subzero config show [--host <host>]
   subzero config check [--host <host>] <model>:<thinking>...
-  subzero config preview [--host <host>] ${CHANGE_FLAGS}
-  subzero config apply --expect <fingerprint> [--host <host>] ${CHANGE_FLAGS}
+  subzero config preview [--host <host>] [--scope general|project] ${CHANGE_FLAGS}
+  subzero config apply --expect <fingerprint> [--host <host>] [--scope general|project] ${CHANGE_FLAGS}
   subzero run [--agent <agent>] <brief...>
   subzero tasks
   subzero attach <task id>
@@ -217,6 +217,13 @@ function nonEmptyArg(flag: string, arg: string): string {
   return arg;
 }
 
+/** The file a preview or apply writes: the project's by default. */
+function parseScope(value: string | undefined): SetupScope {
+  if (value === undefined) return 'project';
+  if (value !== 'general' && value !== 'project') throw new ConfigUsageError(`--scope must be general or project (got "${value}")`);
+  return value;
+}
+
 /** The change set the repeated change flags spell, in flag order. */
 function parseChanges(values: { tier?: string[]; unset?: string[]; limit?: string[]; 'no-limit'?: string[] }): Change[] {
   const changes: Change[] = [];
@@ -239,6 +246,7 @@ function parseChanges(values: { tier?: string[]; unset?: string[]; limit?: strin
 const HOST_OPTION = { host: { type: 'string' } } as const;
 const CHANGE_OPTIONS = {
   ...HOST_OPTION,
+  scope: { type: 'string' },
   tier: { type: 'string', multiple: true },
   unset: { type: 'string', multiple: true },
   limit: { type: 'string', multiple: true },
@@ -294,7 +302,7 @@ async function config(service: DelegationService, args: string[], io: CliIo, opt
       }
       case 'preview': {
         const { values } = parse(CHANGE_OPTIONS, false);
-        const { text: _text, ...preview } = setup(values.host).preview(parseChanges(values));
+        const { text: _text, ...preview } = setup(values.host).preview(parseChanges(values), parseScope(values.scope));
         return ok(io, preview);
       }
       case 'apply': {
@@ -302,7 +310,7 @@ async function config(service: DelegationService, args: string[], io: CliIo, opt
         if (values.expect === undefined || values.expect === '') {
           throw new ConfigUsageError('config apply needs --expect <fingerprint> from config preview');
         }
-        const { text: _text, ...applied } = setup(values.host).apply(parseChanges(values), values.expect);
+        const { text: _text, ...applied } = setup(values.host).apply(parseChanges(values), values.expect, parseScope(values.scope));
         return ok(io, applied);
       }
       default:

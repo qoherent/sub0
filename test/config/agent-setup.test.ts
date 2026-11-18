@@ -1,7 +1,7 @@
 import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LoadError, loadAgentFile } from '../../src/config/agent-config.js';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { addStarterEntries, LoadError, loadCatalog, PLACEHOLDER_STARTER_AGENTS } from '../../src/config/agent-config.js';
 import {
   applyChanges,
   ChangeSetError,
@@ -14,7 +14,10 @@ import {
   type Change,
   type SetupStarterSpec,
 } from '../../src/config/agent-setup.js';
-import { makeProject, tempDir } from '../helpers.js';
+import { GENERAL_MEDIUM_YAML, makeProject, tempDir, useGeneralConfig } from '../helpers.js';
+
+/** Loads a project as the hooks do: the built-in general and fallback fill what the file leaves out. */
+const loadAgentFile = (root: string) => loadCatalog(root, { starterAgents: PLACEHOLDER_STARTER_AGENTS });
 
 // Test seams: a fixed random suffix for the temp file name, and a failing write or rename
 // (an fs error as Node raises it) or a write that hits a programming error.
@@ -50,11 +53,7 @@ afterEach(() => {
   seam.fail = undefined;
 });
 
-const STARTER: SetupStarterSpec = {
-  host: 'pi',
-  generalTools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'],
-  fallbackTools: ['read', 'grep', 'find', 'ls'],
-};
+const STARTER: SetupStarterSpec = { host: 'pi' };
 
 const fileOf = (root: string) => path.join(root, '.agents', 'subzero.yaml');
 const read = (root: string) => readFileSync(fileOf(root), 'utf8');
@@ -140,14 +139,14 @@ describe('AgentSetup change sets', () => {
 });
 
 describe('AgentSetup state', () => {
-  it('reports no file, with every starter entry missing', () => {
+  it('reports no file and no tiers when neither layer exists', () => {
     const state = readSetupState(tempDir(), { host: 'pi' });
     expect(state.status).toBe('no-file');
     if (state.status === 'refused') throw new Error('unexpected');
     expect(state.fileFingerprint).toBeNull();
     expect(state.tiers).toEqual([]);
     expect(state.limits).toEqual([]);
-    expect(state.missingStarter).toEqual(['medium', 'general', 'fallback']);
+    expect(state).not.toHaveProperty('missingStarter');
   });
 
   it('lists tiers, limits and the agents that depend on each tier through tier: or tiers.<t>', () => {
@@ -159,12 +158,12 @@ describe('AgentSetup state', () => {
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.fileFingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(state.tiers).toEqual([
-      { tier: 'medium', host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high', endpoint: 'local', dependents: [], otherHost: false, listed: null },
-      { tier: 'small', host: 'pi', model: 'local/qwen3-4b', thinking: 'low', endpoint: 'local', dependents: ['general', 'file-facts'], otherHost: false, listed: null },
+      { tier: 'medium', host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high', endpoint: 'local', dependents: [], otherHost: false, listed: null, source: 'project' },
+      { tier: 'small', host: 'pi', model: 'local/qwen3-4b', thinking: 'low', endpoint: 'local', dependents: ['general', 'file-facts'], otherHost: false, listed: null, source: 'project' },
     ]);
-    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 1, tiers: ['medium', 'small'], overrideOnly: false, unused: false }]);
+    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 1, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'project' }]);
     expect(state.overrideOnlyEndpoints).toEqual([]);
-    expect(state.missingStarter).toEqual([]);
+    expect(state.overridden).toEqual({ tiers: [], limits: [] });
   });
 
   it('marks an endpoint that only an override model uses, and keeps its limit through a change', () => {
@@ -187,7 +186,7 @@ ${AGENTS}  reviewer:
     const state = readSetupState(root, { host: 'pi' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.overrideOnlyEndpoints).toEqual(['cloud']);
-    expect(state.limits).toContainEqual({ endpoint: 'cloud', parallel: 4, tiers: [], overrideOnly: true, unused: false });
+    expect(state.limits).toContainEqual({ endpoint: 'cloud', parallel: 4, tiers: [], overrideOnly: true, unused: false, source: 'project' });
 
     const preview = previewChanges(root, [{ op: 'setTier', tier: 'medium', model: 'google/g', thinking: 'low' }], STARTER);
     expect(preview.droppedLimits).toEqual(['local']);
@@ -217,19 +216,23 @@ ${AGENTS}`;
     expect(catalog.tiers.get('large')).toEqual({ host: 'pi', model: 'google/g', thinking: 'high' });
   });
 
-  it('classifies a missing starter entry and an unused limit as repairable', () => {
+  it('loads a file with no general or fallback as ok: they are no longer repairable', () => {
     const noFallback = readSetupState(makeProject(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 5\n`), {});
-    expect(noFallback).toMatchObject({ status: 'repairable', missingStarter: ['fallback'] });
-    if (noFallback.status !== 'repairable') throw new Error('unexpected');
-    expect(noFallback.problem).toMatch(/fallback agent is required/);
+    expect(noFallback).toMatchObject({ status: 'ok' });
+    const noAgents = readSetupState(makeProject(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n`), {});
+    expect(noAgents).toMatchObject({ status: 'ok' });
+    const noMedium = readSetupState(makeProject(`# kept\nagents:\n  general:\n    tools: [read]\n    timeout: 5\n`), {});
+    expect(noMedium).toMatchObject({ status: 'ok', tiers: [] });
+  });
 
+  it('classifies an own limit that no model uses as repairable', () => {
     const unused = readSetupState(
       makeProject(`endpoints:\n  old:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`),
       {},
     );
-    expect(unused).toMatchObject({ status: 'repairable', missingStarter: [] });
+    expect(unused).toMatchObject({ status: 'repairable' });
     if (unused.status !== 'repairable') throw new Error('unexpected');
-    expect(unused.limits).toEqual([{ endpoint: 'old', parallel: 1, tiers: [], overrideOnly: false, unused: true }]);
+    expect(unused.limits).toEqual([{ endpoint: 'old', parallel: 1, tiers: [], overrideOnly: false, unused: true, source: 'project' }]);
   });
 
   it('refuses a YAML syntax error, an unknown key and an agent naming a missing tier with the parser message, writing nothing', () => {
@@ -260,7 +263,7 @@ ${AGENTS}`;
 });
 
 describe('AgentSetup preview and apply', () => {
-  it('creates a missing file with the chosen tiers, a limit, general and fallback at 1200 seconds, and it loads', () => {
+  it('creates a missing file with the chosen tiers and a limit only: no agents, and it loads', () => {
     const root = tempDir();
     const changes: Change[] = [
       { op: 'setTier', tier: 'medium', model: 'local/qwen3-coder-30b', thinking: 'medium' },
@@ -269,7 +272,8 @@ describe('AgentSetup preview and apply', () => {
     ];
     const preview = previewChanges(root, changes, STARTER);
     expect(preview).toMatchObject({ fileExists: false, refusals: [], droppedLimits: [], nothingToChange: false });
-    expect(preview.addedStarter).toEqual(['medium', 'general', 'fallback']);
+    expect(preview).not.toHaveProperty('addedStarter');
+    expect(preview.text).not.toContain('agents');
     expect(preview.diff).toContain('+++ .agents/subzero.yaml');
     expect(preview.diff).toContain('+    medium: { host: pi, model: local/qwen3-coder-30b, thinking: medium }');
     expect(existsSync(fileOf(root))).toBe(false);
@@ -285,8 +289,6 @@ describe('AgentSetup preview and apply', () => {
       ]),
     );
     expect(catalog.limits).toEqual(new Map([['local', 2]]));
-    expect(catalog.entries.get('general')).toMatchObject({ tools: STARTER.generalTools, timeout: 1200, skills: [] });
-    expect(catalog.entries.get('fallback')).toMatchObject({ tools: STARTER.fallbackTools, timeout: 1200, skills: [] });
     expect(otherFiles(root)).toEqual([]);
   });
 
@@ -549,28 +551,25 @@ ${AGENTS}`;
     expect(loadAgentFile(root).limits).toEqual(new Map([['google', 2]]));
   });
 
-  it('repairs a file without a medium tier when the change set sets one, and refuses it when not', () => {
+  it('adds a medium tier to a file without one and adds no agent; without one the change set is refused', () => {
     const text = `# kept\nagents:\n  general:\n    tools: [read]\n    timeout: 5\n`;
     const root = makeProject(text);
-    const state = readSetupState(root, {});
-    expect(state).toMatchObject({ status: 'repairable', missingStarter: ['medium', 'fallback'] });
+    expect(readSetupState(root, {})).toMatchObject({ status: 'ok' });
     expect(previewChanges(root, [], STARTER).refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
     const changes: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/m', thinking: 'low' }];
     const preview = previewChanges(root, changes, STARTER);
-    expect(preview.addedStarter).toEqual(['medium', 'fallback']);
+    expect(preview.refusals).toEqual([]);
     applyChanges(root, changes, preview.fingerprint, STARTER);
     expect(read(root).startsWith(text)).toBe(true);
+    expect(read(root)).not.toContain('fallback');
     expect(loadAgentFile(root).tiers.get('medium')).toEqual({ host: 'pi', model: 'local/m', thinking: 'low' });
   });
 
-  it('previews a file missing fallback as an update that adds it', () => {
+  it('previews a file with no fallback as nothing to change: no agent is added', () => {
     const text = `# mine\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 5\n`;
-    const root = makeProject(text);
-    const preview = previewChanges(root, [], STARTER);
-    expect(preview).toMatchObject({ addedStarter: ['fallback'], nothingToChange: false, refusals: [] });
-    expect(preview.text.startsWith(text)).toBe(true);
-    applyChanges(root, [], preview.fingerprint, STARTER);
-    expect(loadAgentFile(root).entries.get('fallback')).toMatchObject({ tools: STARTER.fallbackTools, timeout: 1200 });
+    const preview = previewChanges(makeProject(text), [], STARTER);
+    expect(preview).toMatchObject({ nothingToChange: true, refusals: [], diff: '' });
+    expect(preview.text).toBe(text);
   });
 
   it('reports nothing to change for an empty change set and leaves the modification time alone', () => {
@@ -578,7 +577,7 @@ ${AGENTS}`;
     const past = new Date('2020-01-01T00:00:00Z');
     utimesSync(fileOf(root), past, past);
     const preview = previewChanges(root, [], STARTER);
-    expect(preview).toMatchObject({ nothingToChange: true, refusals: [], droppedLimits: [], addedStarter: [], diff: '' });
+    expect(preview).toMatchObject({ nothingToChange: true, refusals: [], droppedLimits: [], diff: '' });
     expect(applyChanges(root, [], preview.fingerprint, STARTER).written).toBe(false);
     expect(statSync(fileOf(root)).mtimeMs).toBe(past.getTime());
 
@@ -675,3 +674,318 @@ ${AGENTS}`;
 function makeProjectAt(root: string, text: string): void {
   cpSync(path.join(makeProject(text), '.agents'), path.join(root, '.agents'), { recursive: true });
 }
+
+/** Points the general file at a path that may not exist yet, until the test ends. */
+function generalAt(file: string): string {
+  const previous = process.env.SUBZERO_GENERAL_CONFIG;
+  process.env.SUBZERO_GENERAL_CONFIG = file;
+  onTestFinished(() => {
+    if (previous === undefined) delete process.env.SUBZERO_GENERAL_CONFIG;
+    else process.env.SUBZERO_GENERAL_CONFIG = previous;
+  });
+  return file;
+}
+
+const GENERAL_FULL = `endpoints:
+  local:
+    parallel: 2
+models:
+  tiers:
+    medium: { host: pi, model: local/general-medium, thinking: low }
+    small: { host: pi, model: local/general-small, thinking: off }
+    large: { host: pi, model: cloud/general-large, thinking: high }
+`;
+
+const setMedium: Change = { op: 'setTier', tier: 'medium', model: 'local/new-medium', thinking: 'high' };
+
+describe('AgentSetup scopes', () => {
+  it('covers AE6: a general-scope change to medium lists that this project keeps its own', () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject(HAND_WRITTEN);
+    const preview = previewChanges(root, [setMedium, { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'high' }], STARTER, 'general');
+    expect(preview).toMatchObject({ scope: 'general', refusals: [], overridden: { tiers: ['medium'], limits: [] } });
+    expect(previewChanges(root, [setMedium], STARTER).overridden).toEqual({ tiers: [], limits: [] });
+  });
+
+  it('reports a limit this project overrides, and none for a project that names nothing', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const change: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 5 }];
+    expect(previewChanges(makeProject(HAND_WRITTEN), change, STARTER, 'general').overridden).toEqual({ tiers: [], limits: ['local'] });
+    const bare = makeProject(`${AGENTS}`);
+    expect(previewChanges(bare, [setMedium, ...change], STARTER, 'general').overridden).toEqual({ tiers: [], limits: [] });
+  });
+
+  it('creates the general file and its folder from nothing, and a second preview shows nothing to change', () => {
+    const file = generalAt(path.join(tempDir(), 'home', '.agents', 'subzero.yaml'));
+    const root = tempDir();
+    const changes: Change[] = [setMedium, { op: 'setLimit', endpoint: 'local', parallel: 1 }];
+    const preview = previewChanges(root, changes, STARTER, 'general');
+    expect(preview).toMatchObject({ agentFile: file, fileExists: false, refusals: [], nothingToChange: false });
+    expect(preview.diff).toContain('--- /dev/null');
+    expect(preview.text).toContain('medium: { host: pi, model: local/new-medium, thinking: high }');
+    expect(existsSync(path.dirname(file))).toBe(false);
+
+    expect(applyChanges(root, changes, preview.fingerprint, STARTER, 'general').written).toBe(true);
+    expect(readFileSync(file, 'utf8')).toBe(preview.text);
+    expect(existsSync(fileOf(root))).toBe(false);
+    expect(loadAgentFile(root).tiers.get('medium')).toEqual({ host: 'pi', model: 'local/new-medium', thinking: 'high' });
+    expect(previewChanges(root, changes, STARTER, 'general')).toMatchObject({ nothingToChange: true, diff: '', fileExists: true });
+  });
+
+  it('writes the general file and leaves the project file untouched, and the other way round', () => {
+    const general = useGeneralConfig(GENERAL_FULL);
+    const root = makeProject(HAND_WRITTEN);
+    const change: Change[] = [{ op: 'setTier', tier: 'large', model: 'cloud/other', thinking: 'low' }];
+
+    const g = previewChanges(root, change, STARTER, 'general');
+    applyChanges(root, change, g.fingerprint, STARTER, 'general');
+    expect(read(root)).toBe(HAND_WRITTEN);
+    expect(readFileSync(general, 'utf8')).toBe(GENERAL_FULL.replace('cloud/general-large, thinking: high', 'cloud/other, thinking: low'));
+
+    const generalNow = readFileSync(general, 'utf8');
+    const p = previewChanges(root, [setMedium], STARTER);
+    applyChanges(root, [setMedium], p.fingerprint, STARTER);
+    expect(readFileSync(general, 'utf8')).toBe(generalNow);
+    expect(read(root)).toContain('medium: { host: pi, model: local/new-medium, thinking: high }');
+  });
+
+  it('previews a project-scope change in a project with no file and a general medium as the changed tier only', () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir();
+    const changes: Change[] = [{ op: 'setTier', tier: 'small', model: 'local/small', thinking: 'low' }];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview).toMatchObject({ fileExists: false, refusals: [] });
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.text).toBe('models:\n  tiers:\n    small: { host: pi, model: local/small, thinking: low }\n');
+    expect(preview.diff).not.toContain('agents:');
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    const catalog = loadAgentFile(root);
+    expect([...catalog.tiers.keys()]).toEqual(['medium', 'small']);
+  });
+
+  it('is nothing to change when the project sets what it inherits', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const same: Change = { op: 'setTier', tier: 'small', model: 'local/general-small', thinking: 'off' };
+    expect(previewChanges(tempDir(), [same], STARTER)).toMatchObject({ nothingToChange: true, diff: '' });
+  });
+
+  it('writes a limit and a tier on top of a lone-tier project file with a null removal and agents that use inherited tiers', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const text = `models:\n  tiers:\n    large:\nagents:\n  helper:\n    description: h\n    tier: small\n    tools: [read]\n    timeout: 5\n`;
+    const root = makeProject(text);
+    expect(readSetupState(root, { host: 'pi' })).toMatchObject({ status: 'ok' });
+    const changes: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 4 }];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.refusals).toEqual([]);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.text).toBe(`${text}\nendpoints:\n  local:\n    parallel: 4\n`);
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local', 4]]));
+  });
+
+  it('removes an inherited tier by writing a null entry, and deletes a project-only tier', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const root = tempDir();
+    const preview = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER);
+    expect(preview.refusals).toEqual([]);
+    expect(preview.text).toBe('models:\n  tiers:\n    large:\n');
+    expect(preview.diff).toContain('+    large:\n');
+    expect(preview.summary).toEqual(['remove tier large']);
+    applyChanges(root, [{ op: 'unsetTier', tier: 'large' }], preview.fingerprint, STARTER);
+    expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium', 'small']);
+
+    const own = makeProject(`models:\n  tiers:\n    cloud: { host: pi, model: cloud/c, thinking: low }\n    mine: { host: pi, model: local/x, thinking: low }\n`);
+    const gone = previewChanges(own, [{ op: 'unsetTier', tier: 'mine' }], STARTER);
+    expect(gone.text).toBe('models:\n  tiers:\n    cloud: { host: pi, model: cloud/c, thinking: low }\n');
+    expect(gone.text).not.toContain('mine');
+  });
+
+  it('writes a null entry over a project tier that overrides an inherited one, and a tier over a null entry', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const root = makeProject(`models:\n  tiers:\n    large: { host: pi, model: cloud/own, thinking: low }\n    small:\n`);
+    const unset = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER);
+    expect(unset.text).toBe('models:\n  tiers:\n    small:\n    large:\n');
+    const reset = previewChanges(root, [{ op: 'setTier', tier: 'small', model: 'local/back', thinking: 'low' }], STARTER);
+    expect(reset.text).toBe('models:\n  tiers:\n    large: { host: pi, model: cloud/own, thinking: low }\n    small: { host: pi, model: local/back, thinking: low }\n');
+    applyChanges(root, [{ op: 'setTier', tier: 'small', model: 'local/back', thinking: 'low' }], reset.fingerprint, STARTER);
+    expect(loadAgentFile(root).tiers.get('small')).toEqual({ host: 'pi', model: 'local/back', thinking: 'low' });
+  });
+
+  it('removes an inherited limit by writing a null entry, and a project-only limit by deleting it', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const root = tempDir();
+    const preview = previewChanges(root, [{ op: 'clearLimit', endpoint: 'local' }], STARTER);
+    expect(preview.text).toBe('endpoints:\n  local:\n');
+    applyChanges(root, [{ op: 'clearLimit', endpoint: 'local' }], preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits.size).toBe(0);
+
+    const own = makeProject(`endpoints:\n  cloud:\n    parallel: 3\nmodels:\n  tiers:\n    big: { host: pi, model: cloud/b, thinking: low }\n`);
+    expect(previewChanges(own, [{ op: 'clearLimit', endpoint: 'cloud' }], STARTER).text).toBe(
+      'models:\n  tiers:\n    big: { host: pi, model: cloud/b, thinking: low }\n',
+    );
+  });
+
+  it('keeps an inherited limit working when a project tier moves onto its endpoint, and drops it silently when no model uses it', () => {
+    useGeneralConfig(`${GENERAL_FULL}  # more\n`.replace('local/general-small', 'cloud/general-small'));
+    const root = tempDir();
+    // local limit is inherited but only medium uses it; the project moves medium away.
+    const away = previewChanges(root, [{ op: 'setTier', tier: 'medium', model: 'cloud/m', thinking: 'low' }], STARTER);
+    expect(away).toMatchObject({ refusals: [], droppedLimits: [] });
+    expect(away.invalid).toBeUndefined();
+    // and back onto an endpoint the general limit covers.
+    const moved = makeProject(away.text);
+    expect(loadAgentFile(moved).limits.size).toBe(0);
+    const comeBack: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/again', thinking: 'low' }];
+    const back = previewChanges(moved, comeBack, STARTER);
+    expect(back.invalid).toBeUndefined();
+    applyChanges(moved, comeBack, back.fingerprint, STARTER);
+    expect(loadAgentFile(moved).limits).toEqual(new Map([['local', 2]]));
+  });
+
+  it('refuses a change set with no medium in either layer, and counts the inherited medium otherwise', () => {
+    const small: Change = { op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' };
+    expect(previewChanges(tempDir(), [small], STARTER).refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    expect(previewChanges(tempDir(), [small], STARTER).refusals).toEqual([]);
+    expect(previewChanges(tempDir(), [{ op: 'unsetTier', tier: 'medium' }], STARTER).refusals[0]!.message).toMatch(/medium tier cannot be removed/);
+  });
+
+  it('refuses a general change with no medium when the project has none, and lets one through when the project has its own', () => {
+    const small: Change = { op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' };
+    generalAt(path.join(tempDir(), 'subzero.yaml'));
+    expect(previewChanges(tempDir(), [small], STARTER, 'general').refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
+    expect(previewChanges(makeProject(HAND_WRITTEN), [small], STARTER, 'general').refusals).toEqual([]);
+  });
+
+  it('refuses apply with a fingerprint from the other scope', () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject(HAND_WRITTEN);
+    const asProject = previewChanges(root, [setMedium], STARTER).fingerprint;
+    const asGeneral = previewChanges(root, [setMedium], STARTER, 'general').fingerprint;
+    expect(asProject).not.toBe(asGeneral);
+    expect(() => applyChanges(root, [setMedium], asProject, STARTER, 'general')).toThrow(SetupConflictError);
+    expect(() => applyChanges(root, [setMedium], asGeneral, STARTER)).toThrow(SetupConflictError);
+    expect(read(root)).toBe(HAND_WRITTEN);
+  });
+
+  it('refuses apply when the general file changed since a project-scope preview', () => {
+    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir();
+    const change: Change[] = [{ op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' }];
+    const { fingerprint } = previewChanges(root, change, STARTER);
+    writeFileSync(general, GENERAL_FULL);
+    expect(() => applyChanges(root, change, fingerprint, STARTER)).toThrow(SetupConflictError);
+  });
+
+  it('names the general path when the file system refuses a write there, leaving the file untouched', () => {
+    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir();
+    const preview = previewChanges(root, [setMedium], STARTER, 'general');
+    seam.fail = 'rename';
+    let thrown: unknown;
+    try {
+      applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'general');
+    } catch (err) {
+      thrown = err;
+    }
+    seam.fail = undefined;
+    expect(thrown).toBeInstanceOf(SetupWriteError);
+    expect(thrown).toMatchObject({ code: 'write_failed', message: `could not write ${general}: EIO (i/o error)` });
+    expect(readFileSync(general, 'utf8')).toBe(GENERAL_MEDIUM_YAML);
+    expect(readdirSync(path.dirname(general))).toEqual(['subzero.yaml']);
+  });
+
+  it('refuses a general-scope unset of a tier a project agent uses, and leaves the file alone', () => {
+    const general = useGeneralConfig(GENERAL_FULL);
+    const project = `agents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n  reviewer:\n    description: r\n    tiers:\n      large: { model: cloud/r }\n    tools: [read]\n    timeout: 5\n`;
+    const root = makeProject(project);
+    const unset: Change[] = [{ op: 'unsetTier', tier: 'large' }];
+    const preview = previewChanges(root, unset, STARTER, 'general');
+    expect(preview.refusals).toEqual([
+      { change: unset[0], agents: ['helper', 'reviewer'], message: expect.stringMatching(/tier "large" cannot be removed: helper, reviewer use it/) },
+    ]);
+    expect(() => applyChanges(root, unset, preview.fingerprint, STARTER, 'general')).toThrow(SetupRefusedError);
+    expect(readFileSync(general, 'utf8')).toBe(GENERAL_FULL);
+
+    const ok = previewChanges(root, [{ op: 'setTier', tier: 'large', model: 'cloud/x', thinking: 'low' }, { op: 'unsetTier', tier: 'small' }], STARTER, 'general');
+    expect(ok.refusals).toEqual([]);
+    expect(ok.invalid).toBeUndefined();
+  });
+
+  it('does not refuse a general-scope unset of a tier the project defines or removes itself', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const own = makeProject(`models:\n  tiers:\n    large: { host: pi, model: cloud/own, thinking: low }\nagents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n`);
+    const preview = previewChanges(own, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'general');
+    expect(preview.refusals).toEqual([]);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.overridden).toEqual({ tiers: ['large'], limits: [] });
+    expect(preview.text).not.toContain('large');
+  });
+
+  it('ignores a project that switches itself off, in the general scope', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const root = makeProject('enabled: false\n');
+    const preview = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'general');
+    expect(preview.refusals).toEqual([]);
+    expect(preview.overridden).toEqual({ tiers: [], limits: [] });
+    expect(readSetupState(root, { scope: 'general' })).toMatchObject({ status: 'ok' });
+    expect(readSetupState(root)).toMatchObject({ status: 'refused', error: expect.stringMatching(/enabled: false/) });
+  });
+
+  it('refuses a broken general file in either scope, naming it', () => {
+    const general = useGeneralConfig('agents: {}\n');
+    for (const scope of ['general', 'project'] as const) {
+      const state = readSetupState(tempDir(), { scope });
+      expect(state).toMatchObject({ status: 'refused', error: expect.stringContaining(general) });
+      expect(() => previewChanges(tempDir(), [setMedium], STARTER, scope)).toThrow(LoadError);
+    }
+  });
+
+  it('marks each tier and limit as general or project, and names what this project overrides', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const root = makeProject(`endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n    mine: { host: pi, model: local/mine, thinking: low }\n    large:\n`);
+    const state = readSetupState(root, { host: 'pi' });
+    if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
+    expect(state.tiers.map((t) => [t.tier, t.source, t.model])).toEqual([
+      ['medium', 'project', 'local/own'],
+      ['small', 'general', 'local/general-small'],
+      ['mine', 'project', 'local/mine'],
+    ]);
+    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 1, tiers: ['medium', 'small', 'mine'], overrideOnly: false, unused: false, source: 'project' }]);
+    expect(state.overridden).toEqual({ tiers: ['medium', 'large'], limits: ['local'] });
+    expect(JSON.stringify(state)).not.toContain('general-medium');
+    expect(JSON.stringify(state)).not.toContain('"parallel":2');
+
+    const inheritedOnly = readSetupState(tempDir(), { host: 'pi' });
+    if (inheritedOnly.status !== 'no-file') throw new Error(`unexpected ${inheritedOnly.status}`);
+    expect(inheritedOnly.tiers.every((t) => t.source === 'general')).toBe(true);
+    expect(inheritedOnly.limits.map((l) => l.source)).toEqual(['general']);
+    expect(inheritedOnly.fileFingerprint).toBeNull();
+  });
+
+  it('reads the general file in the general scope, with the dependents from this project', () => {
+    const general = useGeneralConfig(GENERAL_FULL);
+    const root = makeProject(`agents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n`);
+    const state = readSetupState(root, { scope: 'general' });
+    if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
+    expect(state.agentFile).toBe(general);
+    expect(state.tiers.map((t) => [t.tier, t.source, t.dependents])).toEqual([
+      ['medium', 'general', []],
+      ['small', 'general', []],
+      ['large', 'general', ['helper']],
+    ]);
+    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 2, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'general' }]);
+  });
+});
+
+describe('addStarterEntries on top of layered files', () => {
+  it('parses a file guided init wrote (a lone tier, a null removal) as layers and adds the starter entries', () => {
+    useGeneralConfig(GENERAL_FULL);
+    const text = `models:\n  tiers:\n    large:\nagents:\n  helper:\n    description: h\n    tier: small\n    tools: [read]\n    timeout: 5\n`;
+    const root = makeProject(text);
+    const result = addStarterEntries(root, { host: 'pi', model: 'local/m', thinking: 'low', timeout: 100, generalTools: ['read'], fallbackTools: ['read'] });
+    expect(result.added).toEqual(['medium', 'general', 'fallback']);
+    expect(read(root).startsWith(text.slice(0, text.indexOf('agents:')))).toBe(true);
+    expect(loadCatalog(root).entries.has('fallback')).toBe(true);
+  });
+});

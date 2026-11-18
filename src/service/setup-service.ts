@@ -19,6 +19,7 @@ import {
   type Change,
   type SetupApplyResult,
   type SetupPreview,
+  type SetupScope,
   type SetupStarterSpec,
   type SetupState,
 } from '../config/agent-setup.js';
@@ -42,8 +43,7 @@ export type SetupServiceErrorCode =
   | 'no_model_listing'
   | 'listing_failed'
   | 'no_model_check'
-  | 'invalid_check'
-  | 'no_starter_tools';
+  | 'invalid_check';
 
 /** A setup operation that cannot run; the message is one line a user can act on. */
 export class SetupServiceError extends Error {
@@ -105,7 +105,7 @@ export interface ModelsResult {
 
 export interface ShowResult {
   host: string;
-  /** The agent file's state; each tier's `listed` is null when the listing did not run or failed. */
+  /** The project's merged tiers and limits, each marked with its source; each tier's `listed` is null when the listing did not run or failed. */
   state: SetupState;
   /** What configuring `large` moves off Claude, to tell before `large` is set. */
   largeWarning: string;
@@ -159,7 +159,7 @@ export class SetupService {
     return { host, models: await this.listModels(host) };
   }
 
-  /** The agent file's state, with each tier marked listed or not when the host lists its models. */
+  /** The project's state over both layers, with each tier marked listed or not when the host lists its models. */
   async show(): Promise<ShowResult> {
     const host = this.host;
     let listedModels: string[] | undefined;
@@ -201,14 +201,14 @@ export class SetupService {
     return { host, results };
   }
 
-  /** What applying the change set would write; nothing is written. */
-  preview(changes: readonly Change[]): SetupPreview {
-    return previewChanges(this.projectRoot, changes, this.starter());
+  /** What applying the change set to the file of the scope would write; nothing is written. */
+  preview(changes: readonly Change[], scope: SetupScope = 'project'): SetupPreview {
+    return previewChanges(this.projectRoot, changes, this.starter(), scope);
   }
 
-  /** Writes a change set exactly as previewed; refuses when the file or the change set moved since. */
-  apply(changes: readonly Change[], fingerprint: string): SetupApplyResult {
-    return applyChanges(this.projectRoot, changes, fingerprint, this.starter());
+  /** Writes a change set exactly as previewed; refuses when the files, the change set or the scope moved since. */
+  apply(changes: readonly Change[], fingerprint: string, scope: SetupScope = 'project'): SetupApplyResult {
+    return applyChanges(this.projectRoot, changes, fingerprint, this.starter(), scope);
   }
 
   private async listModels(host: string): Promise<HostModel[]> {
@@ -225,15 +225,8 @@ export class SetupService {
     }
   }
 
+  /** Guided setup writes tiers and limits only, so the host is all it needs. */
   private starter(): SetupStarterSpec {
-    const host = this.host;
-    const tools = this.kernel.starterTools(host);
-    if (tools === undefined) {
-      throw new SetupServiceError(
-        'no_starter_tools',
-        `the child driver of the host "${host}" offers no starter tools, so setup cannot write the agent entries`,
-      );
-    }
-    return { host, timeout: DEFAULT_SETUP_TIMEOUT, generalTools: tools.general, fallbackTools: tools.fallback };
+    return { host: this.host };
   }
 }

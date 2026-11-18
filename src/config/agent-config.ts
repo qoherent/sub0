@@ -280,7 +280,8 @@ export function readTextOrNull(agentFile: string): string | null {
   }
 }
 
-function readGeneralText(file: string): string | null {
+/** The general file's text, or null when there is none. */
+export function readGeneralText(file: string): string | null {
   try {
     return readFileSync(file, 'utf8');
   } catch (err) {
@@ -707,9 +708,10 @@ export function addStarterEntries(projectRoot: string, spec: StarterSpec): Start
   const agentFile = path.join(projectRoot, AGENT_FILE);
   const text = readTextOrNull(agentFile);
 
-  if (text !== null) {
-    parseCatalog(text, agentFile, { allowMissingStarter: true });
-  }
+  // Parsed as the layer it is, so a file guided init wrote (a lone tier, a null removal) is never refused by a single-file rule.
+  const general = generalFile();
+  const generalText = readGeneralText(general);
+  if (text !== null) buildCatalog(generalText, text, { agentFile, generalFile: general, allowMissingStarter: true });
 
   const original = text ?? '';
   const doc: Document = parseDocument(original);
@@ -737,7 +739,7 @@ export function addStarterEntries(projectRoot: string, spec: StarterSpec): Start
     spliceAgents(splicer, agents);
   }
   const next = splicer.result();
-  parseCatalog(next, agentFile); // entries that do not load are never written
+  buildCatalog(generalText, next, { agentFile, generalFile: general }); // entries that do not load are never written
   mkdirSync(path.dirname(agentFile), { recursive: true });
   writeFileSync(agentFile, next);
   return result;
@@ -785,7 +787,10 @@ export function createSplicer(original: string): Splicer {
       return { end: node.range[1], indent: ' '.repeat(first - (original.lastIndexOf('\n', first - 1) + 1)) };
     },
     insert(at, body) {
-      inserts.push({ at, text: (at > 0 && original[at - 1] !== '\n' ? '\n' : '') + body });
+      // Mid-line (a last entry with no value ends before its newline): start on the next line, whatever the rest of this one holds.
+      const nl = at > 0 && original[at - 1] !== '\n' ? original.indexOf('\n', at) : -2;
+      if (nl >= 0) inserts.push({ at: nl + 1, text: body });
+      else inserts.push({ at, text: (nl === -1 ? '\n' : '') + body });
     },
     insertInline(keys, entries) {
       const node = doc.getIn(keys, true);
@@ -838,12 +843,14 @@ export function yamlKey(key: string | number): string {
   return flowYaml([key]).slice(2, -2);
 }
 
-/** Plan new tiers into models.tiers, creating models or tiers when missing. */
-export function spliceTiers(s: Splicer, tiers: Record<string, ModelTier>): void {
+/** Plan new tiers into models.tiers, creating models or tiers when missing. A null tier is a removal entry. */
+export function spliceTiers(s: Splicer, tiers: Record<string, ModelTier | null>): void {
   if (Object.keys(tiers).length === 0) return;
   const lines = (indent: string) =>
     Object.entries(tiers)
-      .map(([name, tier]) => `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}\n`)
+      .map(([name, tier]) =>
+        tier === null ? `${indent}${yamlKey(name)}:\n` : `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}\n`,
+      )
       .join('');
   if (s.insertInline(['models', 'tiers'], tiers)) return;
   if (!s.doc.hasIn(['models', 'tiers']) && s.insertInline(['models'], { tiers })) return;
