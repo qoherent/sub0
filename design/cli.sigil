@@ -8,14 +8,14 @@
   prerequisites check,
 }
 @design/agent-config.sigil from AgentConfig import {
-  project root, load error, general agent, fallback agent,   agent definition,         agent file, starter entries, timeout, thinking level, model, medium tier,   agents map, tool list, working directory,
+  project root, load error, general agent, fallback agent,   agent definition,         agent file, starter entries, timeout, thinking level, model, medium tier,   tool list, working directory,
 }
 @design/kernel.sigil from Kernel import {
   driver registry, parent adapter, supported child host, entry point, child host,
 }
 @design/agent-config.sigil from AgentConfig import {
   change set, preview fingerprint, stale preview error, unresolved root error,
-  write error, refused change,
+  write error, refused change, setup scope, general file,
 }
 @design/task-store.sigil from TaskStore import {
     task record, task status, parent session id, start-up sweep,
@@ -39,7 +39,8 @@ component Cli {
     and print the result. When no agent name is given or the agent name is
     general, the general agent runs. When the agent name is a name other than
     general that the
-    agents map does not hold runs the fallback agent and the printed result
+    agent entries of the merged configuration do not hold, a built-in agent
+    included, runs the fallback agent and the printed result
     says
     that the
     named
@@ -117,7 +118,15 @@ component Cli {
     resolved and the option host, and run the one of its setup operations
     that has the name of the command.
     Split each model from its thinking level at the last colon, because a model
-    can hold a colon. Print one JSON document on stdout: ok true with the
+    can hold a colon. Take the setup scope of a preview or an apply from the
+    option scope, which is general or project and project when it is left out,
+    and treat any other value as a usage error that exits 2 and writes nothing.
+    The command show takes no setup scope and prints the setup state of the
+    merged configuration with the file each model tier and limit comes from,
+    the general file or the agent file. A preview for the general file also
+    prints each model tier and limit of the change set that this project
+    overrides. Print one
+    JSON document on stdout: ok true with the
     result, or ok false with the code and the one-line message of the
     setup refusal and any refused change,
     exiting 1, also for the unresolved root error, the load error and the
@@ -177,8 +186,8 @@ component Cli {
     Subzero run against a scripted pi writes the task record with task.json,
     events.jsonl and turns/1.json, appends an index line and prints the result.
 
-    Subzero run with an unknown agent name runs the fallback agent, which the
-    load requires. Subzero run with
+    Subzero run with an unknown agent name runs the fallback agent, a built-in
+    one when the agent file holds none. Subzero run with
     no agent name runs the general agent. Subzero init with the child host pi,
     in
     an
@@ -213,7 +222,12 @@ component Cli {
     ok false with the code of the stale preview error, exits 1 and writes
     nothing. Subzero config apply on a project whose agent file the file system
     refuses to write prints ok false with the code of the write error, exits 1
-    and leaves the agent file as it was.
+    and leaves the agent file as it was. Subzero config preview with the option
+    scope general and a tier previews the general file and creates it when it
+    is missing, and the same with the option scope other is a usage error that
+    exits 2. Subzero config show in a project with no agent file and a general
+    file that holds a medium tier prints each model tier with the source general
+    file.
   }
 
   interface {
@@ -230,8 +244,8 @@ component Cli {
     Claude Code parent host. Check takes one or more models, each written
     <model>:<thinking>. Preview and apply take a change set as repeated flags:
     --tier <tier>=<model>:<thinking>, --unset <tier>, --limit <endpoint>=<n>
-    and --no-limit <endpoint>, and apply also takes the preview fingerprint of
-    that preview as --expect.
+    and --no-limit <endpoint>, with the option scope for the setup scope, and
+    apply also takes the preview fingerprint of that preview as --expect.
 
     Make the child session of a task, its transcript and its task record
     reachable

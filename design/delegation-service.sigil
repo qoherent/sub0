@@ -7,10 +7,11 @@
 @design/agent-config.sigil from AgentConfig import {
   agent definition, project root, load error, tool list,
   unresolved root error, model endpoint, parallel limit, general agent,
-  model tier, tier error, agent file, timeout, agents map, fallback agent,
+  model tier, tier error, agent file, timeout, fallback agent,
   working directory, medium tier, setup state, change set, setup preview,
   preview fingerprint, change set error, stale preview error, write error,
-  refused change,
+  refused change, setup scope, merged configuration, off error, general file,
+  enabled switch, built-in agent,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
@@ -111,7 +112,11 @@ component DelegationService {
 
     The *guide text* is the one conversation, its steps, questions,
     suggestions and warnings, that every parent adapter follows over the
-    setup operations during an init that a person starts. After the
+    setup operations during an init that a person starts. After it shows the
+    setup state it asks whether the chosen models are for every project or
+    only this one, which gives the setup scope of its preview and apply, and
+    before the confirmation it says which model tier or limit of the change
+    set this project overrides when the setup scope is the general file. After the
     stale preview error of an apply it previews the change set again, and
     after any other setup refusal of an apply it ends the init, writing
     nothing.
@@ -131,13 +136,17 @@ component DelegationService {
     task record, given that project root. The start-up ends when the sweep has
     finished and TaskCore is connected.
 
-    On a delegation, load each agent entry again, giving AgentConfig each
-    supported child host that the driver registry lists. When the load fails,
-    return the load error to the caller and end the flow with no task made.
+    On a delegation, load the merged configuration again, giving AgentConfig
+    each supported child host that the driver registry lists and the starter
+    tools of the child driver of the child host of the medium tier, which
+    fill each built-in agent. When the load fails, return the load error to
+    the caller, or the off error when the project is off, and end the flow
+    with no task made.
     First
     choose the agent. When the delegation names no agent or names the agent
     general, take the general agent. When it names another agent, look up that
-    name in the agents map. A name that finds the fallback agent in that lookup
+    name among the agent entries of the merged configuration, a built-in
+    agent included. A name that finds the fallback agent in that lookup
     runs it and reports nothing about a name not configured. When the name is
     unknown, take the fallback agent and report in the reply that the named
     agent
@@ -229,9 +238,9 @@ component DelegationService {
     model check of that child driver for each model, one after another, and
     return one result for each model in the order asked, which ends the flow.
     On a preview or an apply, hand the change set and, for an apply, the
-    preview fingerprint to AgentConfig, with that child host, the
-    starter tools of that child driver and a timeout of 1200 seconds, and
-    return the setup preview, which ends the flow.
+    preview fingerprint to AgentConfig, with that child host and the setup
+    scope that the caller gives, which is the agent file when it gives none,
+    and return the setup preview, which ends the flow.
 
     On shutdown, cancel every task in the live task registry, wait up to a
     deadline for their child runs to end, and record each task whose child run
@@ -249,9 +258,9 @@ component DelegationService {
 
     A delegation that names an agent other than general must find that agent in
     the
-    agents map and run it at the model tier that the delegation names, else at
-    its
-    own tier or the medium tier, except that a name missing from the agents map
+    agent entries of the merged configuration and run it at the model tier
+    that the delegation names, else at its
+    own tier or the medium tier, except that a name that no agent entry holds
     runs
     the fallback agent, and its replies report it queued or started like any
     other
@@ -287,7 +296,7 @@ component DelegationService {
     may call for a project root for its own use, and each receives it from
     DelegationService, with one exception: a parent adapter that runs in a
     process
-    where no DelegationService starts reads the agent file under the
+    where no DelegationService starts reads the merged configuration under the
     project root
     that its parent host reports, because it has no DelegationService to ask. A
     call
@@ -311,8 +320,9 @@ component DelegationService {
     delegation from a command line process or from another session is not
     counted, and nothing may signal or lock across processes to enforce it.
 
-    The guided setup must write the agent file only through an apply of
-    AgentConfig with the preview fingerprint of a setup preview, and must use
+    The guided setup must write the file of its setup scope only through an
+    apply of AgentConfig with the preview fingerprint of a setup preview, and
+    must add no agent entry, and must use
     the project root that a DelegationService resolved and never the
     working directory of its process. It must run one model check at a time,
     so that a single model endpoint is not overloaded, and it must make no
@@ -347,8 +357,9 @@ component DelegationService {
     delegation that names the agent general runs the general agent on the
     medium tier and records its agent as general.
 
-    A delegation with an unknown agent name, in an agent file with a
-    fallback agent, runs the fallback agent with its own tool list, records its
+    A delegation with an unknown agent name, in a project with a fallback
+    agent, a built-in one included, runs the fallback agent with its own tool list,
+    records its
     agent as fallback, and its reply says that the named agent is not
     configured. A
     delegation that names the agent fallback runs the same agent and records
@@ -428,9 +439,13 @@ component DelegationService {
     gives the instruction to wait for them. A task
     ended by a session cancel gives the stop notice and no completion notice.
 
-    A delegation in a project with no agent file returns the load error that
-    says the
-    agent file is missing and makes no task, and says to run subzero init.
+    A delegation in a project with no agent file and a general file that holds
+    a medium tier runs the general agent as a built-in agent on the medium
+    tier, with the starter tools of the child driver. A delegation in a project
+    with no agent file and no medium tier in the general file returns the off
+    error and makes no task, and says to run subzero init. A delegation in a
+    project whose agent file holds an enabled switch of false returns the off
+    error and makes no task, whatever the general file holds.
 
     A shutdown while a child run ignores its cancel past the deadline records
     that task as cancelled, and its task record does not stay running.
@@ -506,8 +521,9 @@ component DelegationService {
 
     Offer the guided setup to a parent adapter and to the command line, with
     the setup operations that give the model listing, the setup state with
-    each model tier marked listed, the model check of each chosen model, the
-    setup preview of a change set and its apply, and each *setup refusal* with a
+    each model tier marked listed and marked with the file it comes from, the
+    model check of each chosen model, the setup preview of a change set for a
+    setup scope and its apply, and each *setup refusal* with a
     code
     and a one-line reason, so that every front end shows the same result. A
     setup refusal is any error of a setup operation: a change set error, the
@@ -560,8 +576,11 @@ component DelegationService {
     its parent host and ordering a listing stay with the front end that needs
     them.
 
-    The guided setup lives here, beside the delegation, so that the Claude Code
-    parent host, through the command line, and the pi parent host reach the
+    Each built-in agent takes its starter tools from the child driver here,
+    where the driver registry is, so that no component below AgentConfig names
+    a tool. The guided setup lives here, beside the delegation, so that the
+    Claude Code parent host, through the command line, and the pi parent host
+    reach the
     same setup operations and cannot drift apart. The conversation of an init
     that a person starts, its questions, suggestions and warnings, lives in
     the guide text that

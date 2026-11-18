@@ -11,7 +11,8 @@
 @design/agent-config.sigil from AgentConfig import {
   agent definition, project root, unknown agent error, load error,
   unresolved root error, model endpoint, model tier, routable tier,
-      tier error, agent entry, agents map, general agent, agent file,
+      tier error, agent entry, general agent, agent file, off error,
+  general file, enabled switch, merged configuration,
     parallel limit, SUBZERO_PROJECT_DIR,
   fallback agent, tier text, unmatched tier text, agent alias,
 }
@@ -234,18 +235,23 @@ component ClaudeMcpServer {
     for
     it.
 
-    A name other than general that the agents map does not hold must return the
+    A name other than general that no agent entry of the merged configuration
+    holds must return the
     unknown agent error as a
     *tool error* that names every configured agent entry. When a
     fallback agent is configured, a delegation that names a name other than
     general
-    that the agents map does not hold runs the fallback agent, and the reply
+    that no agent entry of the merged configuration holds runs the fallback
+    agent, and the reply
     must
     say that
     the named agent is not configured. A load error of a malformed
     agent file must be returned as a tool error as well, with no task made and
-    with no pass-back, while a missing agent file is returned as a tool error
-    with the pass-back.
+    with no pass-back, while the off error, which a project returns when its
+    agent file is missing and the general file holds no medium tier or when the
+    enabled switch of its agent file is false, is returned as a tool error with
+    the pass-back. A project whose agent file is missing and whose general file
+    holds a medium tier delegates like any other.
 
     An error of the driver registry for a child host with no registered
     child driver is
@@ -384,8 +390,12 @@ component ClaudeMcpServer {
 
     With the model tier small configured, a delegate call with the tier text
     cheapest capable and the agent alias delegate runs the general agent on
-    small. In a project with no agent file, a delegate call returns the
-    load error with the pass-back and makes no task, and a delegate call with
+    small. In a project with no agent file and no medium tier in the general
+    file, a delegate call returns the off error with the pass-back and makes no
+    task, and in a project whose agent file holds an enabled switch of false it
+    does the same. A delegate call in a project with no agent file and a medium
+    tier in the general file runs the general agent on that medium tier, and a
+    delegate call with
     no
     tier text runs the general agent on its medium tier even when large is
     configured.

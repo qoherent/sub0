@@ -1,7 +1,7 @@
 @design/agent-config.sigil from AgentConfig import {
   agent file, project root, load error, general agent, model tier,
-  routable tier, medium tier,
-  tier word,
+  routable tier, medium tier, routing block,
+  tier word, merged configuration, general file, off error, enabled switch,
 }
 @design/claude-mcp-server.sigil from ClaudeMcpServer import {
   readiness marker, plugin data folder, SessionStart hook, delegate tool,
@@ -24,11 +24,13 @@ component ClaudeRoutingHooks {
   }
 
   state {
-    The *routing settings* are the part of the agent file that holds a
-    *hook switch*, which is on unless it is set to false, and an optional
-    *generic agent list* of agent type names. ClaudeRoutingHooks reads them
-    from the agent file
-    that AgentConfig loads for it, and no other component reads them.
+    The routing block that AgentConfig merges by key holds a *hook switch*,
+    which is on unless it is set to false, and an optional *generic agent list*
+    of agent type names. The general file and the agent file may each hold
+    them, and the agent file wins by key. ClaudeRoutingHooks interprets the
+    hook switch and the generic agent list from the routing block of the merged
+    configuration that AgentConfig loads for it, and no other component reads
+    them.
 
     A *compound-engineering skill* names the model of a generic subagent with a
     tier word, which AgentConfig maps to a model tier.
@@ -45,7 +47,7 @@ component ClaudeRoutingHooks {
 
     A *generic spawn* is an Agent spawn whose subagent type is absent or is
     on the generic agent list. That list is general-purpose and claude unless
-    the routing settings give one, and a list that the routing settings give
+    the routing block gives one, and a list that the routing block gives
     replaces it.
 
     A *pass-back* is an Agent spawn whose short description begins with the
@@ -86,19 +88,18 @@ component ClaudeRoutingHooks {
     next Stop event starts a fresh wake hook for that work.
 
     At each session start, after the parent session id is recorded, read the
-    agent file under the project root that CLAUDE_PROJECT_DIR names. When no
-    project root is given or the agent file is missing, add nothing and end
-    the flow. When the agent file exists and fails with a load error, add a
-    one-line warning that routing is off as the routing text, which ends the
-    flow. When it loads with no routable tier that a tier word maps to, add
-    nothing
-    and end the flow. Otherwise build the routing text from each routable tier
-    that
-    a tier word maps to and add it to
-    Claude's context, which ends the flow.
+    merged configuration under the project root that CLAUDE_PROJECT_DIR names.
+    When no project root is given or AgentConfig reports the off error, add
+    nothing and end the flow. When a file fails with a load error, add a
+    one-line warning that names that file and says routing is off as the
+    routing text, which ends the flow. When it loads with no routable tier
+    that a tier word maps to, add nothing and end the flow. Otherwise build
+    the routing text from each routable tier that a tier word maps to and add
+    it to Claude's context, which ends the flow.
 
     On an Agent spawn, allow it and end the flow when the hook switch of the
-    routing settings is off or the agent file fails to load. Then allow it and
+    routing block is off, the project is off or the merged configuration
+    fails to load. Then allow it and
     end the flow when no readiness marker names a live process whose recorded
     parent process is one of the hook's own ancestor processes. Then allow it
     and
@@ -234,8 +235,7 @@ component ClaudeRoutingHooks {
     Any error inside a hook, a missing or malformed hook input, or a
     deny memory that cannot be read must allow the Agent spawn: the hook exits
     0 with no output. The SessionStart hook must likewise exit 0 and add
-    nothing on any error other than a load error of an agent file that
-    exists.
+    nothing on any error other than a load error of a file that exists.
 
     Each denied prompt must be recorded in the deny memory as its own
     create-only entry, and no write may read or replace another entry, so that
@@ -256,8 +256,8 @@ component ClaudeRoutingHooks {
     When the hook switch is off, every Agent spawn must be allowed while the
     routing text is still added.
 
-    ClaudeRoutingHooks reads the agent file under the project root that
-    *CLAUDE_PROJECT_DIR* names, as the one named exception to the rule that
+    ClaudeRoutingHooks reads the merged configuration under the project root
+    that *CLAUDE_PROJECT_DIR* names, as the one named exception to the rule that
     only
     DelegationService resolves a project root, because a hook process starts no
     DelegationService.
@@ -274,15 +274,15 @@ component ClaudeRoutingHooks {
     compound-engineering skill.
 
     ClaudeRoutingHooks depends on AgentConfig for the agent file and the
-    routable tier names, reads the routing settings from that agent file
-    itself, and on ClaudeMcpServer for the
+    routable tier names, reads the routing block from the merged
+    configuration itself, and on ClaudeMcpServer for the
     readiness marker,
     the plugin data folder, the SessionStart hook and the delegate tool.
   }
 
   cases {
-    In every case here the agent file also holds the medium tier and a
-    general agent, and a case that names the model tiers configured names only
+    In every case here the merged configuration also holds the medium tier,
+    and a case that names the model tiers configured names only
     the
     tiers
     that carry a tier word.
@@ -304,9 +304,16 @@ component ClaudeRoutingHooks {
     large.
 
     With no model tier configured, no routing text is added and every
-    Agent spawn is allowed. In a project with no agent file the SessionStart hook
-    prints nothing and exits 0, and with a malformed agent file it adds the
-    one-line warning and every Agent spawn is allowed.
+    Agent spawn is allowed. In a project with no agent file and no medium tier
+    in the general file the SessionStart hook prints nothing and exits 0, and
+    with a malformed agent file it adds the one-line warning and every Agent
+    spawn is allowed. In a project with no agent file and a general file that
+    holds a medium tier, the SessionStart hook adds the routing text of the
+    general file. With a malformed general file it adds the one-line warning
+    that names the general file, and every Agent spawn is allowed. In a project
+    whose agent file holds an enabled switch of false the SessionStart hook
+    prints nothing and every Agent spawn is allowed, whatever the general file
+    holds.
 
     With medium configured and a live readiness marker, a generic spawn with
     the alias sonnet is denied with a deny reason that names the delegate tool,
@@ -355,10 +362,10 @@ component ClaudeRoutingHooks {
     delivers its result text and completion notice when it is complete.
 
     Add the routing text to Claude's context at each session start, resume,
-    /clear and compaction, built from the agent file under the project root
-    that CLAUDE_PROJECT_DIR names, read at that moment, or a
-    one-line warning when an agent file that exists fails to load, or nothing
-    when there is no agent file or no routable tier that a tier word maps to.
+    /clear and compaction, built from the merged configuration under the
+    project root that CLAUDE_PROJECT_DIR names, read at that moment, or a
+    one-line warning when a file that exists fails to load, or nothing when
+    the project is off or no routable tier that a tier word maps to.
 
     Answer each Agent spawn of the Agent tool through the PreToolUse hook with
     allow, or with deny and the deny reason that Claude sees, as its logic

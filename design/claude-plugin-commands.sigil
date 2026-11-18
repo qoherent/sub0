@@ -8,6 +8,7 @@
 @design/agent-config.sigil from AgentConfig import {
   agent file, starter entries, change set, setup preview, preview fingerprint,
   refused change, stale preview error, write error, model tier, load error,
+  setup scope, general file,
 }
 @design/task-core.sigil from TaskCore import { task id }
 @design/task-store.sigil from TaskStore import { parent session id }
@@ -51,13 +52,17 @@ component ClaudePluginCommands {
     On the init command with no model, read the shared guide text and follow
     it within one turn, running the config commands for its steps and asking
     every question through AskUserQuestion, because the grants of the
-    init command last only for the turn that invoked it. Show the
-    setup preview of the change set unchanged, confirm it once through
-    AskUserQuestion, and run subzero config apply with its preview fingerprint
-    and the same change set. After a write that creates the agent file or adds
-    or removes a model tier, say to start a new Claude Code session, because
-    the routing text is built when a Claude Code session starts, which ends
-    the flow.
+    init command last only for the turn that invoked it. Ask first whether the
+    chosen models are for every project or only this one, which gives the
+    setup scope, and pass it to subzero config preview and subzero config
+    apply. Show the setup preview of the change set unchanged, including each
+    model tier or limit that this project overrides when the setup scope is the
+    general file, confirm it once through AskUserQuestion, and run subzero
+    config apply with its preview fingerprint and the same change set. After a
+    write that creates the agent file or the general file, or adds or removes a
+    model tier, say to start a new Claude Code session, because the
+    routing text is built when a Claude Code session starts, which ends the
+    flow.
   }
 
   constraints {
@@ -76,8 +81,9 @@ component ClaudePluginCommands {
     The init command must be invoked only by the person, and it must
     pre-approve subzero init and each of the config commands, the apply
     included, only for its own invocation, so that no write of the agent file
-    is pre-approved outside an init command that a person typed. It must never
-    create, edit or delete the agent file itself, and it must stop, writing
+    or the general file is pre-approved outside an init command that a person
+    typed. It must never create, edit or delete the agent file or the general
+    file itself, and it must stop, writing
     nothing, when a command is denied or cannot run. A refused change must not
     end the init command: it reports the refused change and leaves it out of
     the change set. After the stale preview error it shows a new
@@ -97,8 +103,11 @@ component ClaudePluginCommands {
     because only the person may invoke it.
 
     The init command with a model in a project with no agent file writes the
-    starter entries. The init command with no model, where the person declines
-    the setup preview, writes nothing.
+    starter entries into the agent file, whether or not a general file exists.
+    The init command with no model, where the person declines the setup
+    preview, writes nothing. With the answer for every project and a project
+    with no general file, the init command with no model writes the general
+    file after the confirmation and nothing into the project.
   }
 
   interface {
@@ -109,8 +118,8 @@ component ClaudePluginCommands {
 
     Offer the init command to a person in the Claude Code parent host, with an
     optional model, so that it writes the starter entries, or runs a guided
-    setup that writes the agent file only after the person confirms the
-    setup preview.
+    setup that writes the general file or the agent file only after the person
+    confirms the setup preview.
   }
 
   decisions {

@@ -8,7 +8,8 @@
   project root, SUBZERO_PROJECT_DIR, load error, general agent, model tier,
   medium tier, parallel limit, working directory, starter entries, change set,
   setup preview, preview fingerprint, refused change, fallback agent,
-  tier error, stale preview error, write error,
+  tier error, stale preview error, write error, setup scope, general file,
+  off error, enabled switch,
 }
 @design/cli.sigil from Cli import { subzero init }
 @design/kernel.sigil from Kernel import {
@@ -177,7 +178,8 @@ component PiExtension {
     under the
     project root of the session core, as subzero init does on the command line.
     Rebuild the description of the subagent tool from the agent file when it
-    added any, and show which it added, which ends the flow.
+    added any, and show which it added, which ends the flow. The init with a
+    model writes only the agent file, whether or not a general file exists.
 
     On the /subzero command with init and no model, refuse when pi has no user
     interface or the agent is running. Otherwise make the guided setup with the
@@ -185,15 +187,21 @@ component PiExtension {
     guide text as a user message, which starts the guided init and ends the
     flow.
 
+    On a call of subzero_init_preview or subzero_init_apply, take the setup
+    scope from the call, which is the agent file when it gives none, so that
+    the user's answer to the first question of the guide text, every project
+    or only this one, reaches the setup operations.
+
     On a call of subzero_init_apply, build the setup preview of its change set
-    again, and refuse it, writing nothing, when the preview fingerprint
+    again for its setup scope, and refuse it, writing nothing, when the
+    preview fingerprint
     differs, when it holds a refused change or when it would not load.
     Otherwise show its diff and summary in the confirmation dialog of pi. When
     the user declines, write nothing and turn the init tools off, which ends the
     flow. When the user
     confirms, apply the change set with that preview fingerprint. When the
     apply writes, rebuild the description of the subagent tool from the
-    agent file and turn the init tools off, which ends the flow. When
+    merged configuration and turn the init tools off, which ends the flow. When
     AgentConfig refuses the apply with the stale preview error, return that
     setup refusal and leave the init tools on, so that the guided init can
     preview again, which ends the flow. When it refuses the apply with any
@@ -237,13 +245,13 @@ component PiExtension {
     may
     leak in from the shell that started pi.
 
-    A pi project with no agent file must be refused with the load error that
-    says to
-    run subzero init, and PiExtension must never run a subagent on a model that
-    the
-    agent file does not name. A malformed agent file must still return its
-    load error, and a name that the agent file does not hold must still run the
-    fallback agent.
+    A pi project that is off, with no agent file and no medium tier in the
+    general file or with an enabled switch of false in its agent file, must be
+    refused with the off error that names its cause, and that says to run
+    subzero init only when the cause is the missing medium tier, and PiExtension
+    must never run a subagent on a model that no file names. A malformed agent
+    file or general file must still return its load error, and a name that no
+    agent entry holds must still run the fallback agent.
 
     PiExtension must reach the core only through the session core,
     AgentConfig and, for init, the guided setup and the prerequisites check
@@ -257,8 +265,8 @@ component PiExtension {
     never starts must not leave the init tools on for a later run, and a call
     of one of the init tools while no guided init runs must be refused and
     change nothing. subzero_init_apply must
-    write the agent file only after the user confirms the diff of its
-    setup preview in the confirmation dialog of pi, and it must refuse and
+    write the file of its setup scope only after the user confirms the diff of
+    its setup preview in the confirmation dialog of pi, and it must refuse and
     write nothing when pi has no user interface.
 
     The subagent tool must run in pi's parallel execution mode, so that several
@@ -295,9 +303,13 @@ component PiExtension {
     model is cheapest capable starts a child on that local model and returns
     its task id at once.
 
-    In a project with no agent file, a subagent tool call returns the
-    load error that
-    says to run subzero init and starts no child.
+    In a project with no agent file and no medium tier in the general file, a
+    subagent tool call returns the off error that names the missing medium
+    tier and says to run subzero init, and starts no child. With an enabled
+    switch of false in the agent file, the same call returns the off error that
+    names the enabled switch and does not say to run subzero init. With a
+    medium tier in the general file and no agent
+    file, the same call runs the general agent on the medium tier.
 
     With the medium tier configured, a subagent tool call with no model runs on
     the
@@ -353,8 +365,9 @@ component PiExtension {
     With pi idle and a user interface, the /subzero command with init turns on
     the init tools and starts a guided init. When the user declines the diff
     that subzero_init_apply shows, nothing is written and the init tools are
-    off. When the user confirms it, the agent file is written, the description
-    of the subagent tool names the new model tiers in the same pi session, and
+    off. When the user confirms it, the file of the chosen setup scope is
+    written, the description of the subagent tool names the new model tiers in
+    the same pi session, and
     the init tools are off. When pi has no user interface, the /subzero command
     with init and no model writes nothing and says to give a model.
 
@@ -426,7 +439,8 @@ component PiExtension {
     expensive
     model. The medium tier runs work that names no tier, so
     compound-engineering works
-    in every project once subzero init has written the agent file. The
+    in every project once subzero init has written the agent file or the
+    general file. The
     session core
     lives for one pi session and is cancelled at its end, because the pi
     process
@@ -439,15 +453,16 @@ component PiExtension {
     child only during a turn, and the /subzero command stops them while pi is
     idle.
 
-    A project with no agent file is refused until subzero init writes one, so
-    that the
+    A project is refused until a medium tier exists in the agent file or the
+    general file, so that no subagent runs on a model that no file names. The
     starter tools of the general agent, which may write files and run shell
-    commands,
-    are always the ones that the agent file names. Installing the pi package is
-    the
-    opt-in that accepts this. The init tools exist only for a guided init, and
-    subzero_init_apply asks for the confirmation itself, because pi has no
-    permission gate on a tool and the pi package has no command line. pi builds
+    commands, are the ones that the child driver gives when no agent file names
+    its own. Installing the pi package and writing a general file with a medium
+    tier are the opt-in that accepts this in every project, and an enabled
+    switch of false in a project is the way out of it. The init tools exist
+    only for a guided init, and subzero_init_apply asks for the confirmation
+    itself, because pi has no permission gate on a tool and the pi package has
+    no command line. pi builds
     the description of the subagent tool at the start of a session, so it is
     rebuilt after a write and the new model tiers route without a new session.
     Capping the tools of a child to the active tools
