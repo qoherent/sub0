@@ -105,7 +105,8 @@ export function routingContext(projectRoot: string | undefined, taskMode: boolea
     if (err instanceof MissingAgentFileError) return undefined;
     if ((err as { code?: unknown }).code === 'load_error') {
       const message = (err as Error).message;
-      return buildWarning(message, message.includes(generalFile()) ? generalFile() : AGENT_FILE);
+      const general = generalFile();
+      return buildWarning(message, message.includes(general) ? general : AGENT_FILE);
     }
     return undefined;
   }

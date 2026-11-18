@@ -14,6 +14,7 @@ import path from 'node:path';
 import { isMap, isScalar, parse as parseYaml, type Document, type Pair } from 'yaml';
 import {
   AGENT_FILE,
+  BUILT_IN_TIMEOUT,
   buildCatalog,
   createSplicer,
   DEFAULT_TIER,
@@ -37,7 +38,7 @@ import {
 import { TIER_WORDS } from './tier-words.js';
 
 /** Seconds given to `general` and `fallback` when `init <model>` adds them. */
-export const DEFAULT_SETUP_TIMEOUT = 1200;
+export const DEFAULT_SETUP_TIMEOUT = BUILT_IN_TIMEOUT;
 
 /** What setup needs from the caller to write tiers: the host every tier the change set sets runs on. */
 export interface SetupStarterSpec {
@@ -261,6 +262,13 @@ function namedIn(text: string | null): Named {
   return out;
 }
 
+/** The parallel limits a file sets as numbers, leaving out removal entries. */
+function numericLimits(text: string | null): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [endpoint, parallel] of namedIn(text).limits) if (parallel !== null) out.set(endpoint, parallel);
+  return out;
+}
+
 /** What setup sees of the layers at one scope. */
 interface View {
   /** The tiers the scope lists: the merged ones for the project, the general file's for general. */
@@ -290,8 +298,7 @@ function viewOf(l: Layers, scope: SetupScope, general: string | null, project: s
     return { tiers: catalog.tiers, limits: catalog.limits, project: catalog, projectNamed: namedIn(project), ...(problem !== undefined ? { problem } : {}) };
   }
   const own = catalogOf(l, general, null, false);
-  const limits = new Map<string, number>();
-  for (const [endpoint, parallel] of namedIn(general).limits) if (parallel !== null) limits.set(endpoint, parallel);
+  const limits = numericLimits(general);
   let merged: AgentCatalog | null = null;
   if (project !== null) {
     try {
@@ -516,7 +523,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   const view = viewOf(l, scope, l.generalText, l.projectText);
   const own = namedIn(text);
   // The project scope inherits the general file's entries, and writes a removal entry for one it removes.
-  const inherited = scope === 'project' ? namedIn(l.generalText) : { tiers: new Map<string, boolean>(), limits: new Map<string, number | null>() };
+  const inherited = scope === 'project' ? namedIn(l.generalText) : namedIn(null);
   const inheritsTier = (tier: string) => inherited.tiers.get(tier) === true;
   const inheritsLimit = (endpoint: string) => typeof inherited.limits.get(endpoint) === 'number';
 
@@ -644,9 +651,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(result.limits, finalLimits)) invalid = MISMATCH;
       } else {
         const result = catalogOf(l, next, null, false);
-        const limits = new Map<string, number>();
-        for (const [endpoint, parallel] of namedIn(next).limits) if (parallel !== null) limits.set(endpoint, parallel);
-        if (!sameTiers(result.tiers, finalTiers) || !sameLimits(limits, finalLimits)) invalid = MISMATCH;
+        if (!sameTiers(result.tiers, finalTiers) || !sameLimits(numericLimits(next), finalLimits)) invalid = MISMATCH;
         // The change must leave this project loading.
         if (invalid === undefined && view.project !== null) catalogOf(l, next, l.projectText, true);
       }
