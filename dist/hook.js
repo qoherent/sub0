@@ -27103,9 +27103,10 @@ function date4(params) {
 // src/config/agent-config.ts
 var AGENT_FILE = path.join(".agents", "subzero.yaml");
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-var DEFAULT_TIER = "default";
+var DEFAULT_TIER = "medium";
 var GENERAL_AGENT = "general";
 var FALLBACK_AGENT = "fallback";
+var RUN_INIT = "; run /subzero:init in Claude Code or /subzero init in pi";
 var LoadError = class extends Error {
   code = "load_error";
   constructor(message) {
@@ -27113,9 +27114,15 @@ var LoadError = class extends Error {
     this.name = "LoadError";
   }
 };
+var MissingAgentFileError = class extends LoadError {
+  constructor(agentFile) {
+    super(`agent file is missing: ${agentFile}${RUN_INIT}`);
+    this.name = "MissingAgentFileError";
+  }
+};
 var MissingDefaultTierError = class extends LoadError {
   constructor() {
-    super("the default tier is required in models.tiers when agents holds an entry");
+    super(`the medium tier is required in models.tiers${RUN_INIT}`);
     this.name = "MissingDefaultTierError";
   }
 };
@@ -27150,11 +27157,12 @@ function readAgentText(agentFile) {
     return readFileSync(agentFile, "utf8");
   } catch (err) {
     const code = err.code;
-    if (code === "ENOENT") throw new LoadError(`agent file is missing: ${agentFile}`);
+    if (code === "ENOENT") throw new MissingAgentFileError(agentFile);
     throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
   }
 }
-function parseCatalog(text, agentFile) {
+function parseCatalog(text, agentFile, options = {}) {
+  const allowMissingStarter = options.allowMissingStarter === true;
   const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
   let parsed;
   try {
@@ -27170,9 +27178,9 @@ function parseCatalog(text, agentFile) {
   const endpointsMap = doc.endpoints ?? {};
   if (!isRecord(skillsMap)) throw malformed('"skills" must be a map');
   if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
-  if (doc.models !== void 0 && !isRecord(doc.models)) throw malformed('"models" must be a map');
+  if (doc.models !== void 0 && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
   const modelsMap = doc.models ?? {};
-  if (modelsMap.tiers !== void 0 && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
+  if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
   const baseDir = path.dirname(agentFile);
   const skillFolders = /* @__PURE__ */ new Map();
   for (const [name, value] of Object.entries(skillsMap)) {
@@ -27206,11 +27214,15 @@ function parseCatalog(text, agentFile) {
     }
   }
   for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint)) {
+    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
       throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
     }
   }
-  if (entries.size > 0 && !tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
+  if (!allowMissingStarter) {
+    if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+  }
   return { agentFile, entries, tiers, routing, limits };
 }
 function validateTier(name, raw) {
@@ -27330,6 +27342,13 @@ function routableTiers(projectRoot, supportedHosts) {
   return out;
 }
 
+// src/config/tier-words.ts
+var TIER_WORDS = [
+  { tier: "small", phrase: "cheapest capable" },
+  { tier: "medium", phrase: "mid-tier" },
+  { tier: "large", phrase: "session model" }
+];
+
 // src/mcp/parent-session.ts
 import { createHash } from "node:crypto";
 import { mkdirSync as mkdirSync2, readdirSync, readFileSync as readFileSync2, renameSync, rmSync, statSync as statSync2, writeFileSync as writeFileSync2 } from "node:fs";
@@ -27371,6 +27390,41 @@ function pruneSessions(folder, now, keep) {
   } catch {
   }
 }
+function readinessDir(dir, projectRoot) {
+  return path2.join(dir, "ready", projectKey(projectRoot));
+}
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function liveReadinessMarkers(dir, projectRoot) {
+  const folder = readinessDir(dir, projectRoot);
+  let names;
+  try {
+    names = readdirSync(folder);
+  } catch {
+    return [];
+  }
+  const live = [];
+  for (const name of names) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const value = JSON.parse(readFileSync2(path2.join(folder, name), "utf8"));
+      if (Number.isInteger(value.pid) && Number.isInteger(value.ppid) && isAlive(value.pid)) {
+        live.push({ pid: value.pid, ppid: value.ppid, taskMode: typeof value.taskMode === "boolean" ? value.taskMode : null });
+      }
+    } catch {
+    }
+  }
+  return live;
+}
+
+// src/routing/deny-lock.ts
+var pause = new Int32Array(new SharedArrayBuffer(4));
 
 // src/routing/routing.ts
 var DELEGATE_TOOL = "mcp__plugin_subzero_subzero__delegate";
@@ -27378,20 +27432,15 @@ var AWAIT_TOOL = "mcp__plugin_subzero_subzero__await";
 var TASKS_TOOL = "mcp__plugin_subzero_subzero__tasks";
 var AWAIT_SECONDS = 600;
 var PASSBACK_WORD = "passback";
-var TIER_WORDS = [
-  { tier: "small", phrase: "cheapest capable" },
-  { tier: "medium", phrase: "mid-tier" },
-  { tier: "large", phrase: "session model" }
-];
 function wordTiers(tiers) {
   return TIER_WORDS.flatMap(({ tier }) => tiers.filter((t) => t.tier === tier));
 }
-function buildRoutingText(tiers) {
+function buildRoutingText(tiers, taskMode = false) {
   const routed = new Map(tiers.map((t) => [t.tier, t]));
   const lines = [
     "subzero routing is on for this project.",
     `Some subagent work runs on other models through the ${DELEGATE_TOOL} tool instead of the Agent tool.`,
-    "Compound-engineering names a model by tier word; send these tier words as follows:"
+    "Compound-engineering names a model by tier word; delegate accepts these phrases or tier names:"
   ];
   for (const { tier, phrase } of TIER_WORDS) {
     const t = routed.get(tier);
@@ -27401,7 +27450,9 @@ function buildRoutingText(tiers) {
   }
   lines.push(
     "Pass the subagent prompt unchanged as brief. A subagent spawn that asks for a fork or for worktree isolation stays on the Agent tool and is never sent to subzero.",
-    `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done. A task whose result an await reply does not show must be read with ${TASKS_TOOL}(task) before it is used.`,
+    taskMode === true ? `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief) in one message; completed tasks deliver their results. Use results returned directly, and wait for every completion notice from background tasks before using their results together.` : taskMode === null ? `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief) in one message. If it returns a task id, collect it with ${AWAIT_TOOL}; wait for every task before using their results together.` : `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
+    `A task whose result an await reply does not show must be read with ${TASKS_TOOL}(task) before it is used.`,
+    "In a non-interactive or unidentified session, delegate waits and returns the result even when asked not to wait.",
     "A queued task has not launched yet: no child is running and it starts when its endpoint has room. A task's launch time is its `started` time; the time it waited does not count.",
     `If ${DELEGATE_TOOL} is refused or returns a tool error and made no task, pass that subagent back: call Agent with the same prompt and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails; never pass it back.`
   );
@@ -27411,12 +27462,12 @@ function buildWarning(detail) {
   const flat = detail.replace(/\s+/g, " ").trim().slice(0, 300);
   return `subzero routing is off: the agent file ${AGENT_FILE} does not load (${flat}). Every subagent runs on Claude until it is fixed.`;
 }
-function routingContext(projectRoot) {
+function routingContext(projectRoot, taskMode = false) {
   if (projectRoot === void 0) return void 0;
   try {
     if (!existsSync(path3.join(projectRoot, AGENT_FILE))) return void 0;
     const tiers = wordTiers(routableTiers(projectRoot));
-    return tiers.length === 0 ? void 0 : buildRoutingText(tiers);
+    return tiers.length === 0 ? void 0 : buildRoutingText(tiers, taskMode);
   } catch (err) {
     if (err.code === "load_error") return buildWarning(err.message);
     return void 0;
@@ -27451,14 +27502,17 @@ var project;
 try {
   const input2 = JSON.parse(await readStdin());
   project = setting(process.env.CLAUDE_PROJECT_DIR);
-  if (typeof input2.session_id === "string" && project) {
-    writeParentSessionId(dataDir(process.env), realpathSync2(project), input2.session_id, ancestorPids());
-  }
+  if (!project || typeof input2.session_id !== "string" || input2.session_id.trim() === "") process.exit(0);
+  writeParentSessionId(dataDir(process.env), realpathSync2(project), input2.session_id, ancestorPids());
 } catch {
+  process.exit(0);
 }
 var output2 = "";
 try {
-  const context = routingContext(project === void 0 ? void 0 : realpathSync2(project));
+  const root = project === void 0 ? void 0 : realpathSync2(project);
+  const ancestors = ancestorPids();
+  const taskMode = root === void 0 ? null : liveReadinessMarkers(dataDir(process.env), root).find((marker) => ancestors.has(marker.ppid))?.taskMode ?? null;
+  const context = routingContext(root, taskMode);
   if (context !== void 0) {
     output2 = JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } }) + "\n";
   }

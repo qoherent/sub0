@@ -25,9 +25,9 @@ var __export = (target, all) => {
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    for (let key2 of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key2) && key2 !== except)
+        __defProp(to, key2, { get: () => from[key2], enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
   }
   return to;
 };
@@ -117,17 +117,17 @@ var require_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    function visit_(key, node2, visitor, path6) {
-      const ctrl = callVisitor(key, node2, visitor, path6);
+    function visit_(key2, node2, visitor, path7) {
+      const ctrl = callVisitor(key2, node2, visitor, path7);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visit_(key, ctrl, visitor, path6);
+        replaceNode(key2, path7, ctrl);
+        return visit_(key2, ctrl, visitor, path7);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
+          path7 = Object.freeze(path7.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = visit_(i, node2.items[i], visitor, path6);
+            const ci = visit_(i, node2.items[i], visitor, path7);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -138,13 +138,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
-          const ck = visit_("key", node2.key, visitor, path6);
+          path7 = Object.freeze(path7.concat(node2));
+          const ck = visit_("key", node2.key, visitor, path7);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = visit_("value", node2.value, visitor, path6);
+          const cv = visit_("value", node2.value, visitor, path7);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -165,17 +165,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node2, visitor, path6) {
-      const ctrl = await callVisitor(key, node2, visitor, path6);
+    async function visitAsync_(key2, node2, visitor, path7) {
+      const ctrl = await callVisitor(key2, node2, visitor, path7);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visitAsync_(key, ctrl, visitor, path6);
+        replaceNode(key2, path7, ctrl);
+        return visitAsync_(key2, ctrl, visitor, path7);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
+          path7 = Object.freeze(path7.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = await visitAsync_(i, node2.items[i], visitor, path6);
+            const ci = await visitAsync_(i, node2.items[i], visitor, path7);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -186,13 +186,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
-          const ck = await visitAsync_("key", node2.key, visitor, path6);
+          path7 = Object.freeze(path7.concat(node2));
+          const ck = await visitAsync_("key", node2.key, visitor, path7);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = await visitAsync_("value", node2.value, visitor, path6);
+          const cv = await visitAsync_("value", node2.value, visitor, path7);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -219,27 +219,27 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node2, visitor, path6) {
+    function callVisitor(key2, node2, visitor, path7) {
       if (typeof visitor === "function")
-        return visitor(key, node2, path6);
+        return visitor(key2, node2, path7);
       if (identity.isMap(node2))
-        return visitor.Map?.(key, node2, path6);
+        return visitor.Map?.(key2, node2, path7);
       if (identity.isSeq(node2))
-        return visitor.Seq?.(key, node2, path6);
+        return visitor.Seq?.(key2, node2, path7);
       if (identity.isPair(node2))
-        return visitor.Pair?.(key, node2, path6);
+        return visitor.Pair?.(key2, node2, path7);
       if (identity.isScalar(node2))
-        return visitor.Scalar?.(key, node2, path6);
+        return visitor.Scalar?.(key2, node2, path7);
       if (identity.isAlias(node2))
-        return visitor.Alias?.(key, node2, path6);
+        return visitor.Alias?.(key2, node2, path7);
       return void 0;
     }
-    function replaceNode(key, path6, node2) {
-      const parent = path6[path6.length - 1];
+    function replaceNode(key2, path7, node2) {
+      const parent = path7[path7.length - 1];
       if (identity.isCollection(parent)) {
-        parent.items[key] = node2;
+        parent.items[key2] = node2;
       } else if (identity.isPair(parent)) {
-        if (key === "key")
+        if (key2 === "key")
           parent.key = node2;
         else
           parent.value = node2;
@@ -500,7 +500,7 @@ var require_anchors = __commonJS({
 var require_applyReviver = __commonJS({
   "node_modules/yaml/dist/doc/applyReviver.js"(exports) {
     "use strict";
-    function applyReviver(reviver, obj, key, val) {
+    function applyReviver(reviver, obj, key2, val) {
       if (val && typeof val === "object") {
         if (Array.isArray(val)) {
           for (let i = 0, len = val.length; i < len; ++i) {
@@ -540,7 +540,7 @@ var require_applyReviver = __commonJS({
           }
         }
       }
-      return reviver.call(obj, key, val);
+      return reviver.call(obj, key2, val);
     }
     exports.applyReviver = applyReviver;
   }
@@ -847,10 +847,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path6, value) {
+    function collectionFromPath(schema, path7, value) {
       let v = value;
-      for (let i = path6.length - 1; i >= 0; --i) {
-        const k = path6[i];
+      for (let i = path7.length - 1; i >= 0; --i) {
+        const k = path7[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -869,7 +869,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path6) => path6 == null || typeof path6 === "object" && !!path6[Symbol.iterator]().next().done;
+    var isEmptyPath = (path7) => path7 == null || typeof path7 === "object" && !!path7[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -899,42 +899,42 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path6, value) {
-        if (isEmptyPath(path6))
+      addIn(path7, value) {
+        if (isEmptyPath(path7))
           this.add(value);
         else {
-          const [key, ...rest] = path6;
-          const node2 = this.get(key, true);
+          const [key2, ...rest] = path7;
+          const node2 = this.get(key2, true);
           if (identity.isCollection(node2))
             node2.addIn(rest, value);
           else if (node2 === void 0 && this.schema)
-            this.set(key, collectionFromPath(this.schema, rest, value));
+            this.set(key2, collectionFromPath(this.schema, rest, value));
           else
-            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+            throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
         }
       }
       /**
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        const [key, ...rest] = path6;
+      deleteIn(path7) {
+        const [key2, ...rest] = path7;
         if (rest.length === 0)
-          return this.delete(key);
-        const node2 = this.get(key, true);
+          return this.delete(key2);
+        const node2 = this.get(key2, true);
         if (identity.isCollection(node2))
           return node2.deleteIn(rest);
         else
-          throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+          throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        const [key, ...rest] = path6;
-        const node2 = this.get(key, true);
+      getIn(path7, keepScalar) {
+        const [key2, ...rest] = path7;
+        const node2 = this.get(key2, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node2) ? node2.value : node2;
         else
@@ -951,29 +951,29 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path6) {
-        const [key, ...rest] = path6;
+      hasIn(path7) {
+        const [key2, ...rest] = path7;
         if (rest.length === 0)
-          return this.has(key);
-        const node2 = this.get(key, true);
+          return this.has(key2);
+        const node2 = this.get(key2, true);
         return identity.isCollection(node2) ? node2.hasIn(rest) : false;
       }
       /**
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        const [key, ...rest] = path6;
+      setIn(path7, value) {
+        const [key2, ...rest] = path7;
         if (rest.length === 0) {
-          this.set(key, value);
+          this.set(key2, value);
         } else {
-          const node2 = this.get(key, true);
+          const node2 = this.get(key2, true);
           if (identity.isCollection(node2))
             node2.setIn(rest, value);
           else if (node2 === void 0 && this.schema)
-            this.set(key, collectionFromPath(this.schema, rest, value));
+            this.set(key2, collectionFromPath(this.schema, rest, value));
           else
-            throw new Error(`Expected YAML collection at ${key}. Remaining path: ${rest}`);
+            throw new Error(`Expected YAML collection at ${key2}. Remaining path: ${rest}`);
         }
       }
     };
@@ -1551,19 +1551,19 @@ var require_stringifyPair = __commonJS({
     var Scalar = require_Scalar();
     var stringify = require_stringify();
     var stringifyComment = require_stringifyComment();
-    function stringifyPair({ key, value }, ctx, onComment, onChompKeep) {
+    function stringifyPair({ key: key2, value }, ctx, onComment, onChompKeep) {
       const { allNullValues, doc, indent, indentStep, options: { commentString, indentSeq, simpleKeys } } = ctx;
-      let keyComment = identity.isNode(key) && key.comment || null;
+      let keyComment = identity.isNode(key2) && key2.comment || null;
       if (simpleKeys) {
         if (keyComment) {
           throw new Error("With simple keys, key nodes cannot have comments");
         }
-        if (identity.isCollection(key) || !identity.isNode(key) && typeof key === "object") {
+        if (identity.isCollection(key2) || !identity.isNode(key2) && typeof key2 === "object") {
           const msg = "With simple keys, collection cannot be used as a key value";
           throw new Error(msg);
         }
       }
-      let explicitKey = !simpleKeys && (!key || keyComment && value == null && !ctx.inFlow || identity.isCollection(key) || (identity.isScalar(key) ? key.type === Scalar.Scalar.BLOCK_FOLDED || key.type === Scalar.Scalar.BLOCK_LITERAL : typeof key === "object"));
+      let explicitKey = !simpleKeys && (!key2 || keyComment && value == null && !ctx.inFlow || identity.isCollection(key2) || (identity.isScalar(key2) ? key2.type === Scalar.Scalar.BLOCK_FOLDED || key2.type === Scalar.Scalar.BLOCK_LITERAL : typeof key2 === "object"));
       ctx = Object.assign({}, ctx, {
         allNullValues: false,
         implicitKey: !explicitKey && (simpleKeys || !allNullValues),
@@ -1571,7 +1571,7 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str = stringify.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      let str = stringify.stringify(key2, ctx, () => keyCommentDone = true, () => chompKeep = true);
       if (!explicitKey && !ctx.inFlow && str.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
@@ -1715,7 +1715,7 @@ var require_merge = __commonJS({
       }),
       stringify: () => MERGE_KEY
     };
-    var isMergeKey = (ctx, key) => (merge2.identify(key) || identity.isScalar(key) && (!key.type || key.type === Scalar.Scalar.PLAIN) && merge2.identify(key.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
+    var isMergeKey = (ctx, key2) => (merge2.identify(key2) || identity.isScalar(key2) && (!key2.type || key2.type === Scalar.Scalar.PLAIN) && merge2.identify(key2.value)) && ctx?.doc.schema.tags.some((tag) => tag.tag === merge2.tag && tag.default);
     function addMergeToJSMap(ctx, map2, value) {
       const source = resolveAliasValue(ctx, value);
       if (identity.isSeq(source))
@@ -1732,14 +1732,14 @@ var require_merge = __commonJS({
       if (!identity.isMap(source))
         throw new Error("Merge sources must be maps or map aliases");
       const srcMap = source.toJSON(null, ctx, Map);
-      for (const [key, value2] of srcMap) {
+      for (const [key2, value2] of srcMap) {
         if (map2 instanceof Map) {
-          if (!map2.has(key))
-            map2.set(key, value2);
+          if (!map2.has(key2))
+            map2.set(key2, value2);
         } else if (map2 instanceof Set) {
-          map2.add(key);
-        } else if (!Object.prototype.hasOwnProperty.call(map2, key)) {
-          Object.defineProperty(map2, key, {
+          map2.add(key2);
+        } else if (!Object.prototype.hasOwnProperty.call(map2, key2)) {
+          Object.defineProperty(map2, key2, {
             value: value2,
             writable: true,
             enumerable: true,
@@ -1767,19 +1767,19 @@ var require_addPairToJSMap = __commonJS({
     var stringify = require_stringify();
     var identity = require_identity();
     var toJS = require_toJS();
-    function addPairToJSMap(ctx, map2, { key, value }) {
-      if (identity.isNode(key) && key.addToJSMap)
-        key.addToJSMap(ctx, map2, value);
-      else if (merge2.isMergeKey(ctx, key))
+    function addPairToJSMap(ctx, map2, { key: key2, value }) {
+      if (identity.isNode(key2) && key2.addToJSMap)
+        key2.addToJSMap(ctx, map2, value);
+      else if (merge2.isMergeKey(ctx, key2))
         merge2.addMergeToJSMap(ctx, map2, value);
       else {
-        const jsKey = toJS.toJS(key, "", ctx);
+        const jsKey = toJS.toJS(key2, "", ctx);
         if (map2 instanceof Map) {
           map2.set(jsKey, toJS.toJS(value, jsKey, ctx));
         } else if (map2 instanceof Set) {
           map2.add(jsKey);
         } else {
-          const stringKey = stringifyKey(key, jsKey, ctx);
+          const stringKey = stringifyKey(key2, jsKey, ctx);
           const jsValue = toJS.toJS(value, stringKey, ctx);
           if (stringKey in map2)
             Object.defineProperty(map2, stringKey, {
@@ -1794,19 +1794,19 @@ var require_addPairToJSMap = __commonJS({
       }
       return map2;
     }
-    function stringifyKey(key, jsKey, ctx) {
+    function stringifyKey(key2, jsKey, ctx) {
       if (jsKey === null)
         return "";
       if (typeof jsKey !== "object")
         return String(jsKey);
-      if (identity.isNode(key) && ctx?.doc) {
+      if (identity.isNode(key2) && ctx?.doc) {
         const strCtx = stringify.createStringifyContext(ctx.doc, {});
         strCtx.anchors = /* @__PURE__ */ new Set();
         for (const node2 of ctx.anchors.keys())
           strCtx.anchors.add(node2.anchor);
         strCtx.inFlow = true;
         strCtx.inStringifyKey = true;
-        const strKey = key.toString(strCtx);
+        const strKey = key2.toString(strCtx);
         if (!ctx.mapKeyWarned) {
           let jsonStr = JSON.stringify(strKey);
           if (jsonStr.length > 40)
@@ -1830,24 +1830,24 @@ var require_Pair = __commonJS({
     var stringifyPair = require_stringifyPair();
     var addPairToJSMap = require_addPairToJSMap();
     var identity = require_identity();
-    function createPair(key, value, ctx) {
-      const k = createNode.createNode(key, void 0, ctx);
+    function createPair(key2, value, ctx) {
+      const k = createNode.createNode(key2, void 0, ctx);
       const v = createNode.createNode(value, void 0, ctx);
       return new Pair(k, v);
     }
     var Pair = class _Pair {
-      constructor(key, value = null) {
+      constructor(key2, value = null) {
         Object.defineProperty(this, identity.NODE_TYPE, { value: identity.PAIR });
-        this.key = key;
+        this.key = key2;
         this.value = value;
       }
       clone(schema) {
-        let { key, value } = this;
-        if (identity.isNode(key))
-          key = key.clone(schema);
+        let { key: key2, value } = this;
+        if (identity.isNode(key2))
+          key2 = key2.clone(schema);
         if (identity.isNode(value))
           value = value.clone(schema);
-        return new _Pair(key, value);
+        return new _Pair(key2, value);
       }
       toJSON(_, ctx) {
         const pair = ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
@@ -2023,11 +2023,11 @@ var require_YAMLMap = __commonJS({
     var identity = require_identity();
     var Pair = require_Pair();
     var Scalar = require_Scalar();
-    function findPair(items, key) {
-      const k = identity.isScalar(key) ? key.value : key;
+    function findPair(items, key2) {
+      const k = identity.isScalar(key2) ? key2.value : key2;
       for (const it of items) {
         if (identity.isPair(it)) {
-          if (it.key === key || it.key === k)
+          if (it.key === key2 || it.key === k)
             return it;
           if (identity.isScalar(it.key) && it.key.value === k)
             return it;
@@ -2050,20 +2050,20 @@ var require_YAMLMap = __commonJS({
       static from(schema, obj, ctx) {
         const { keepUndefined, replacer } = ctx;
         const map2 = new this(schema);
-        const add = (key, value) => {
+        const add = (key2, value) => {
           if (typeof replacer === "function")
-            value = replacer.call(obj, key, value);
-          else if (Array.isArray(replacer) && !replacer.includes(key))
+            value = replacer.call(obj, key2, value);
+          else if (Array.isArray(replacer) && !replacer.includes(key2))
             return;
           if (value !== void 0 || keepUndefined)
-            map2.items.push(Pair.createPair(key, value, ctx));
+            map2.items.push(Pair.createPair(key2, value, ctx));
         };
         if (obj instanceof Map) {
-          for (const [key, value] of obj)
-            add(key, value);
+          for (const [key2, value] of obj)
+            add(key2, value);
         } else if (obj && typeof obj === "object") {
-          for (const key of Object.keys(obj))
-            add(key, obj[key]);
+          for (const key2 of Object.keys(obj))
+            add(key2, obj[key2]);
         }
         if (typeof schema.sortMapEntries === "function") {
           map2.items.sort(schema.sortMapEntries);
@@ -2103,23 +2103,23 @@ var require_YAMLMap = __commonJS({
           this.items.push(_pair);
         }
       }
-      delete(key) {
-        const it = findPair(this.items, key);
+      delete(key2) {
+        const it = findPair(this.items, key2);
         if (!it)
           return false;
         const del = this.items.splice(this.items.indexOf(it), 1);
         return del.length > 0;
       }
-      get(key, keepScalar) {
-        const it = findPair(this.items, key);
+      get(key2, keepScalar) {
+        const it = findPair(this.items, key2);
         const node2 = it?.value;
         return (!keepScalar && identity.isScalar(node2) ? node2.value : node2) ?? void 0;
       }
-      has(key) {
-        return !!findPair(this.items, key);
+      has(key2) {
+        return !!findPair(this.items, key2);
       }
-      set(key, value) {
-        this.add(new Pair.Pair(key, value), true);
+      set(key2, value) {
+        this.add(new Pair.Pair(key2, value), true);
       }
       /**
        * @param ctx - Conversion context, originally set in Document#toJS()
@@ -2208,15 +2208,15 @@ var require_YAMLSeq = __commonJS({
        *
        * @returns `true` if the item was found and removed.
        */
-      delete(key) {
-        const idx = asItemIndex(key);
+      delete(key2) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
           return false;
         const del = this.items.splice(idx, 1);
         return del.length > 0;
       }
-      get(key, keepScalar) {
-        const idx = asItemIndex(key);
+      get(key2, keepScalar) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
           return void 0;
         const it = this.items[idx];
@@ -2228,8 +2228,8 @@ var require_YAMLSeq = __commonJS({
        * `key` must contain a representation of an integer for this to succeed.
        * It may be wrapped in a `Scalar`.
        */
-      has(key) {
-        const idx = asItemIndex(key);
+      has(key2) {
+        const idx = asItemIndex(key2);
         return typeof idx === "number" && idx < this.items.length;
       }
       /**
@@ -2239,10 +2239,10 @@ var require_YAMLSeq = __commonJS({
        * If `key` does not contain a representation of an integer, this will throw.
        * It may be wrapped in a `Scalar`.
        */
-      set(key, value) {
-        const idx = asItemIndex(key);
+      set(key2, value) {
+        const idx = asItemIndex(key2);
         if (typeof idx !== "number")
-          throw new Error(`Expected a valid index, not ${key}.`);
+          throw new Error(`Expected a valid index, not ${key2}.`);
         const prev = this.items[idx];
         if (identity.isScalar(prev) && Scalar.isScalarValue(value))
           prev.value = value;
@@ -2276,8 +2276,8 @@ var require_YAMLSeq = __commonJS({
           let i = 0;
           for (let it of obj) {
             if (typeof replacer === "function") {
-              const key = obj instanceof Set ? it : String(i++);
-              it = replacer.call(obj, key, it);
+              const key2 = obj instanceof Set ? it : String(i++);
+              it = replacer.call(obj, key2, it);
             }
             seq.items.push(createNode.createNode(it, void 0, ctx));
           }
@@ -2285,8 +2285,8 @@ var require_YAMLSeq = __commonJS({
         return seq;
       }
     };
-    function asItemIndex(key) {
-      let idx = identity.isScalar(key) ? key.value : key;
+    function asItemIndex(key2) {
+      let idx = identity.isScalar(key2) ? key2.value : key2;
       if (idx && typeof idx === "string")
         idx = Number(idx);
       return typeof idx === "number" && Number.isInteger(idx) && idx >= 0 ? idx : null;
@@ -2700,25 +2700,25 @@ ${cn.comment}` : item.comment;
         for (let it of iterable) {
           if (typeof replacer === "function")
             it = replacer.call(iterable, String(i++), it);
-          let key, value;
+          let key2, value;
           if (Array.isArray(it)) {
             if (it.length === 2) {
-              key = it[0];
+              key2 = it[0];
               value = it[1];
             } else
               throw new TypeError(`Expected [key, value] tuple: ${it}`);
           } else if (it && it instanceof Object) {
             const keys = Object.keys(it);
             if (keys.length === 1) {
-              key = keys[0];
-              value = it[key];
+              key2 = keys[0];
+              value = it[key2];
             } else {
               throw new TypeError(`Expected tuple with one key, not ${keys.length} keys`);
             }
           } else {
-            key = it;
+            key2 = it;
           }
-          pairs2.items.push(Pair.createPair(key, value, ctx));
+          pairs2.items.push(Pair.createPair(key2, value, ctx));
         }
       return pairs2;
     }
@@ -2765,16 +2765,16 @@ var require_omap = __commonJS({
         if (ctx?.onCreate)
           ctx.onCreate(map2);
         for (const pair of this.items) {
-          let key, value;
+          let key2, value;
           if (identity.isPair(pair)) {
-            key = toJS.toJS(pair.key, "", ctx);
-            value = toJS.toJS(pair.value, key, ctx);
+            key2 = toJS.toJS(pair.key, "", ctx);
+            value = toJS.toJS(pair.value, key2, ctx);
           } else {
-            key = toJS.toJS(pair, "", ctx);
+            key2 = toJS.toJS(pair, "", ctx);
           }
-          if (map2.has(key))
+          if (map2.has(key2))
             throw new Error("Ordered maps must not include duplicate keys");
-          map2.set(key, value);
+          map2.set(key2, value);
         }
         return map2;
       }
@@ -2795,12 +2795,12 @@ var require_omap = __commonJS({
       resolve(seq, onError) {
         const pairs$1 = pairs.resolvePairs(seq, onError);
         const seenKeys = [];
-        for (const { key } of pairs$1.items) {
-          if (identity.isScalar(key)) {
-            if (seenKeys.includes(key.value)) {
-              onError(`Ordered maps must not include duplicate keys: ${key.value}`);
+        for (const { key: key2 } of pairs$1.items) {
+          if (identity.isScalar(key2)) {
+            if (seenKeys.includes(key2.value)) {
+              onError(`Ordered maps must not include duplicate keys: ${key2.value}`);
             } else {
-              seenKeys.push(key.value);
+              seenKeys.push(key2.value);
             }
           }
         }
@@ -2985,14 +2985,14 @@ var require_set = __commonJS({
         super(schema);
         this.tag = _YAMLSet.tag;
       }
-      add(key) {
+      add(key2) {
         let pair;
-        if (identity.isPair(key))
-          pair = key;
-        else if (key && typeof key === "object" && "key" in key && "value" in key && key.value === null)
-          pair = new Pair.Pair(key.key, null);
+        if (identity.isPair(key2))
+          pair = key2;
+        else if (key2 && typeof key2 === "object" && "key" in key2 && "value" in key2 && key2.value === null)
+          pair = new Pair.Pair(key2.key, null);
         else
-          pair = new Pair.Pair(key, null);
+          pair = new Pair.Pair(key2, null);
         const prev = YAMLMap.findPair(this.items, pair.key);
         if (!prev)
           this.items.push(pair);
@@ -3001,18 +3001,18 @@ var require_set = __commonJS({
        * If `keepPair` is `true`, returns the Pair matching `key`.
        * Otherwise, returns the value of that Pair's key.
        */
-      get(key, keepPair) {
-        const pair = YAMLMap.findPair(this.items, key);
+      get(key2, keepPair) {
+        const pair = YAMLMap.findPair(this.items, key2);
         return !keepPair && identity.isPair(pair) ? identity.isScalar(pair.key) ? pair.key.value : pair.key : pair;
       }
-      set(key, value) {
+      set(key2, value) {
         if (typeof value !== "boolean")
           throw new Error(`Expected boolean value for set(key, value) in a YAML set, not ${typeof value}`);
-        const prev = YAMLMap.findPair(this.items, key);
+        const prev = YAMLMap.findPair(this.items, key2);
         if (prev && !value) {
           this.items.splice(this.items.indexOf(prev), 1);
         } else if (!prev && value) {
-          this.items.push(new Pair.Pair(key));
+          this.items.push(new Pair.Pair(key2));
         }
       }
       toJSON(_, ctx) {
@@ -3259,7 +3259,7 @@ var require_tags = __commonJS({
         if (Array.isArray(customTags))
           tags = [];
         else {
-          const keys = Array.from(schemas.keys()).filter((key) => key !== "yaml11").map((key) => JSON.stringify(key)).join(", ");
+          const keys = Array.from(schemas.keys()).filter((key2) => key2 !== "yaml11").map((key2) => JSON.stringify(key2)).join(", ");
           throw new Error(`Unknown schema "${schemaName}"; use one of ${keys} or define customTags array`);
         }
       }
@@ -3275,7 +3275,7 @@ var require_tags = __commonJS({
         const tagObj = typeof tag === "string" ? tagsByName[tag] : tag;
         if (!tagObj) {
           const tagName = JSON.stringify(tag);
-          const keys = Object.keys(tagsByName).map((key) => JSON.stringify(key)).join(", ");
+          const keys = Object.keys(tagsByName).map((key2) => JSON.stringify(key2)).join(", ");
           throw new Error(`Unknown custom tag ${tagName}; use one of ${keys}`);
         }
         if (!tags2.includes(tagObj))
@@ -3478,9 +3478,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path6, value) {
+      addIn(path7, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path6, value);
+          this.contents.addIn(path7, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3539,8 +3539,8 @@ var require_Document = __commonJS({
        * Convert a key and a value into a `Pair` using the current schema,
        * recursively wrapping all values as `Scalar` or `Collection` nodes.
        */
-      createPair(key, value, options = {}) {
-        const k = this.createNode(key, null, options);
+      createPair(key2, value, options = {}) {
+        const k = this.createNode(key2, null, options);
         const v = this.createNode(value, null, options);
         return new Pair.Pair(k, v);
       }
@@ -3548,76 +3548,76 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      delete(key) {
-        return assertCollection(this.contents) ? this.contents.delete(key) : false;
+      delete(key2) {
+        return assertCollection(this.contents) ? this.contents.delete(key2) : false;
       }
       /**
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        if (Collection.isEmptyPath(path6)) {
+      deleteIn(path7) {
+        if (Collection.isEmptyPath(path7)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path6) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path7) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      get(key, keepScalar) {
-        return identity.isCollection(this.contents) ? this.contents.get(key, keepScalar) : void 0;
+      get(key2, keepScalar) {
+        return identity.isCollection(this.contents) ? this.contents.get(key2, keepScalar) : void 0;
       }
       /**
        * Returns item at `path`, or `undefined` if not found. By default unwraps
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        if (Collection.isEmptyPath(path6))
+      getIn(path7, keepScalar) {
+        if (Collection.isEmptyPath(path7))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path6, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path7, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
        */
-      has(key) {
-        return identity.isCollection(this.contents) ? this.contents.has(key) : false;
+      has(key2) {
+        return identity.isCollection(this.contents) ? this.contents.has(key2) : false;
       }
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path6) {
-        if (Collection.isEmptyPath(path6))
+      hasIn(path7) {
+        if (Collection.isEmptyPath(path7))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path6) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path7) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      set(key, value) {
+      set(key2, value) {
         if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, [key], value);
+          this.contents = Collection.collectionFromPath(this.schema, [key2], value);
         } else if (assertCollection(this.contents)) {
-          this.contents.set(key, value);
+          this.contents.set(key2, value);
         }
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        if (Collection.isEmptyPath(path6)) {
+      setIn(path7, value) {
+        if (Collection.isEmptyPath(path7)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path6), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path7), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path6, value);
+          this.contents.setIn(path7, value);
         }
       }
       /**
@@ -3912,24 +3912,24 @@ var require_resolve_props = __commonJS({
 var require_util_contains_newline = __commonJS({
   "node_modules/yaml/dist/compose/util-contains-newline.js"(exports) {
     "use strict";
-    function containsNewline(key) {
-      if (!key)
+    function containsNewline(key2) {
+      if (!key2)
         return null;
-      switch (key.type) {
+      switch (key2.type) {
         case "alias":
         case "scalar":
         case "double-quoted-scalar":
         case "single-quoted-scalar":
-          if (key.source.includes("\n"))
+          if (key2.source.includes("\n"))
             return true;
-          if (key.end) {
-            for (const st of key.end)
+          if (key2.end) {
+            for (const st of key2.end)
               if (st.type === "newline")
                 return true;
           }
           return false;
         case "flow-collection":
-          for (const it of key.items) {
+          for (const it of key2.items) {
             for (const st of it.start)
               if (st.type === "newline")
                 return true;
@@ -4003,10 +4003,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep, value } = collItem;
+        const { start, key: key2, sep, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key2 ?? sep?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4014,10 +4014,10 @@ var require_resolve_block_map = __commonJS({
         });
         const implicitKey = !keyProps.found;
         if (implicitKey) {
-          if (key) {
-            if (key.type === "block-seq")
+          if (key2) {
+            if (key2.type === "block-seq")
               onError(offset, "BLOCK_AS_IMPLICIT_KEY", "A block sequence may not be used as an implicit map key");
-            else if ("indent" in key && key.indent !== bm.indent)
+            else if ("indent" in key2 && key2.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
           if (!keyProps.anchor && !keyProps.tag && !sep) {
@@ -4030,17 +4030,17 @@ var require_resolve_block_map = __commonJS({
             }
             continue;
           }
-          if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key)) {
-            onError(key ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
+          if (keyProps.newlineAfterProp || utilContainsNewline.containsNewline(key2)) {
+            onError(key2 ?? start[start.length - 1], "MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line");
           }
         } else if (keyProps.found?.indent !== bm.indent) {
           onError(offset, "BAD_INDENT", startColMsg);
         }
         ctx.atKey = true;
         const keyStart = keyProps.end;
-        const keyNode = key ? composeNode(ctx, key, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
+        const keyNode = key2 ? composeNode(ctx, key2, keyProps, onError) : composeEmptyNode(ctx, keyStart, start, null, keyProps, onError);
         if (ctx.schema.compat)
-          utilFlowIndentCheck.flowIndentCheck(bm.indent, key, onError);
+          utilFlowIndentCheck.flowIndentCheck(bm.indent, key2, onError);
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4050,7 +4050,7 @@ var require_resolve_block_map = __commonJS({
           offset: keyNode.range[2],
           onError,
           parentIndent: bm.indent,
-          startOnNewline: !key || key.type === "block-scalar"
+          startOnNewline: !key2 || key2.type === "block-scalar"
         });
         offset = valueProps.end;
         if (valueProps.found) {
@@ -4214,11 +4214,11 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep, value } = collItem;
+        const { start, key: key2, sep, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep?.[0],
+          next: key2 ?? sep?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
@@ -4239,9 +4239,9 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap2 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap2 && ctx.options.strict && utilContainsNewline.containsNewline(key2))
             onError(
-              key,
+              key2,
               // checked by containsNewline()
               "MULTILINE_IMPLICIT_KEY",
               "Implicit keys of flow sequence pairs need to be on a single line"
@@ -4288,8 +4288,8 @@ var require_resolve_flow_collection = __commonJS({
         } else {
           ctx.atKey = true;
           const keyStart = props.end;
-          const keyNode = key ? composeNode(ctx, key, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
-          if (isBlock(key))
+          const keyNode = key2 ? composeNode(ctx, key2, props, onError) : composeEmptyNode(ctx, keyStart, start, null, props, onError);
+          if (isBlock(key2))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
           const valueProps = resolveProps.resolveProps(sep ?? [], {
@@ -5439,9 +5439,9 @@ var require_cst_scalar = __commonJS({
         ];
         if (!addEndtoBlockProps(props, "end" in token ? token.end : void 0))
           props.push({ type: "newline", offset: -1, indent, source: "\n" });
-        for (const key of Object.keys(token))
-          if (key !== "type" && key !== "offset")
-            delete token[key];
+        for (const key2 of Object.keys(token))
+          if (key2 !== "type" && key2 !== "offset")
+            delete token[key2];
         Object.assign(token, { type: "block-scalar", indent, props, source: body });
       }
     }
@@ -5489,9 +5489,9 @@ var require_cst_scalar = __commonJS({
         default: {
           const indent = "indent" in token ? token.indent : -1;
           const end = "end" in token && Array.isArray(token.end) ? token.end.filter((st) => st.type === "space" || st.type === "comment" || st.type === "newline") : [];
-          for (const key of Object.keys(token))
-            if (key !== "type" && key !== "offset")
-              delete token[key];
+          for (const key2 of Object.keys(token))
+            if (key2 !== "type" && key2 !== "offset")
+              delete token[key2];
           Object.assign(token, { type, indent, source, end });
         }
       }
@@ -5546,12 +5546,12 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep, value }) {
+    function stringifyItem({ start, key: key2, sep, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
-      if (key)
-        res += stringifyToken(key);
+      if (key2)
+        res += stringifyToken(key2);
       if (sep)
         for (const st of sep)
           res += st.source;
@@ -5578,9 +5578,9 @@ var require_cst_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path6) => {
+    visit2.itemAtPath = (cst, path7) => {
       let item = cst;
-      for (const [field, index] of path6) {
+      for (const [field, index] of path7) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5589,23 +5589,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit2.parentCollection = (cst, path6) => {
-      const parent = visit2.itemAtPath(cst, path6.slice(0, -1));
-      const field = path6[path6.length - 1][0];
+    visit2.parentCollection = (cst, path7) => {
+      const parent = visit2.itemAtPath(cst, path7.slice(0, -1));
+      const field = path7[path7.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path6, item, visitor) {
-      let ctrl = visitor(item, path6);
+    function _visit(path7, item, visitor) {
+      let ctrl = visitor(item, path7);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path6.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path7.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5616,10 +5616,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path6);
+            ctrl = ctrl(item, path7);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path6) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path7) : ctrl;
     }
     exports.visit = visit2;
   }
@@ -6883,7 +6883,7 @@ var require_parser = __commonJS({
                   });
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
-                  const key = it.key;
+                  const key2 = it.key;
                   const sep = it.sep;
                   sep.push(this.sourceToken);
                   delete it.key;
@@ -6892,7 +6892,7 @@ var require_parser = __commonJS({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep }]
+                    items: [{ start: start2, key: key2, sep }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7506,15 +7506,15 @@ var require_code = __commonJS({
       return JSON.stringify(x).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
     }
     exports.safeStringify = safeStringify;
-    function getProperty(key) {
-      return typeof key == "string" && exports.IDENTIFIER.test(key) ? new _Code(`.${key}`) : _`[${key}]`;
+    function getProperty(key2) {
+      return typeof key2 == "string" && exports.IDENTIFIER.test(key2) ? new _Code(`.${key2}`) : _`[${key2}]`;
     }
     exports.getProperty = getProperty;
-    function getEsmExportName(key) {
-      if (typeof key == "string" && exports.IDENTIFIER.test(key)) {
-        return new _Code(`${key}`);
+    function getEsmExportName(key2) {
+      if (typeof key2 == "string" && exports.IDENTIFIER.test(key2)) {
+        return new _Code(`${key2}`);
       }
-      throw new Error(`CodeGen: invalid export name: ${key}, use explicit $id name mapping`);
+      throw new Error(`CodeGen: invalid export name: ${key2}, use explicit $id name mapping`);
     }
     exports.getEsmExportName = getEsmExportName;
     function regexpCode(rx) {
@@ -8141,11 +8141,11 @@ var require_codegen = __commonJS({
       // returns code for object literal for the passed argument list of key-value pairs
       object(...keyValues) {
         const code = ["{"];
-        for (const [key, value] of keyValues) {
+        for (const [key2, value] of keyValues) {
           if (code.length > 1)
             code.push(",");
-          code.push(key);
-          if (key !== value || this.opts.es5) {
+          code.push(key2);
+          if (key2 !== value || this.opts.es5) {
             code.push(":");
             (0, code_1.addCodeArg)(code, value);
           }
@@ -8420,17 +8420,17 @@ var require_util = __commonJS({
       if (typeof schema === "boolean")
         return;
       const rules = self.RULES.keywords;
-      for (const key in schema) {
-        if (!rules[key])
-          checkStrictMode(it, `unknown keyword: "${key}"`);
+      for (const key2 in schema) {
+        if (!rules[key2])
+          checkStrictMode(it, `unknown keyword: "${key2}"`);
       }
     }
     exports.checkUnknownRules = checkUnknownRules;
     function schemaHasRules(schema, rules) {
       if (typeof schema == "boolean")
         return !schema;
-      for (const key in schema)
-        if (rules[key])
+      for (const key2 in schema)
+        if (rules[key2])
           return true;
       return false;
     }
@@ -8438,8 +8438,8 @@ var require_util = __commonJS({
     function schemaHasRulesButRef(schema, RULES) {
       if (typeof schema == "boolean")
         return !schema;
-      for (const key in schema)
-        if (key !== "$ref" && RULES.all[key])
+      for (const key2 in schema)
+        if (key2 !== "$ref" && RULES.all[key2])
           return true;
       return false;
     }
@@ -9017,8 +9017,8 @@ var require_defaults = __commonJS({
     function assignDefaults(it, ty) {
       const { properties, items } = it.schema;
       if (ty === "object" && properties) {
-        for (const key in properties) {
-          assignDefault(it, key, properties[key].default);
+        for (const key2 in properties) {
+          assignDefault(it, key2, properties[key2].default);
         }
       } else if (ty === "array" && Array.isArray(items)) {
         items.forEach((sch, i) => assignDefault(it, i, sch.default));
@@ -9402,8 +9402,8 @@ var require_fast_deep_equal = __commonJS({
         for (i = length; i-- !== 0; )
           if (!Object.prototype.hasOwnProperty.call(b, keys[i])) return false;
         for (i = length; i-- !== 0; ) {
-          var key = keys[i];
-          if (!equal(a[key], b[key])) return false;
+          var key2 = keys[i];
+          if (!equal(a[key2], b[key2])) return false;
         }
         return true;
       }
@@ -9475,20 +9475,20 @@ var require_json_schema_traverse = __commonJS({
     function _traverse(opts, pre, post, schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex) {
       if (schema && typeof schema == "object" && !Array.isArray(schema)) {
         pre(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
-        for (var key in schema) {
-          var sch = schema[key];
+        for (var key2 in schema) {
+          var sch = schema[key2];
           if (Array.isArray(sch)) {
-            if (key in traverse.arrayKeywords) {
+            if (key2 in traverse.arrayKeywords) {
               for (var i = 0; i < sch.length; i++)
-                _traverse(opts, pre, post, sch[i], jsonPtr + "/" + key + "/" + i, rootSchema, jsonPtr, key, schema, i);
+                _traverse(opts, pre, post, sch[i], jsonPtr + "/" + key2 + "/" + i, rootSchema, jsonPtr, key2, schema, i);
             }
-          } else if (key in traverse.propsKeywords) {
+          } else if (key2 in traverse.propsKeywords) {
             if (sch && typeof sch == "object") {
               for (var prop in sch)
-                _traverse(opts, pre, post, sch[prop], jsonPtr + "/" + key + "/" + escapeJsonPtr(prop), rootSchema, jsonPtr, key, schema, prop);
+                _traverse(opts, pre, post, sch[prop], jsonPtr + "/" + key2 + "/" + escapeJsonPtr(prop), rootSchema, jsonPtr, key2, schema, prop);
             }
-          } else if (key in traverse.keywords || opts.allKeys && !(key in traverse.skipKeywords)) {
-            _traverse(opts, pre, post, sch, jsonPtr + "/" + key, rootSchema, jsonPtr, key, schema);
+          } else if (key2 in traverse.keywords || opts.allKeys && !(key2 in traverse.skipKeywords)) {
+            _traverse(opts, pre, post, sch, jsonPtr + "/" + key2, rootSchema, jsonPtr, key2, schema);
           }
         }
         post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
@@ -9545,10 +9545,10 @@ var require_resolve = __commonJS({
       "$dynamicAnchor"
     ]);
     function hasRef(schema) {
-      for (const key in schema) {
-        if (REF_KEYWORDS.has(key))
+      for (const key2 in schema) {
+        if (REF_KEYWORDS.has(key2))
           return true;
-        const sch = schema[key];
+        const sch = schema[key2];
         if (Array.isArray(sch) && sch.some(hasRef))
           return true;
         if (typeof sch == "object" && hasRef(sch))
@@ -9558,14 +9558,14 @@ var require_resolve = __commonJS({
     }
     function countKeys(schema) {
       let count = 0;
-      for (const key in schema) {
-        if (key === "$ref")
+      for (const key2 in schema) {
+        if (key2 === "$ref")
           return Infinity;
         count++;
-        if (SIMPLE_INLINED.has(key))
+        if (SIMPLE_INLINED.has(key2))
           continue;
-        if (typeof schema[key] == "object") {
-          (0, util_1.eachItem)(schema[key], (sch) => count += countKeys(sch));
+        if (typeof schema[key2] == "object") {
+          (0, util_1.eachItem)(schema[key2], (sch) => count += countKeys(sch));
         }
         if (count === Infinity)
           return Infinity;
@@ -9754,8 +9754,8 @@ var require_validate = __commonJS({
     function schemaCxtHasRules({ schema, self }) {
       if (typeof schema == "boolean")
         return !schema;
-      for (const key in schema)
-        if (self.RULES.all[key])
+      for (const key2 in schema)
+        if (self.RULES.all[key2])
           return true;
       return false;
     }
@@ -10599,8 +10599,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path6) {
-      let input2 = path6;
+    function removeDotSegments(path7) {
+      let input2 = path7;
       const output2 = [];
       let nextSlash = -1;
       let len = 0;
@@ -10674,11 +10674,11 @@ var require_utils = __commonJS({
       }
       return output2.join("");
     }
-    function removeDotSegmentsRelative(path6) {
-      if (path6 === "" || path6[0] === "/") {
-        return removeDotSegments(path6);
+    function removeDotSegmentsRelative(path7) {
+      if (path7 === "" || path7[0] === "/") {
+        return removeDotSegments(path7);
       }
-      const segments = path6.split("/");
+      const segments = path7.split("/");
       const last = segments.length - 1;
       const output2 = [];
       let trailingDirectory = false;
@@ -11041,8 +11041,8 @@ var require_schemes = __commonJS({
       }
       if (wsComponent.resourceName) {
         const queryIndex = wsComponent.resourceName.indexOf("?");
-        const path6 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
-        wsComponent.path = path6 && path6 !== "/" ? path6 : void 0;
+        const path7 = queryIndex === -1 ? wsComponent.resourceName : wsComponent.resourceName.slice(0, queryIndex);
+        wsComponent.path = path7 && path7 !== "/" ? path7 : void 0;
         wsComponent.query = queryIndex === -1 ? void 0 : wsComponent.resourceName.slice(queryIndex + 1);
         wsComponent.resourceName = void 0;
       }
@@ -11850,7 +11850,7 @@ var require_core = __commonJS({
         }
       }
       // Adds schema to the instance
-      addSchema(schema, key, _meta, _validateSchema = this.opts.validateSchema) {
+      addSchema(schema, key2, _meta, _validateSchema = this.opts.validateSchema) {
         if (Array.isArray(schema)) {
           for (const sch of schema)
             this.addSchema(sch, void 0, _meta, _validateSchema);
@@ -11864,15 +11864,15 @@ var require_core = __commonJS({
             throw new Error(`schema ${schemaId} must be string`);
           }
         }
-        key = (0, resolve_1.normalizeId)(key || id);
-        this._checkUnique(key);
-        this.schemas[key] = this._addSchema(schema, _meta, key, _validateSchema, true);
+        key2 = (0, resolve_1.normalizeId)(key2 || id);
+        this._checkUnique(key2);
+        this.schemas[key2] = this._addSchema(schema, _meta, key2, _validateSchema, true);
         return this;
       }
       // Add schema that will be used to validate other schemas
       // options in META_IGNORE_OPTIONS are alway set to false
-      addMetaSchema(schema, key, _validateSchema = this.opts.validateSchema) {
-        this.addSchema(schema, key, true, _validateSchema);
+      addMetaSchema(schema, key2, _validateSchema = this.opts.validateSchema) {
+        this.addSchema(schema, key2, true, _validateSchema);
         return this;
       }
       //  Validate schema against its meta-schema
@@ -12028,14 +12028,14 @@ var require_core = __commonJS({
           let keywords = metaSchema;
           for (const seg of segments)
             keywords = keywords[seg];
-          for (const key in rules) {
-            const rule = rules[key];
+          for (const key2 in rules) {
+            const rule = rules[key2];
             if (typeof rule != "object")
               continue;
             const { $data } = rule.definition;
-            const schema = keywords[key];
+            const schema = keywords[key2];
             if ($data && schema)
-              keywords[key] = schemaOrData(schema);
+              keywords[key2] = schemaOrData(schema);
           }
         }
         return metaSchema;
@@ -12108,10 +12108,10 @@ var require_core = __commonJS({
     Ajv2.MissingRefError = ref_error_1.default;
     exports.default = Ajv2;
     function checkOptions(checkOpts, options, msg, log = "error") {
-      for (const key in checkOpts) {
-        const opt = key;
+      for (const key2 in checkOpts) {
+        const opt = key2;
         if (opt in options)
-          this.logger[log](`${msg}: option ${key}. ${checkOpts[opt]}`);
+          this.logger[log](`${msg}: option ${key2}. ${checkOpts[opt]}`);
       }
     }
     function getSchEnv(keyRef) {
@@ -12125,8 +12125,8 @@ var require_core = __commonJS({
       if (Array.isArray(optsSchemas))
         this.addSchema(optsSchemas);
       else
-        for (const key in optsSchemas)
-          this.addSchema(optsSchemas[key], key);
+        for (const key2 in optsSchemas)
+          this.addSchema(optsSchemas[key2], key2);
     }
     function addInitialFormats() {
       for (const name in this.opts.formats) {
@@ -13174,11 +13174,11 @@ var require_dependencies = __commonJS({
     function splitDependencies({ schema }) {
       const propertyDeps = {};
       const schemaDeps = {};
-      for (const key in schema) {
-        if (key === "__proto__")
+      for (const key2 in schema) {
+        if (key2 === "__proto__")
           continue;
-        const deps = Array.isArray(schema[key]) ? propertyDeps : schemaDeps;
-        deps[key] = schema[key];
+        const deps = Array.isArray(schema[key2]) ? propertyDeps : schemaDeps;
+        deps[key2] = schema[key2];
       }
       return [propertyDeps, schemaDeps];
     }
@@ -13255,13 +13255,13 @@ var require_propertyNames = __commonJS({
         if ((0, util_1.alwaysValidSchema)(it, schema))
           return;
         const valid = gen.name("valid");
-        gen.forIn("key", data2, (key) => {
-          cxt.setParams({ propertyName: key });
+        gen.forIn("key", data2, (key2) => {
+          cxt.setParams({ propertyName: key2 });
           cxt.subschema({
             keyword: "propertyNames",
-            data: key,
+            data: key2,
             dataTypes: ["string"],
-            propertyName: key,
+            propertyName: key2,
             compositeRule: true
           }, valid);
           gen.if((0, codegen_1.not)(valid), () => {
@@ -13310,38 +13310,38 @@ var require_additionalProperties = __commonJS({
         checkAdditionalProperties();
         cxt.ok((0, codegen_1._)`${errsCount} === ${names_1.default.errors}`);
         function checkAdditionalProperties() {
-          gen.forIn("key", data2, (key) => {
+          gen.forIn("key", data2, (key2) => {
             if (!props.length && !patProps.length)
-              additionalPropertyCode(key);
+              additionalPropertyCode(key2);
             else
-              gen.if(isAdditional(key), () => additionalPropertyCode(key));
+              gen.if(isAdditional(key2), () => additionalPropertyCode(key2));
           });
         }
-        function isAdditional(key) {
+        function isAdditional(key2) {
           let definedProp;
           if (props.length > 8) {
             const propsSchema = (0, util_1.schemaRefOrVal)(it, parentSchema.properties, "properties");
-            definedProp = (0, code_1.isOwnProperty)(gen, propsSchema, key);
+            definedProp = (0, code_1.isOwnProperty)(gen, propsSchema, key2);
           } else if (props.length) {
-            definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key} === ${p}`));
+            definedProp = (0, codegen_1.or)(...props.map((p) => (0, codegen_1._)`${key2} === ${p}`));
           } else {
             definedProp = codegen_1.nil;
           }
           if (patProps.length) {
-            definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key})`));
+            definedProp = (0, codegen_1.or)(definedProp, ...patProps.map((p) => (0, codegen_1._)`${(0, code_1.usePattern)(cxt, p)}.test(${key2})`));
           }
           return (0, codegen_1.not)(definedProp);
         }
-        function deleteAdditional(key) {
-          gen.code((0, codegen_1._)`delete ${data2}[${key}]`);
+        function deleteAdditional(key2) {
+          gen.code((0, codegen_1._)`delete ${data2}[${key2}]`);
         }
-        function additionalPropertyCode(key) {
+        function additionalPropertyCode(key2) {
           if (opts.removeAdditional === "all" || opts.removeAdditional && schema === false) {
-            deleteAdditional(key);
+            deleteAdditional(key2);
             return;
           }
           if (schema === false) {
-            cxt.setParams({ additionalProperty: key });
+            cxt.setParams({ additionalProperty: key2 });
             cxt.error();
             if (!allErrors)
               gen.break();
@@ -13350,22 +13350,22 @@ var require_additionalProperties = __commonJS({
           if (typeof schema == "object" && !(0, util_1.alwaysValidSchema)(it, schema)) {
             const valid = gen.name("valid");
             if (opts.removeAdditional === "failing") {
-              applyAdditionalSchema(key, valid, false);
+              applyAdditionalSchema(key2, valid, false);
               gen.if((0, codegen_1.not)(valid), () => {
                 cxt.reset();
-                deleteAdditional(key);
+                deleteAdditional(key2);
               });
             } else {
-              applyAdditionalSchema(key, valid);
+              applyAdditionalSchema(key2, valid);
               if (!allErrors)
                 gen.if((0, codegen_1.not)(valid), () => gen.break());
             }
           }
         }
-        function applyAdditionalSchema(key, valid, errors) {
+        function applyAdditionalSchema(key2, valid, errors) {
           const subschema = {
             keyword: "additionalProperties",
-            dataProp: key,
+            dataProp: key2,
             dataPropType: util_1.Type.Str
           };
           if (errors === false) {
@@ -13490,19 +13490,19 @@ var require_patternProperties = __commonJS({
           }
         }
         function validateProperties(pat) {
-          gen.forIn("key", data2, (key) => {
-            gen.if((0, codegen_1._)`${(0, code_1.usePattern)(cxt, pat)}.test(${key})`, () => {
+          gen.forIn("key", data2, (key2) => {
+            gen.if((0, codegen_1._)`${(0, code_1.usePattern)(cxt, pat)}.test(${key2})`, () => {
               const alwaysValid = alwaysValidPatterns.includes(pat);
               if (!alwaysValid) {
                 cxt.subschema({
                   keyword: "patternProperties",
                   schemaProp: pat,
-                  dataProp: key,
+                  dataProp: key2,
                   dataPropType: util_2.Type.Str
                 }, valid);
               }
               if (it.opts.unevaluated && props !== true) {
-                gen.assign((0, codegen_1._)`${props}[${key}]`, true);
+                gen.assign((0, codegen_1._)`${props}[${key2}]`, true);
               } else if (!alwaysValid && !it.allErrors) {
                 gen.if((0, codegen_1.not)(valid), () => gen.break());
               }
@@ -15318,9 +15318,9 @@ function floatSafeRemainder(val, step) {
   return ratio - roundedRatio;
 }
 var EVALUATING = /* @__PURE__ */ Symbol("evaluating");
-function defineLazy(object3, key, getter) {
+function defineLazy(object3, key2, getter) {
   let value = void 0;
-  Object.defineProperty(object3, key, {
+  Object.defineProperty(object3, key2, {
     get() {
       if (value === EVALUATING) {
         return void 0;
@@ -15332,7 +15332,7 @@ function defineLazy(object3, key, getter) {
       return value;
     },
     set(v) {
-      Object.defineProperty(object3, key, {
+      Object.defineProperty(object3, key2, {
         value: v
         // configurable: true,
       });
@@ -15358,47 +15358,47 @@ function rawShape(def) {
 function sourceShape(schema) {
   return rawShape(schema._zod.def) ?? schema._zod.def.shape;
 }
-function deferProp(target, key, getter) {
-  Object.defineProperty(target, key, {
+function deferProp(target, key2, getter) {
+  Object.defineProperty(target, key2, {
     get() {
       const value = getter();
-      assignProp(this, key, value);
+      assignProp(this, key2, value);
       return value;
     },
     enumerable: true,
     configurable: true
   });
 }
-function putProp(target, key, value) {
-  if (key in target)
-    assignProp(target, key, value);
+function putProp(target, key2, value) {
+  if (key2 in target)
+    assignProp(target, key2, value);
   else
-    target[key] = value;
+    target[key2] = value;
 }
 function mirrorShape(target, source, keys, wrap) {
   const raw = sourceShape(source);
-  for (const key of keys) {
-    const desc = Object.getOwnPropertyDescriptor(raw, key);
+  for (const key2 of keys) {
+    const desc = Object.getOwnPropertyDescriptor(raw, key2);
     if (!desc.enumerable)
       continue;
     if (desc.get) {
-      deferProp(target, key, () => {
-        const value = source._zod.def.shape[key];
-        return wrap ? wrap(value, key) : value;
+      deferProp(target, key2, () => {
+        const value = source._zod.def.shape[key2];
+        return wrap ? wrap(value, key2) : value;
       });
     } else
-      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+      putProp(target, key2, wrap ? wrap(desc.value, key2) : desc.value);
   }
 }
 function mirrorProps(target, source) {
-  for (const key of Reflect.ownKeys(source)) {
-    const desc = Object.getOwnPropertyDescriptor(source, key);
+  for (const key2 of Reflect.ownKeys(source)) {
+    const desc = Object.getOwnPropertyDescriptor(source, key2);
     if (!desc.enumerable)
       continue;
     if (desc.get)
-      deferProp(target, key, () => source[key]);
+      deferProp(target, key2, () => source[key2]);
     else
-      putProp(target, key, desc.value);
+      putProp(target, key2, desc.value);
   }
 }
 function mergeDefs(...defs) {
@@ -15412,14 +15412,14 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key2) => acc?.[key2], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
-  const promises = keys.map((key) => promisesObj[key]);
+  const promises = keys.map((key2) => promisesObj[key2]);
   return Promise.all(promises).then((results) => {
     const resolvedObj = {};
     for (let i = 0; i < keys.length; i++) {
@@ -15491,8 +15491,8 @@ function shallowClone(o) {
 }
 function numKeys(data2) {
   let keyCount = 0;
-  for (const key in data2) {
-    if (Object.prototype.hasOwnProperty.call(data2, key)) {
+  for (const key2 in data2) {
+    if (Object.prototype.hasOwnProperty.call(data2, key2)) {
       keyCount++;
     }
   }
@@ -15646,12 +15646,12 @@ function pick(schema, mask) {
 function maskedKeys(schema, mask) {
   const raw = sourceShape(schema);
   const keys = [];
-  for (const key of Reflect.ownKeys(mask)) {
-    if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
-      throw new Error(`Unrecognized key: "${String(key)}"`);
+  for (const key2 of Reflect.ownKeys(mask)) {
+    if (!Object.getOwnPropertyDescriptor(raw, key2)?.enumerable) {
+      throw new Error(`Unrecognized key: "${String(key2)}"`);
     }
-    if (mask[key])
-      keys.push(key);
+    if (mask[key2])
+      keys.push(key2);
   }
   return keys;
 }
@@ -15664,7 +15664,7 @@ function omit(schema, mask) {
   }
   const omitted = new Set(maskedKeys(schema, mask));
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key2) => !omitted.has(key2)));
   return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
 }
 function extend(schema, shape) {
@@ -15675,8 +15675,8 @@ function extend(schema, shape) {
   const hasChecks = checks && checks.length > 0;
   if (hasChecks) {
     const existingShape = sourceShape(schema);
-    for (const key of Reflect.ownKeys(shape)) {
-      if (Object.getOwnPropertyDescriptor(existingShape, key) !== void 0) {
+    for (const key2 of Reflect.ownKeys(shape)) {
+      if (Object.getOwnPropertyDescriptor(existingShape, key2) !== void 0) {
         throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
       }
     }
@@ -15723,15 +15723,15 @@ function partial(Class2, schema, mask, name = "partial") {
   }
   const selected = mask ? new Set(maskedKeys(schema, mask)) : void 0;
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class2 && ((value, key) => selected && !selected.has(key) ? value : new Class2({ type: "optional", innerType: value })));
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class2 && ((value, key2) => selected && !selected.has(key2) ? value : new Class2({ type: "optional", innerType: value })));
   return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
 }
 function required(Class2, schema, mask) {
   const selected = mask ? new Set(maskedKeys(schema, mask)) : void 0;
   const newShape = {};
-  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => (
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key2) => (
     // overwrite with non-optional
-    selected && !selected.has(key) ? value : new Class2({ type: "nonoptional", innerType: value })
+    selected && !selected.has(key2) ? value : new Class2({ type: "nonoptional", innerType: value })
   ));
   return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
 }
@@ -15755,11 +15755,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -15918,46 +15918,46 @@ var Class = class {
   }
 };
 function members(proto, table) {
-  for (const key in table) {
-    const desc = Object.getOwnPropertyDescriptor(table, key);
+  for (const key2 in table) {
+    const desc = Object.getOwnPropertyDescriptor(table, key2);
     if (desc.get)
-      Object.defineProperty(proto, key, { ...desc, enumerable: false });
+      Object.defineProperty(proto, key2, { ...desc, enumerable: false });
     else
-      defineBound(proto, key, desc.value);
+      defineBound(proto, key2, desc.value);
   }
 }
-function own(inst, key, value, enumerable = true) {
-  Object.defineProperty(inst, key, { configurable: true, writable: true, enumerable, value });
+function own(inst, key2, value, enumerable = true) {
+  Object.defineProperty(inst, key2, { configurable: true, writable: true, enumerable, value });
   return value;
 }
-function hide(inst, key, value) {
-  return own(inst, key, value, false);
+function hide(inst, key2, value) {
+  return own(inst, key2, value, false);
 }
 // @__NO_SIDE_EFFECTS__
 function derived(computes, table) {
-  for (const key in computes) {
-    const compute = computes[key];
-    Object.defineProperty(table, key, {
+  for (const key2 in computes) {
+    const compute = computes[key2];
+    Object.defineProperty(table, key2, {
       configurable: true,
       enumerable: true,
       get() {
-        return own(this, key, compute(this));
+        return own(this, key2, compute(this));
       },
       set(value) {
-        own(this, key, value);
+        own(this, key2, value);
       }
     });
   }
   return table;
 }
-function defineBound(proto, key, fn) {
-  Object.defineProperty(proto, key, {
+function defineBound(proto, key2, fn) {
+  Object.defineProperty(proto, key2, {
     configurable: true,
     get() {
-      return this == null ? fn : own(this, key, fn.bind(this));
+      return this == null ? fn : own(this, key2, fn.bind(this));
     },
     set(value) {
-      own(this, key, value);
+      own(this, key2, value);
     }
   });
 }
@@ -15974,53 +15974,53 @@ var breaker = {
     return void 0;
   }
 };
-function defineLazyInternal(inst, key, compute) {
+function defineLazyInternal(inst, key2, compute) {
   const proto = Object.getPrototypeOf(inst._zod);
-  if (key in proto && installing !== inst._zod) {
+  if (key2 in proto && installing !== inst._zod) {
     installing = void 0;
     return;
   }
   installing = inst._zod;
-  Object.defineProperty(proto, key, {
+  Object.defineProperty(proto, key2, {
     configurable: true,
     get() {
-      Object.defineProperty(this, key, breaker);
+      Object.defineProperty(this, key2, breaker);
       const outer = broke;
       broke = false;
       try {
         const value = compute(this);
         if (broke)
-          delete this[key];
+          delete this[key2];
         else
-          Object.defineProperty(this, key, { configurable: true, writable: true, value });
+          Object.defineProperty(this, key2, { configurable: true, writable: true, value });
         broke = broke || outer;
         return value;
       } catch (err) {
-        delete this[key];
+        delete this[key2];
         broke = broke || outer;
         throw err;
       }
     },
     set(value) {
-      Object.defineProperty(this, key, { configurable: true, writable: true, value });
+      Object.defineProperty(this, key2, { configurable: true, writable: true, value });
     }
   });
 }
-function installLazyProp(inst, key, make, enumerable) {
-  const proto = claim(inst, key);
+function installLazyProp(inst, key2, make, enumerable) {
+  const proto = claim(inst, key2);
   if (!proto)
     return;
-  Object.defineProperty(proto, key, {
+  Object.defineProperty(proto, key2, {
     configurable: true,
     get() {
       const desc = { configurable: true, writable: true, enumerable, value: void 0 };
-      Object.defineProperty(this, key, desc);
+      Object.defineProperty(this, key2, desc);
       desc.value = make(this);
-      Object.defineProperty(this, key, desc);
+      Object.defineProperty(this, key2, desc);
       return desc.value;
     },
     set(value) {
-      Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
+      Object.defineProperty(this, key2, { configurable: true, writable: true, enumerable, value });
     }
   });
 }
@@ -16197,15 +16197,15 @@ var $ZodError = $constructor("$ZodError", initializer);
 var $ZodRealError = $constructor("$ZodError", initializer, void 0, {
   Parent: Error
 });
-function node(obj, key, make) {
-  if (!Object.prototype.hasOwnProperty.call(obj, key)) {
-    if (key === "__proto__") {
-      Object.defineProperty(obj, key, { value: make(), writable: true, enumerable: true, configurable: true });
+function node(obj, key2, make) {
+  if (!Object.prototype.hasOwnProperty.call(obj, key2)) {
+    if (key2 === "__proto__") {
+      Object.defineProperty(obj, key2, { value: make(), writable: true, enumerable: true, configurable: true });
     } else {
-      obj[key] = make();
+      obj[key2] = make();
     }
   }
-  return obj[key];
+  return obj[key2];
 }
 function flattenError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = {};
@@ -16221,16 +16221,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -16269,17 +16269,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -16318,8 +16318,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -17114,16 +17114,16 @@ var $ZodCheckProperties = /* @__PURE__ */ $constructor("$ZodCheckProperties", (i
       payload.issues.push({ expected: "object", code: "invalid_type", input: payload.value, inst });
       return void 0;
     }
-    entries ?? (entries = Reflect.ownKeys(def.shape).map((key) => [key, def.shape[key]]));
+    entries ?? (entries = Reflect.ownKeys(def.shape).map((key2) => [key2, def.shape[key2]]));
     const input2 = payload.value;
     let proms;
-    for (const [key, schema] of entries) {
-      const result = schema._zod.run({ value: input2[key], issues: [] }, {});
+    for (const [key2, schema] of entries) {
+      const result = schema._zod.run({ value: input2[key2], issues: [] }, {});
       if (result instanceof Promise) {
         proms ?? (proms = []);
-        proms.push(result.then((result2) => handleCheckPropertyResult(result2, payload, key)));
+        proms.push(result.then((result2) => handleCheckPropertyResult(result2, payload, key2)));
       } else {
-        handleCheckPropertyResult(result, payload, key);
+        handleCheckPropertyResult(result, payload, key2);
       }
     }
     if (proms)
@@ -18024,8 +18024,8 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
   };
   capSize(inst, arraySize);
 });
-function handlePropertyResult(result, final, key, input2, optin, optout) {
-  const isPresent = key in input2;
+function handlePropertyResult(result, final, key2, input2, optin, optout) {
+  const isPresent = key2 in input2;
   const isOptionalOut = optout === "optional";
   if (!isPresent && isOptionalOut && optin === "optional") {
     return;
@@ -18034,7 +18034,7 @@ function handlePropertyResult(result, final, key, input2, optin, optout) {
     if (optin !== void 0 && isOptionalOut && !isPresent) {
       return;
     }
-    final.issues.push(...prefixIssues(key, result.issues));
+    final.issues.push(...prefixIssues(key2, result.issues));
   }
   if (!isPresent && optin === void 0) {
     if (!result.issues.length) {
@@ -18042,17 +18042,17 @@ function handlePropertyResult(result, final, key, input2, optin, optout) {
         code: "invalid_type",
         expected: "nonoptional",
         input: void 0,
-        path: [key]
+        path: [key2]
       });
     }
     return;
   }
   if (result.value === void 0) {
     if (isPresent || optin === "defaulted" && !isOptionalOut) {
-      final.value[key] = void 0;
+      final.value[key2] = void 0;
     }
   } else {
-    final.value[key] = result.value;
+    final.value[key2] = result.value;
   }
 }
 var NO_SYMBOL_KEYS = [];
@@ -18085,28 +18085,28 @@ function handleCatchall(proms, input2, payload, ctx, def, inst, abortEarly) {
   const optin = _catchall.optin;
   const optout = _catchall.optout;
   let seen = 0;
-  for (const key in input2) {
+  for (const key2 in input2) {
     if (abortEarly && payload.issues.length !== seen) {
       if (aborted(payload, seen))
         break;
       seen = payload.issues.length;
     }
-    if (keySet.has(key))
+    if (keySet.has(key2))
       continue;
-    if (key === "__proto__") {
+    if (key2 === "__proto__") {
       if (t === "never")
-        unrecognized.push(key);
+        unrecognized.push(key2);
       continue;
     }
     if (t === "never") {
-      unrecognized.push(key);
+      unrecognized.push(key2);
       continue;
     }
-    const r = _catchall.run({ value: input2[key], issues: [] }, ctx);
+    const r = _catchall.run({ value: input2[key2], issues: [] }, ctx);
     if (r instanceof Promise) {
-      proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input2, optin, optout)));
+      proms.push(r.then((r2) => handlePropertyResult(r2, payload, key2, input2, optin, optout)));
     } else {
-      handlePropertyResult(r, payload, key, input2, optin, optout);
+      handlePropertyResult(r, payload, key2, input2, optin, optout);
     }
   }
   if (unrecognized.length) {
@@ -18143,16 +18143,16 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   defineLazyInternal(inst, "propValues", (zod) => {
     const shape = zod.def.shape;
     const propValues = {};
-    for (const key in shape) {
-      const field = shape[key]._zod;
+    for (const key2 in shape) {
+      const field = shape[key2]._zod;
       if (field.values) {
-        if (!Object.prototype.hasOwnProperty.call(propValues, key)) {
-          assignProp(propValues, key, /* @__PURE__ */ new Set());
+        if (!Object.prototype.hasOwnProperty.call(propValues, key2)) {
+          assignProp(propValues, key2, /* @__PURE__ */ new Set());
         }
         for (const v of field.values)
-          propValues[key].add(v);
+          propValues[key2].add(v);
         if (field.optin !== void 0)
-          propValues[key].add(void 0);
+          propValues[key2].add(void 0);
       }
     }
     return propValues;
@@ -18179,22 +18179,22 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     const shape = value.shape;
     const abortEarly = ctx?.abortEarly;
     let seen = payload.issues.length;
-    for (const key of value.allKeys) {
+    for (const key2 of value.allKeys) {
       if (abortEarly && payload.issues.length !== seen) {
         if (aborted(payload, seen))
           break;
         seen = payload.issues.length;
       }
-      if (key === "__proto__")
+      if (key2 === "__proto__")
         continue;
-      const el = shape[key];
+      const el = shape[key2];
       const optin = el._zod.optin;
       const optout = el._zod.optout;
-      const r = el._zod.run({ value: input2[key], issues: [] }, ctx);
+      const r = el._zod.run({ value: input2[key2], issues: [] }, ctx);
       if (r instanceof Promise) {
-        proms.push(r.then((r2) => handlePropertyResult(r2, payload, key, input2, optin, optout)));
+        proms.push(r.then((r2) => handlePropertyResult(r2, payload, key2, input2, optin, optout)));
       } else {
-        handlePropertyResult(r, payload, key, input2, optin, optout);
+        handlePropertyResult(r, payload, key2, input2, optin, optout);
       }
     }
     if (!catchall) {
@@ -18228,17 +18228,17 @@ var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) =>
     doc.write(`const input = payload.value;`);
     const ids = /* @__PURE__ */ Object.create(null);
     let counter = 0;
-    for (const key of normalized.allKeys) {
-      ids[key] = `key_${counter++}`;
+    for (const key2 of normalized.allKeys) {
+      ids[key2] = `key_${counter++}`;
     }
     doc.write(memo2 ? `const newResult = memo.alloc(inst, payload, {}, ctx);` : `const newResult = {};`);
-    for (const key of normalized.allKeys) {
-      if (key === "__proto__")
+    for (const key2 of normalized.allKeys) {
+      if (key2 === "__proto__")
         continue;
-      const id = ids[key];
-      const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
+      const id = ids[key2];
+      const k = typeof key2 === "symbol" ? `syms[${syms.indexOf(key2)}]` : esc(key2);
       const isPresent = `${k} in input`;
-      const schema = shape[key];
+      const schema = shape[key2];
       const optin = schema?._zod?.optin;
       const isOptionalIn = optin !== void 0;
       const isOptionalOut = schema?._zod?.optout === "optional";
@@ -18572,21 +18572,21 @@ function mergeValues(a, b) {
   }
   if (isPlainObject(a) && isPlainObject(b)) {
     const bKeys = Object.keys(b);
-    const sharedKeys = Object.keys(a).filter((key) => bKeys.indexOf(key) !== -1);
+    const sharedKeys = Object.keys(a).filter((key2) => bKeys.indexOf(key2) !== -1);
     const newObj = { ...a, ...b };
     if (Object.prototype.hasOwnProperty.call(newObj, "__proto__"))
       delete newObj.__proto__;
-    for (const key of sharedKeys) {
-      if (key === "__proto__")
+    for (const key2 of sharedKeys) {
+      if (key2 === "__proto__")
         continue;
-      const sharedValue = mergeValues(a[key], b[key]);
+      const sharedValue = mergeValues(a[key2], b[key2]);
       if (!sharedValue.valid) {
         return {
           valid: false,
-          mergeErrorPath: [key, ...sharedValue.mergeErrorPath]
+          mergeErrorPath: [key2, ...sharedValue.mergeErrorPath]
         };
       }
-      newObj[key] = sharedValue.data;
+      newObj[key2] = sharedValue.data;
     }
     return { valid: true, data: newObj };
   }
@@ -18745,9 +18745,9 @@ var $ZodTuple = /* @__PURE__ */ $constructor("$ZodTuple", (inst, def) => {
     return handleTupleResults(itemResults, payload, items, input2, optoutStart);
   };
 });
-function getTupleOptStart(items, key) {
+function getTupleOptStart(items, key2) {
   for (let i = items.length - 1; i >= 0; i--) {
-    const omittable = key === "optin" ? items[i]._zod.optin !== void 0 : items[i]._zod.optout === "optional";
+    const omittable = key2 === "optin" ? items[i]._zod.optin !== void 0 : items[i]._zod.optout === "optional";
     if (!omittable)
       return i + 1;
   }
@@ -18805,12 +18805,12 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
     if (values && !def.partial) {
       payload.value = memo2 ? memo2.alloc(inst, payload, {}, ctx) : {};
       const recordKeys = /* @__PURE__ */ new Set();
-      for (const key of values) {
-        if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
-          recordKeys.add(typeof key === "number" ? key.toString() : key);
-          if (key === "__proto__")
+      for (const key2 of values) {
+        if (typeof key2 === "string" || typeof key2 === "number" || typeof key2 === "symbol") {
+          recordKeys.add(typeof key2 === "number" ? key2.toString() : key2);
+          if (key2 === "__proto__")
             continue;
-          const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+          const keyResult = def.keyType._zod.run({ value: key2, issues: [] }, ctx);
           if (keyResult instanceof Promise) {
             throw new Error("Async schemas not supported in object keys currently");
           }
@@ -18819,8 +18819,8 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
               code: "invalid_key",
               origin: "record",
               issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
-              input: key,
-              path: [key],
+              input: key2,
+              path: [key2],
               inst
             });
             continue;
@@ -18828,32 +18828,32 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
           const outKey = keyResult.value;
           if (outKey === "__proto__")
             continue;
-          const result = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
+          const result = def.valueType._zod.run({ value: input2[key2], issues: [] }, ctx);
           if (result instanceof Promise) {
             proms.push(result.then((result2) => {
               if (result2.issues.length) {
-                payload.issues.push(...prefixIssues(key, result2.issues));
+                payload.issues.push(...prefixIssues(key2, result2.issues));
               }
               payload.value[outKey] = result2.value;
             }));
           } else {
             if (result.issues.length) {
-              payload.issues.push(...prefixIssues(key, result.issues));
+              payload.issues.push(...prefixIssues(key2, result.issues));
             }
             payload.value[outKey] = result.value;
           }
         }
       }
       let unrecognized;
-      for (const key in input2) {
-        if (!recordKeys.has(key)) {
+      for (const key2 in input2) {
+        if (!recordKeys.has(key2)) {
           if (def.mode === "loose") {
-            if (key === "__proto__")
+            if (key2 === "__proto__")
               continue;
-            payload.value[key] = input2[key];
+            payload.value[key2] = input2[key2];
           } else {
             unrecognized = unrecognized ?? [];
-            unrecognized.push(key);
+            unrecognized.push(key2);
           }
         }
       }
@@ -18869,18 +18869,18 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
     } else {
       payload.value = memo2 ? memo2.alloc(inst, payload, {}, ctx) : {};
       let unrecognized;
-      for (const key of Reflect.ownKeys(input2)) {
-        if (key === "__proto__")
+      for (const key2 of Reflect.ownKeys(input2)) {
+        if (key2 === "__proto__")
           continue;
-        if (!Object.prototype.propertyIsEnumerable.call(input2, key))
+        if (!Object.prototype.propertyIsEnumerable.call(input2, key2))
           continue;
-        let keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+        let keyResult = def.keyType._zod.run({ value: key2, issues: [] }, ctx);
         if (keyResult instanceof Promise) {
           throw new Error("Async schemas not supported in object keys currently");
         }
-        const checkNumericKey = typeof key === "string" && number.test(key) && keyResult.issues.length;
+        const checkNumericKey = typeof key2 === "string" && number.test(key2) && keyResult.issues.length;
         if (checkNumericKey) {
-          const retryResult = def.keyType._zod.run({ value: Number(key), issues: [] }, ctx);
+          const retryResult = def.keyType._zod.run({ value: Number(key2), issues: [] }, ctx);
           if (retryResult instanceof Promise) {
             throw new Error("Async schemas not supported in object keys currently");
           }
@@ -18890,17 +18890,17 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
         }
         if (keyResult.issues.length) {
           if (def.mode === "loose") {
-            payload.value[key] = input2[key];
+            payload.value[key2] = input2[key2];
           } else if (values) {
             unrecognized = unrecognized ?? [];
-            unrecognized.push(key);
+            unrecognized.push(key2);
           } else {
             payload.issues.push({
               code: "invalid_key",
               origin: "record",
               issues: keyResult.issues.map((iss) => finalizeIssue(iss, ctx, config())),
-              input: key,
-              path: [key],
+              input: key2,
+              path: [key2],
               inst
             });
           }
@@ -18909,17 +18909,17 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
         const outKey = keyResult.value;
         if (outKey === "__proto__")
           continue;
-        const result = def.valueType._zod.run({ value: input2[key], issues: [] }, ctx);
+        const result = def.valueType._zod.run({ value: input2[key2], issues: [] }, ctx);
         if (result instanceof Promise) {
           proms.push(result.then((result2) => {
             if (result2.issues.length) {
-              payload.issues.push(...prefixIssues(key, result2.issues));
+              payload.issues.push(...prefixIssues(key2, result2.issues));
             }
             payload.value[outKey] = result2.value;
           }));
         } else {
           if (result.issues.length) {
-            payload.issues.push(...prefixIssues(key, result.issues));
+            payload.issues.push(...prefixIssues(key2, result.issues));
           }
           payload.value[outKey] = result.value;
         }
@@ -18959,20 +18959,20 @@ var $ZodMap = /* @__PURE__ */ $constructor("$ZodMap", (inst, def) => {
     payload.value = memo2 ? memo2.alloc(inst, payload, /* @__PURE__ */ new Map(), ctx) : /* @__PURE__ */ new Map();
     const abortEarly = ctx?.abortEarly;
     let seen = payload.issues.length;
-    for (const [key, value] of input2) {
+    for (const [key2, value] of input2) {
       if (abortEarly && payload.issues.length !== seen) {
         if (aborted(payload, seen))
           break;
         seen = payload.issues.length;
       }
-      const keyResult = def.keyType._zod.run({ value: key, issues: [] }, ctx);
+      const keyResult = def.keyType._zod.run({ value: key2, issues: [] }, ctx);
       const valueResult = def.valueType._zod.run({ value, issues: [] }, ctx);
       if (keyResult instanceof Promise || valueResult instanceof Promise) {
         proms.push(Promise.all([keyResult, valueResult]).then(([keyResult2, valueResult2]) => {
-          handleMapResult(keyResult2, valueResult2, payload, key, input2, inst, ctx);
+          handleMapResult(keyResult2, valueResult2, payload, key2, input2, inst, ctx);
         }));
       } else {
-        handleMapResult(keyResult, valueResult, payload, key, input2, inst, ctx);
+        handleMapResult(keyResult, valueResult, payload, key2, input2, inst, ctx);
       }
     }
     if (proms.length)
@@ -18981,10 +18981,10 @@ var $ZodMap = /* @__PURE__ */ $constructor("$ZodMap", (inst, def) => {
   };
   capSize(inst, mapSize);
 });
-function handleMapResult(keyResult, valueResult, final, key, input2, inst, ctx) {
+function handleMapResult(keyResult, valueResult, final, key2, input2, inst, ctx) {
   if (keyResult.issues.length) {
-    if (propertyKeyTypes.has(typeof key)) {
-      final.issues.push(...prefixIssues(key, keyResult.issues));
+    if (propertyKeyTypes.has(typeof key2)) {
+      final.issues.push(...prefixIssues(key2, keyResult.issues));
     } else {
       final.issues.push({
         code: "invalid_key",
@@ -18996,15 +18996,15 @@ function handleMapResult(keyResult, valueResult, final, key, input2, inst, ctx) 
     }
   }
   if (valueResult.issues.length) {
-    if (propertyKeyTypes.has(typeof key)) {
-      final.issues.push(...prefixIssues(key, valueResult.issues));
+    if (propertyKeyTypes.has(typeof key2)) {
+      final.issues.push(...prefixIssues(key2, valueResult.issues));
     } else {
       final.issues.push({
         origin: "map",
         code: "invalid_element",
         input: input2,
         inst,
-        key,
+        key: key2,
         issues: valueResult.issues.map((iss) => finalizeIssue(iss, ctx, config()))
       });
     }
@@ -19679,8 +19679,8 @@ function isRecursive(inst, stack, resolve) {
   };
   const shape = (sh, spread) => {
     let answer = NONE;
-    for (const key of Reflect.ownKeys(sh)) {
-      const desc = Object.getOwnPropertyDescriptor(sh, key);
+    for (const key2 of Reflect.ownKeys(sh)) {
+      const desc = Object.getOwnPropertyDescriptor(sh, key2);
       if (spread && !desc.enumerable)
         continue;
       const child = desc.get ? ASSUMED : desc.value?._zod ? isRecursive(desc.value, stack, resolve) : NONE;
@@ -19776,8 +19776,8 @@ function isRecursive(inst, stack, resolve) {
       break;
     default: {
       kind;
-      for (const key in def) {
-        const desc = Object.getOwnPropertyDescriptor(def, key);
+      for (const key2 in def) {
+        const desc = Object.getOwnPropertyDescriptor(def, key2);
         if (!desc || desc.get)
           continue;
         const value = desc.value;
@@ -27910,11 +27910,11 @@ function generatePropertiesChecks(doc, ctx, def, accessor) {
   }
   doc.write(`if (${accessor} == null) return INVALID;`);
   const shape = def.shape;
-  for (const key of Reflect.ownKeys(shape)) {
-    const keyExpr = typeof key === "symbol" ? addConstant(ctx, key) : esc(key);
+  for (const key2 of Reflect.ownKeys(shape)) {
+    const keyExpr = typeof key2 === "symbol" ? addConstant(ctx, key2) : esc(key2);
     const inputVar = newVar(ctx);
     doc.write(`const ${inputVar} = ${accessor}[${keyExpr}];`);
-    compileChild(doc, ctx, shape[key], inputVar, false);
+    compileChild(doc, ctx, shape[key2], inputVar, false);
   }
 }
 function generatePropertyCheck(doc, ctx, def, accessor) {
@@ -28307,9 +28307,9 @@ function generateObjectCheck(doc, ctx, schema, accessor, buildsValue = true) {
     throw new ZodCompileUnsupportedError('object shape key "__proto__"');
   }
   const propOutputs = /* @__PURE__ */ new Map();
-  for (const key of allKeys) {
-    const propSchema = propShape[key];
-    const kx = keyExpr(key);
+  for (const key2 of allKeys) {
+    const propSchema = propShape[key2];
+    const kx = keyExpr(key2);
     const inputVar = newVar(ctx);
     doc.write(`const ${inputVar} = ${accessor}[${kx}];`);
     if (propSchema._zod.optin !== void 0) {
@@ -28330,14 +28330,14 @@ function generateObjectCheck(doc, ctx, schema, accessor, buildsValue = true) {
       } else {
         doc.write(`if (${outputVar2} === INVALID) return INVALID;`);
       }
-      propOutputs.set(key, outputVar2);
+      propOutputs.set(key2, outputVar2);
     } else {
       if (requiresPresenceCheck(propSchema)) {
         doc.write(`if (!(${kx} in ${accessor})) return INVALID;`);
       }
       const outputAccessor = compileChild(doc, ctx, propSchema, inputVar, buildsValue);
       if (outputAccessor !== null)
-        propOutputs.set(key, outputAccessor);
+        propOutputs.set(key2, outputAccessor);
     }
   }
   const catchall = def.catchall;
@@ -28758,9 +28758,9 @@ function generateTupleCheck(doc, ctx, schema, accessor) {
   }
   return outputVar;
 }
-function getTupleOptStart2(items, key) {
+function getTupleOptStart2(items, key2) {
   for (let i = items.length - 1; i >= 0; i--) {
-    const omittable = key === "optin" ? items[i]._zod.optin !== void 0 : items[i]._zod.optout === "optional";
+    const omittable = key2 === "optin" ? items[i]._zod.optin !== void 0 : items[i]._zod.optout === "optional";
     if (!omittable)
       return i + 1;
   }
@@ -28890,16 +28890,16 @@ function generateRecordCheck(doc, ctx, schema, accessor) {
   const keyValues = recordDef.partial ? void 0 : def.keyType._zod.values;
   if (keyValues) {
     const inputKeys = [];
-    for (const key of keyValues) {
-      if (!(typeof key === "string" || typeof key === "number" || typeof key === "symbol")) {
-        throw new ZodCompileUnsupportedError(`record key value ${String(key)}`);
+    for (const key2 of keyValues) {
+      if (!(typeof key2 === "string" || typeof key2 === "number" || typeof key2 === "symbol")) {
+        throw new ZodCompileUnsupportedError(`record key value ${String(key2)}`);
       }
-      const inputKey = typeof key === "number" ? key.toString() : key;
+      const inputKey = typeof key2 === "number" ? key2.toString() : key2;
       if (inputKey === "__proto__") {
         throw new ZodCompileUnsupportedError('record key "__proto__"');
       }
       inputKeys.push(inputKey);
-      const keyConst = addConstant(ctx, key);
+      const keyConst = addConstant(ctx, key2);
       const outKey = generateCheck(doc, ctx, def.keyType, keyConst);
       const valueVar = newVar(ctx);
       doc.write(`const ${valueVar} = ${accessor}[${literalPropertyKey(ctx, inputKey)}];`);
@@ -28977,10 +28977,10 @@ function emitOwnKeys(doc, ctx, accessor, kVar, body, onSymbol) {
   });
   doc.write(`}`);
 }
-function literalPropertyKey(ctx, key) {
-  if (typeof key === "string")
-    return esc(key);
-  return addConstant(ctx, key);
+function literalPropertyKey(ctx, key2) {
+  if (typeof key2 === "string")
+    return esc(key2);
+  return addConstant(ctx, key2);
 }
 function generateMapCheck(doc, ctx, schema, accessor) {
   const def = schema._zod.def;
@@ -30209,9 +30209,9 @@ function _stringFormat(Class2, format, fnOrRegex, _params = {}) {
 // node_modules/zod/v4/core/to-json-schema.js
 function assignProps(target, ...sources) {
   for (const source of sources) {
-    for (const key of Reflect.ownKeys(source)) {
-      if (Object.prototype.propertyIsEnumerable.call(source, key)) {
-        assignProp(target, key, source[key]);
+    for (const key2 of Reflect.ownKeys(source)) {
+      if (Object.prototype.propertyIsEnumerable.call(source, key2)) {
+        assignProp(target, key2, source[key2]);
       }
     }
   }
@@ -30357,8 +30357,8 @@ function extractDefs(ctx, schema) {
     if (defId)
       seen.defId = defId;
     const schema2 = seen.schema;
-    for (const key in schema2) {
-      delete schema2[key];
+    for (const key2 in schema2) {
+      delete schema2[key2];
     }
     schema2.$ref = ref;
   };
@@ -30439,8 +30439,8 @@ function foldObjects(members2) {
   for (const member of members2) {
     if (typeof member !== "object" || member.type !== "object")
       return null;
-    for (const key in member) {
-      if (!FOLDABLE_KEYS.has(key))
+    for (const key2 in member) {
+      if (!FOLDABLE_KEYS.has(key2))
         return null;
     }
     objects.push(member);
@@ -30448,22 +30448,22 @@ function foldObjects(members2) {
   const properties = {};
   const required2 = /* @__PURE__ */ new Set();
   for (const object3 of objects) {
-    for (const key in object3.properties) {
-      if (Object.prototype.hasOwnProperty.call(properties, key))
+    for (const key2 in object3.properties) {
+      if (Object.prototype.hasOwnProperty.call(properties, key2))
         continue;
       const parts = [];
       for (const other of objects) {
-        const part = other.properties?.[key] ?? undeclaredConstraint(other);
+        const part = other.properties?.[key2] ?? undeclaredConstraint(other);
         if (part === null || part === void 0)
           continue;
         if (!parts.some((seen) => JSON.stringify(seen) === JSON.stringify(part)))
           parts.push(part);
       }
       const merged = parts.length === 1 ? parts[0] : foldObjects(parts) ?? { allOf: parts };
-      assignProp(properties, key, merged);
+      assignProp(properties, key2, merged);
     }
-    for (const key of object3.required ?? [])
-      required2.add(key);
+    for (const key2 of object3.required ?? [])
+      required2.add(key2);
   }
   const folded = { type: "object", properties };
   if (required2.size)
@@ -30488,8 +30488,8 @@ function foldIntersection(json2) {
   const allOf = json2.allOf;
   if (!Array.isArray(allOf) || allOf.length < 2)
     return;
-  for (const key of FOLDABLE_KEYS)
-    if (key in json2)
+  for (const key2 of FOLDABLE_KEYS)
+    if (key2 in json2)
       return;
   const unions = allOf.filter((m) => UNION_KEYS.some((k) => Array.isArray(m[k])));
   let folded = null;
@@ -30536,20 +30536,20 @@ function finalize(ctx, schema) {
       assignProps(schema2, _cached);
       const isParentRef = zodSchema._zod.parent === ref;
       if (isParentRef) {
-        for (const key in schema2) {
-          if (key === "$ref" || key === "allOf")
+        for (const key2 in schema2) {
+          if (key2 === "$ref" || key2 === "allOf")
             continue;
-          if (!(key in _cached)) {
-            delete schema2[key];
+          if (!(key2 in _cached)) {
+            delete schema2[key2];
           }
         }
       }
       if (refSchema.$ref && refSeen.def) {
-        for (const key in schema2) {
-          if (key === "$ref" || key === "allOf")
+        for (const key2 in schema2) {
+          if (key2 === "$ref" || key2 === "allOf")
             continue;
-          if (key in refSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(refSeen.def[key])) {
-            delete schema2[key];
+          if (key2 in refSeen.def && JSON.stringify(schema2[key2]) === JSON.stringify(refSeen.def[key2])) {
+            delete schema2[key2];
           }
         }
       }
@@ -30561,11 +30561,11 @@ function finalize(ctx, schema) {
       if (parentSeen?.schema.$ref) {
         schema2.$ref = parentSeen.schema.$ref;
         if (parentSeen.def) {
-          for (const key in schema2) {
-            if (key === "$ref" || key === "allOf")
+          for (const key2 in schema2) {
+            if (key2 === "$ref" || key2 === "allOf")
               continue;
-            if (key in parentSeen.def && JSON.stringify(schema2[key]) === JSON.stringify(parentSeen.def[key])) {
-              delete schema2[key];
+            if (key2 in parentSeen.def && JSON.stringify(schema2[key2]) === JSON.stringify(parentSeen.def[key2])) {
+              delete schema2[key2];
             }
           }
         }
@@ -30698,8 +30698,8 @@ function isTransforming(_schema, _ctx) {
     return isTransforming(def.in, ctx) || isTransforming(def.out, ctx);
   }
   if (def.type === "object") {
-    for (const key in def.shape) {
-      if (isTransforming(def.shape[key], ctx))
+    for (const key2 in def.shape) {
+      if (isTransforming(def.shape[key2], ctx))
         return true;
     }
     return false;
@@ -30737,13 +30737,13 @@ var createStandardJSONSchemaMethod = (schema, io, processors = {}) => (params) =
 };
 
 // node_modules/zod/v4/core/json-schema-processors.js
-var narrowMin = (agg, key, value) => {
-  if (agg[key] === void 0 || value > agg[key])
-    agg[key] = value;
+var narrowMin = (agg, key2, value) => {
+  if (agg[key2] === void 0 || value > agg[key2])
+    agg[key2] = value;
 };
-var narrowMax = (agg, key, value) => {
-  if (agg[key] === void 0 || value < agg[key])
-    agg[key] = value;
+var narrowMax = (agg, key2, value) => {
+  if (agg[key2] === void 0 || value < agg[key2])
+    agg[key2] = value;
 };
 var narrowBoth = (agg, value) => {
   narrowMin(agg, "minimum", value);
@@ -31081,17 +31081,17 @@ var objectProcessor = (schema, ctx, _json, params) => {
   }
   json2.type = "object";
   json2.properties = {};
-  for (const key in shape) {
-    assignProp(json2.properties, key, processSchema(shape[key], ctx, {
+  for (const key2 in shape) {
+    assignProp(json2.properties, key2, processSchema(shape[key2], ctx, {
       ...params,
-      path: [...params.path, "properties", key]
+      path: [...params.path, "properties", key2]
     }));
   }
   const requiredKeys = [];
-  for (const key of Object.keys(shape)) {
-    const field = def.shape[key];
+  for (const key2 of Object.keys(shape)) {
+    const field = def.shape[key2];
     if (ctx.io === "input" ? inputOptin(field) === void 0 : field._zod.optout === void 0) {
-      requiredKeys.push(key);
+      requiredKeys.push(key2);
     }
   }
   if (requiredKeys.length > 0) {
@@ -31466,9 +31466,9 @@ function toJSONSchema(input2, params) {
     };
     ctx2.external = external;
     for (const entry of registry2._idmap.entries()) {
-      const [key, schema] = entry;
+      const [key2, schema] = entry;
       extractDefs(ctx2, schema);
-      assignProp(schemas, key, finalize(ctx2, schema));
+      assignProp(schemas, key2, finalize(ctx2, schema));
     }
     if (Object.keys(defs).length > 0) {
       const defsSegment = ctx2.target === "draft-2020-12" ? "$defs" : "definitions";
@@ -31783,17 +31783,17 @@ __export(checks_exports2, {
 
 // node_modules/zod/v4/classic/errors.js
 var _installedErrorProtos = /* @__PURE__ */ new WeakSet([Object.prototype, Error.prototype]);
-function _lazyMethod(proto, key, make) {
-  Object.defineProperty(proto, key, {
+function _lazyMethod(proto, key2, make) {
+  Object.defineProperty(proto, key2, {
     configurable: true,
     enumerable: false,
     get() {
       const value = make(this);
-      Object.defineProperty(this, key, { value, configurable: true, writable: true });
+      Object.defineProperty(this, key2, { value, configurable: true, writable: true });
       return value;
     },
     set(value) {
-      Object.defineProperty(this, key, { value, configurable: true, writable: true });
+      Object.defineProperty(this, key2, { value, configurable: true, writable: true });
     }
   });
 }
@@ -33457,17 +33457,17 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
-    if (!key || !ctx.defs[key]) {
+  if (path7[0] === defsKey) {
+    const key2 = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
+    if (!key2 || !ctx.defs[key2]) {
       throw new Error(`Reference not found: ${ref}`);
     }
-    return ctx.defs[key];
+    return ctx.defs[key2];
   }
   throw new Error(`Reference not found: ${ref}`);
 }
@@ -33502,16 +33502,16 @@ function checkObjectGuards(objectSchema, guards) {
       });
     }
     if (guards.keySchema) {
-      for (const key of keys) {
-        const result = guards.keySchema.safeParse(key);
+      for (const key2 of keys) {
+        const result = guards.keySchema.safeParse(key2);
         if (result.success)
           continue;
         payload.issues.push({
           code: "invalid_key",
           origin: "record",
           issues: result.error.issues,
-          input: key,
-          path: [key],
+          input: key2,
+          path: [key2],
           continue: true
         });
       }
@@ -33536,20 +33536,20 @@ function canonicalKey(value, seen) {
     if (Array.isArray(value)) {
       const parts2 = [];
       for (const item of value) {
-        const key = canonicalKey(item, seen);
-        if (key === null)
+        const key2 = canonicalKey(item, seen);
+        if (key2 === null)
           return null;
-        parts2.push(key);
+        parts2.push(key2);
       }
       return `a${parts2.length}:[${parts2.join(",")}]`;
     }
     const keys = Object.keys(value).sort();
     const parts = [];
     for (const k of keys) {
-      const key = canonicalKey(value[k], seen);
-      if (key === null)
+      const key2 = canonicalKey(value[k], seen);
+      if (key2 === null)
         return null;
-      parts.push(`${k.length}:${k}=${key}`);
+      parts.push(`${k.length}:${k}=${key2}`);
     }
     return `o${parts.length}:{${parts.join(",")}}`;
   } finally {
@@ -33589,10 +33589,10 @@ function containsRef(value) {
     return value.some(containsRef);
   if (typeof value.$ref === "string")
     return true;
-  return Object.entries(value).some(([key, sub]) => {
-    if (SCHEMA_KEYWORDS.has(key))
+  return Object.entries(value).some(([key2, sub]) => {
+    if (SCHEMA_KEYWORDS.has(key2))
       return containsRef(sub);
-    if (!SCHEMA_MAP_KEYWORDS.has(key) || typeof sub !== "object" || sub === null)
+    if (!SCHEMA_MAP_KEYWORDS.has(key2) || typeof sub !== "object" || sub === null)
       return false;
     return Object.values(sub).some(containsRef);
   });
@@ -33608,12 +33608,12 @@ function checkArrayGuards(arraySchema, guards) {
     if (guards.uniqueItems === true) {
       const firstSeen = /* @__PURE__ */ new Map();
       for (let i = 0; i < items.length; i++) {
-        const key = canonicalKey(items[i], /* @__PURE__ */ new Set());
-        if (key === null)
+        const key2 = canonicalKey(items[i], /* @__PURE__ */ new Set());
+        if (key2 === null)
           continue;
-        const first = firstSeen.get(key);
+        const first = firstSeen.get(key2);
         if (first === void 0) {
-          firstSeen.set(key, i);
+          firstSeen.set(key2, i);
           continue;
         }
         payload.issues.push({
@@ -33852,9 +33852,9 @@ function convertBaseSchema(schema, ctx) {
       const properties = schema.properties || {};
       const requiredSet = new Set(schema.required || []);
       const additionalSchema = typeof schema.additionalProperties === "object" ? convertSchema(schema.additionalProperties, ctx) : void 0;
-      for (const [key, propSchema] of Object.entries(properties)) {
+      for (const [key2, propSchema] of Object.entries(properties)) {
         const propZodSchema = convertSchema(propSchema, ctx);
-        assignProp(shape, key, requiredSet.has(key) ? propZodSchema : propZodSchema.optional());
+        assignProp(shape, key2, requiredSet.has(key2) ? propZodSchema : propZodSchema.optional());
       }
       if (schema.patternProperties) {
         const patternProps = schema.patternProperties;
@@ -33889,12 +33889,12 @@ function convertBaseSchema(schema, ctx) {
             if (!isPlainObject(payload.value))
               return;
             const unrecognized = [];
-            for (const key of Object.keys(payload.value)) {
-              if (propertyKeys.includes(key))
+            for (const key2 of Object.keys(payload.value)) {
+              if (propertyKeys.includes(key2))
                 continue;
-              if (patterns.some((regex) => regex.test(key)))
+              if (patterns.some((regex) => regex.test(key2)))
                 continue;
-              unrecognized.push(key);
+              unrecognized.push(key2);
             }
             if (unrecognized.length) {
               payload.issues.push({
@@ -34025,38 +34025,38 @@ function convertSchema(schema, ctx) {
   }
   const extraMeta = {};
   const coreMetadataKeys = ["$id", "id", "$comment", "$anchor", "$vocabulary", "$dynamicRef", "$dynamicAnchor"];
-  for (const key of coreMetadataKeys) {
-    if (key in schema) {
-      extraMeta[key] = schema[key];
+  for (const key2 of coreMetadataKeys) {
+    if (key2 in schema) {
+      extraMeta[key2] = schema[key2];
     }
   }
   const contentMetadataKeys = ["contentEncoding", "contentMediaType", "contentSchema"];
-  for (const key of contentMetadataKeys) {
-    if (key in schema) {
-      extraMeta[key] = schema[key];
+  for (const key2 of contentMetadataKeys) {
+    if (key2 in schema) {
+      extraMeta[key2] = schema[key2];
     }
   }
   if (schema.type === "object" && schema.$ref === void 0) {
     if (schema.propertyNames !== void 0 && !containsRef(schema.propertyNames)) {
       extraMeta.propertyNames = schema.propertyNames;
     }
-    for (const key of ["minProperties", "maxProperties"]) {
-      if (schema[key] !== void 0)
-        extraMeta[key] = schema[key];
+    for (const key2 of ["minProperties", "maxProperties"]) {
+      if (schema[key2] !== void 0)
+        extraMeta[key2] = schema[key2];
     }
   }
   if (schema.type === "array" && schema.$ref === void 0) {
     if (schema.contains !== void 0 && !containsRef(schema.contains)) {
       extraMeta.contains = schema.contains;
     }
-    for (const key of ["uniqueItems", "minContains", "maxContains"]) {
-      if (schema[key] !== void 0)
-        extraMeta[key] = schema[key];
+    for (const key2 of ["uniqueItems", "minContains", "maxContains"]) {
+      if (schema[key2] !== void 0)
+        extraMeta[key2] = schema[key2];
     }
   }
-  for (const key of Object.keys(schema)) {
-    if (!RECOGNIZED_KEYS.has(key)) {
-      assignProp(extraMeta, key, schema[key]);
+  for (const key2 of Object.keys(schema)) {
+    if (!RECOGNIZED_KEYS.has(key2)) {
+      assignProp(extraMeta, key2, schema[key2]);
     }
   }
   if (Object.keys(extraMeta).length > 0) {
@@ -35986,6 +35986,14 @@ var Kernel = class {
   prerequisites(host) {
     return this.driver(host).prerequisites;
   }
+  /** Undefined when the driver of the host cannot list its models. */
+  listModels(host) {
+    return this.driver(host).listModels;
+  }
+  /** Undefined when the driver of the host cannot check a model. */
+  checkModel(host) {
+    return this.driver(host).checkModel;
+  }
   driver(host) {
     const driver = this.drivers.get(host);
     if (driver === void 0) throw new UnsupportedHostError(host, this.supportedHosts());
@@ -35994,11 +36002,359 @@ var Kernel = class {
 };
 
 // src/pi/driver.ts
-var import_yaml = __toESM(require_dist(), 1);
+var import_yaml2 = __toESM(require_dist(), 1);
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync as existsSync2, readFileSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
 import { homedir } from "node:os";
-import path2 from "node:path";
+import path3 from "node:path";
+
+// src/config/agent-config.ts
+var import_yaml = __toESM(require_dist(), 1);
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+var AGENT_FILE = path.join(".agents", "subzero.yaml");
+var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+var DEFAULT_TIER = "medium";
+var GENERAL_AGENT = "general";
+var FALLBACK_AGENT = "fallback";
+var RUN_INIT = "; run /subzero:init in Claude Code or /subzero init in pi";
+var LoadError = class extends Error {
+  code = "load_error";
+  constructor(message) {
+    super(message);
+    this.name = "LoadError";
+  }
+};
+var MissingAgentFileError = class extends LoadError {
+  constructor(agentFile) {
+    super(`agent file is missing: ${agentFile}${RUN_INIT}`);
+    this.name = "MissingAgentFileError";
+  }
+};
+var MissingDefaultTierError = class extends LoadError {
+  constructor() {
+    super(`the medium tier is required in models.tiers${RUN_INIT}`);
+    this.name = "MissingDefaultTierError";
+  }
+};
+var UnknownAgentError = class extends Error {
+  constructor(agent, configured) {
+    const list = configured.length > 0 ? configured.join(", ") : "(none)";
+    super(
+      agent === void 0 ? `no agent was named and no general agent is configured; configured agents: ${list}` : `unknown agent "${agent}"; configured agents: ${list}`
+    );
+    this.agent = agent;
+    this.configured = configured;
+    this.name = "UnknownAgentError";
+  }
+  agent;
+  configured;
+  code = "unknown_agent";
+};
+var TierError = class extends Error {
+  constructor(tier, configured, host, supportedHosts) {
+    const list = configured.length > 0 ? configured.join(", ") : "(none)";
+    super(
+      host === void 0 ? `unknown tier "${tier}"; configured tiers: ${list}` : `tier "${tier}" runs on the host "${host}", which has no registered child driver; supported hosts: ${(supportedHosts ?? []).length === 0 ? "(none)" : supportedHosts.join(", ")}; configured tiers: ${list}`
+    );
+    this.tier = tier;
+    this.configured = configured;
+    this.host = host;
+    this.supportedHosts = supportedHosts;
+    this.name = "TierError";
+  }
+  tier;
+  configured;
+  host;
+  supportedHosts;
+  code = "unknown_tier";
+};
+var UnresolvedRootError = class extends Error {
+  code = "unresolved_root";
+  constructor(detail) {
+    super(
+      `subzero could not resolve the project root${detail ? ` (${detail})` : ""}. Set SUBZERO_PROJECT_DIR to the absolute path of the project.`
+    );
+    this.name = "UnresolvedRootError";
+  }
+};
+function modelEndpoint(model) {
+  const slash = model.indexOf("/");
+  return slash === -1 ? model : model.slice(0, slash);
+}
+var TIER_KEYS = ["host", "model", "thinking"];
+var AGENT_KEYS = ["description", "skills", "tools", "timeout", "tier", "tiers"];
+var ROUTING_KEYS = ["hook", "generic_agents"];
+var agentSchema = external_exports.object({
+  description: external_exports.string().min(1, "needs a description").optional(),
+  skills: external_exports.array(external_exports.string().min(1)).default([]),
+  tools: external_exports.array(external_exports.string().min(1)).min(1, "needs at least one tool"),
+  timeout: external_exports.number().positive(),
+  tier: external_exports.string().min(1).optional()
+});
+var tierFieldSchemas = {
+  host: external_exports.string().min(1, "must be a non-empty string"),
+  model: external_exports.string().min(1, "must be a non-empty string"),
+  thinking: external_exports.enum(THINKING_LEVELS)
+};
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function loadAgentFile(projectRoot) {
+  const agentFile = path.join(projectRoot, AGENT_FILE);
+  return parseCatalog(readAgentText(agentFile), agentFile);
+}
+function readAgentText(agentFile) {
+  try {
+    return readFileSync(agentFile, "utf8");
+  } catch (err) {
+    const code = err.code;
+    if (code === "ENOENT") throw new MissingAgentFileError(agentFile);
+    throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
+  }
+}
+function parseCatalog(text2, agentFile, options = {}) {
+  const allowMissingStarter = options.allowMissingStarter === true;
+  const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
+  let parsed;
+  try {
+    parsed = (0, import_yaml.parse)(text2);
+  } catch (err) {
+    throw malformed(err.message);
+  }
+  const doc = parsed === null ? {} : parsed;
+  if (!isRecord(doc)) throw malformed("expected a map");
+  const agentsMap = doc.agents ?? {};
+  if (!isRecord(agentsMap)) throw malformed('expected an "agents" map');
+  const skillsMap = doc.skills ?? {};
+  const endpointsMap = doc.endpoints ?? {};
+  if (!isRecord(skillsMap)) throw malformed('"skills" must be a map');
+  if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
+  if (doc.models !== void 0 && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
+  const modelsMap = doc.models ?? {};
+  if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
+  const baseDir = path.dirname(agentFile);
+  const skillFolders = /* @__PURE__ */ new Map();
+  for (const [name, value] of Object.entries(skillsMap)) {
+    if (typeof value !== "string" || value.length === 0) {
+      throw new LoadError(`skill "${name}" must map to a folder path`);
+    }
+    skillFolders.set(name, path.resolve(baseDir, value));
+  }
+  const limits = /* @__PURE__ */ new Map();
+  for (const [endpoint, entry] of Object.entries(endpointsMap)) {
+    const parallel = isRecord(entry) ? entry.parallel : void 0;
+    if (typeof parallel !== "number" || !Number.isInteger(parallel) || parallel < 1) {
+      throw new LoadError(`endpoint "${endpoint}": parallel must be a positive whole number`);
+    }
+    limits.set(endpoint, parallel);
+  }
+  const tiers = /* @__PURE__ */ new Map();
+  for (const [name, raw] of Object.entries(modelsMap.tiers ?? {})) {
+    tiers.set(name, validateTier(name, raw));
+  }
+  const entries = /* @__PURE__ */ new Map();
+  for (const [name, raw] of Object.entries(agentsMap)) {
+    entries.set(name, validateAgent(name, raw, skillFolders, tiers));
+  }
+  const routing = validateRouting(doc.routing);
+  const used = /* @__PURE__ */ new Set();
+  for (const tier of tiers.values()) used.add(modelEndpoint(tier.model));
+  for (const entry of entries.values()) {
+    for (const override of entry.overrides.values()) {
+      if (override.model !== void 0) used.add(modelEndpoint(override.model));
+    }
+  }
+  for (const endpoint of limits.keys()) {
+    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
+      throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
+    }
+  }
+  if (!allowMissingStarter) {
+    if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+  }
+  return { agentFile, entries, tiers, routing, limits };
+}
+function validateTier(name, raw) {
+  if (!isRecord(raw)) throw new LoadError(`tier "${name}": must be a map of host, model and thinking`);
+  for (const key2 of TIER_KEYS) {
+    if (raw[key2] === void 0 || raw[key2] === null || raw[key2] === "") {
+      throw new LoadError(`tier "${name}": ${key2} is required`);
+    }
+  }
+  for (const key2 of Object.keys(raw)) {
+    if (!TIER_KEYS.includes(key2)) throw new LoadError(`tier "${name}": unknown key "${key2}"`);
+  }
+  return {
+    host: checkField(`tier "${name}"`, "host", raw.host),
+    model: checkField(`tier "${name}"`, "model", raw.model),
+    thinking: checkField(`tier "${name}"`, "thinking", raw.thinking)
+  };
+}
+function checkField(label, key2, value) {
+  const parsed = tierFieldSchemas[key2].safeParse(value);
+  if (!parsed.success) throw new LoadError(`${label}: ${key2}: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  return parsed.data;
+}
+function agentLabel(name) {
+  return name === GENERAL_AGENT || name === FALLBACK_AGENT ? name : `agent "${name}"`;
+}
+function validateAgent(name, raw, skillFolders, tiers) {
+  const label = agentLabel(name);
+  const reserved = name === GENERAL_AGENT || name === FALLBACK_AGENT;
+  if (!isRecord(raw)) throw new LoadError(`${label}: must be a map`);
+  for (const key2 of TIER_KEYS) {
+    if (raw[key2] !== void 0) {
+      throw new LoadError(`${label}: ${key2} cannot be set on an agent; host, model and thinking belong to a tier in models.tiers`);
+    }
+  }
+  for (const key2 of Object.keys(raw)) {
+    if (!AGENT_KEYS.includes(key2)) throw new LoadError(`${label}: unknown key "${key2}"`);
+  }
+  if (reserved && raw.description !== void 0) {
+    throw new LoadError(`${label}: a description is not allowed; ${name} is never chosen by its description`);
+  }
+  if (!reserved && (raw.description === void 0 || raw.description === null || raw.description === "")) {
+    throw new LoadError(`${label}: description is required`);
+  }
+  if (raw.timeout === void 0 || raw.timeout === null) {
+    throw new LoadError(`${label}: timeout is required (seconds)`);
+  }
+  if (typeof raw.timeout !== "number" || !(raw.timeout > 0)) {
+    throw new LoadError(`${label}: timeout must be a positive number of seconds`);
+  }
+  const parsed = agentSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue2 = parsed.error.issues[0];
+    const where = issue2?.path.join(".") || "entry";
+    throw new LoadError(`${label}: ${where}: ${issue2?.message ?? "invalid"}`);
+  }
+  const def = parsed.data;
+  if (def.tier !== void 0 && !tiers.has(def.tier)) {
+    throw new LoadError(`${label}: tier "${def.tier}" is not configured in models.tiers`);
+  }
+  const overrides = /* @__PURE__ */ new Map();
+  if (raw.tiers !== void 0) {
+    if (!isRecord(raw.tiers)) throw new LoadError(`${label}: tiers must be a map of tier name to overrides`);
+    for (const [tier, override] of Object.entries(raw.tiers)) {
+      const where = `${label}: tiers.${tier}`;
+      if (!tiers.has(tier)) throw new LoadError(`${where}: tier "${tier}" is not configured in models.tiers`);
+      if (!isRecord(override)) throw new LoadError(`${where}: must be a map of host, model and thinking`);
+      const fields = {};
+      for (const [key2, value] of Object.entries(override)) {
+        if (!TIER_KEYS.includes(key2)) {
+          throw new LoadError(`${where}: ${key2} cannot be overridden; only host, model and thinking can`);
+        }
+        fields[key2] = checkField(where, key2, value);
+      }
+      overrides.set(tier, fields);
+    }
+  }
+  const skills = def.skills.map((skill) => {
+    const folder = skillFolders.get(skill);
+    if (folder === void 0) {
+      throw new LoadError(`${label}: skill "${skill}" is not in the skills map`);
+    }
+    return { name: skill, folder };
+  });
+  return {
+    name,
+    ...def.description !== void 0 ? { description: def.description } : {},
+    skills,
+    tools: def.tools,
+    timeout: def.timeout,
+    ...def.tier !== void 0 ? { tier: def.tier } : {},
+    overrides
+  };
+}
+function validateRouting(raw) {
+  if (raw === void 0 || raw === null) return { hook: true };
+  if (!isRecord(raw)) throw new LoadError("routing: must be a map");
+  for (const key2 of Object.keys(raw)) {
+    if (!ROUTING_KEYS.includes(key2)) throw new LoadError(`routing: unknown key "${key2}"`);
+  }
+  if (raw.hook !== void 0 && typeof raw.hook !== "boolean") throw new LoadError("routing: hook must be true or false");
+  const list = raw.generic_agents;
+  if (list !== void 0 && !(Array.isArray(list) && list.every((v) => typeof v === "string" && v !== ""))) {
+    throw new LoadError("routing: generic_agents must be a list of agent type names");
+  }
+  return { hook: raw.hook !== false, genericAgents: list };
+}
+function resolveAgent(catalog, name, options = {}) {
+  const entryName = name ?? GENERAL_AGENT;
+  const entry = catalog.entries.get(entryName);
+  if (entry === void 0) throw new UnknownAgentError(name, [...catalog.entries.keys()]);
+  const tierName = options.tier ?? entry.tier ?? DEFAULT_TIER;
+  const configured = [...catalog.tiers.keys()];
+  const base = catalog.tiers.get(tierName);
+  if (base === void 0) throw new TierError(tierName, configured);
+  const resolved = { ...base, ...entry.overrides.get(tierName) };
+  const supported = options.supportedHosts;
+  if (supported !== void 0 && !supported.includes(resolved.host)) {
+    throw new TierError(tierName, configured, resolved.host, supported);
+  }
+  const endpoint = modelEndpoint(resolved.model);
+  return {
+    name: options.tier !== void 0 ? `${entryName}:${options.tier}` : entryName,
+    ...entry.description !== void 0 ? { description: entry.description } : {},
+    host: resolved.host,
+    model: resolved.model,
+    thinking: resolved.thinking,
+    skills: entry.skills,
+    tools: entry.tools,
+    timeout: entry.timeout,
+    endpoint,
+    parallel: catalog.limits.get(endpoint) ?? null
+  };
+}
+function configuredTierNames(projectRoot) {
+  return [...loadAgentFile(projectRoot).tiers.keys()];
+}
+function routableTiers(projectRoot, supportedHosts) {
+  const catalog = loadAgentFile(projectRoot);
+  const general = catalog.entries.get(GENERAL_AGENT);
+  if (general === void 0) return [];
+  const out = [];
+  for (const [tier, base] of catalog.tiers) {
+    const resolved = { ...base, ...general.overrides.get(tier) };
+    if (supportedHosts === void 0 || supportedHosts.includes(resolved.host)) out.push({ tier, ...resolved });
+  }
+  return out;
+}
+async function resolveProjectRoot(sources) {
+  const fromEnv = sources.env?.SUBZERO_PROJECT_DIR;
+  if (fromEnv !== void 0 && fromEnv !== "") {
+    return canonicalDir(fromEnv, "SUBZERO_PROJECT_DIR");
+  }
+  if (sources.roots) {
+    let reported = [];
+    try {
+      reported = await sources.roots();
+    } catch {
+      reported = [];
+    }
+    const first = reported[0];
+    if (first !== void 0) {
+      const dir = first.startsWith("file:") ? fileURLToPath(first) : first;
+      return canonicalDir(dir, "the first root reported by the parent");
+    }
+  }
+  if (sources.cwd !== void 0) return canonicalDir(sources.cwd, "the working directory");
+  return new UnresolvedRootError("SUBZERO_PROJECT_DIR is unset and the parent reported no root");
+}
+function canonicalDir(dir, source) {
+  if (!path.isAbsolute(dir)) return new UnresolvedRootError(`${source} is not absolute: ${dir}`);
+  try {
+    const real = realpathSync(dir);
+    if (!statSync(real).isDirectory()) return new UnresolvedRootError(`${source} is not a directory: ${dir}`);
+    return real;
+  } catch {
+    return new UnresolvedRootError(`${source} does not exist: ${dir}`);
+  }
+}
 
 // src/core/types.ts
 var ENDED_STATES = /* @__PURE__ */ new Set(["Settled", "Failed", "Cancelled"]);
@@ -36022,7 +36378,7 @@ function unavailableUsage(reason) {
 
 // src/pi/launch.ts
 var CHILD_ENV = { PI_OFFLINE: "1", PI_TELEMETRY: "0" };
-function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
+function childRpcArgs() {
   return [
     "--mode",
     "rpc",
@@ -36032,7 +36388,12 @@ function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
     "-nc",
     "-np",
     "--no-themes",
-    "-ns",
+    "-ns"
+  ];
+}
+function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
+  return [
+    ...childRpcArgs(),
     ...overlaySkills.flatMap((folder) => ["--skill", folder]),
     "--model",
     agent.model,
@@ -36069,15 +36430,15 @@ function attachCommand(spec) {
 }
 
 // src/pi/overlay.ts
-import { cpSync, existsSync, statSync } from "node:fs";
-import path from "node:path";
+import { cpSync, existsSync, statSync as statSync2 } from "node:fs";
+import path2 from "node:path";
 function overlayFolder(driverFilesFolder) {
-  return path.join(driverFilesFolder, "skills");
+  return path2.join(driverFilesFolder, "skills");
 }
 function missingSkills(skills) {
   return skills.filter((skill) => {
     try {
-      return !statSync(skill.folder).isDirectory();
+      return !statSync2(skill.folder).isDirectory();
     } catch {
       return true;
     }
@@ -36086,7 +36447,7 @@ function missingSkills(skills) {
 function prepareOverlay(driverFilesFolder, skills) {
   const root = overlayFolder(driverFilesFolder);
   return skills.map((skill) => {
-    const target = path.join(root, skill.name);
+    const target = path2.join(root, skill.name);
     if (!existsSync(target)) cpSync(skill.folder, target, { recursive: true, dereference: true });
     return target;
   });
@@ -36202,6 +36563,11 @@ var PiRpcClient = class {
 var PI_HOST = "pi";
 var MESSAGE_LIMIT = 300;
 var STDERR_TAIL_LIMIT = 4e3;
+var LIST_TIMEOUT_MS = 3e4;
+var CHECK_TIMEOUT_MS = 12e4;
+var CHECK_PROMPT = "Reply with the single word: ok";
+var UNKNOWN_MODEL = /model\b.*\bnot found/i;
+var NO_MODELS = "pi offers no models that subzero children can use. Set up a pi provider (log in, set its API key, or add it to pi's models.json; a provider that only a pi extension adds does not reach children), then try again.";
 var QUIET_EVENTS = /* @__PURE__ */ new Set([
   "agent_start",
   "agent_end",
@@ -36227,6 +36593,7 @@ var PiDriver = class {
   options;
   version;
   live = /* @__PURE__ */ new Set();
+  probes = /* @__PURE__ */ new Set();
   /** The child port of this driver, which Kernel hands to a caller. */
   port = { start: (request, onEvent) => this.start(request, onEvent) };
   /** Reopens the child session in the pi terminal interface. */
@@ -36272,6 +36639,109 @@ var PiDriver = class {
     }
     return void 0;
   };
+  /**
+   * The models a child can use: pi's get_available_models, asked with the
+   * children's environment, isolation flags and pi command, so that a provider
+   * children cannot reach is not listed. Rejects with a one-line reason; zero
+   * models is an error that points to pi provider setup.
+   */
+  listModels = async (options = {}) => {
+    const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
+    const probe = this.probe([...childRpcArgs(), "--no-session"], options.projectRoot, { strict: true });
+    const timer = deadline(timeoutMs);
+    try {
+      const answer = await Promise.race([
+        probe.client.send({ type: "get_available_models" }).then(
+          (response) => response,
+          () => "gone"
+        ),
+        probe.gone.then(() => "gone"),
+        timer.promise
+      ]);
+      if (answer === "timeout") {
+        probe.mustKill = true;
+        throw new Error(`pi did not list its models within ${seconds(timeoutMs)}`);
+      }
+      if (answer === "gone") throw new Error(await probe.whyGone("it listed its models"));
+      if (!answer.success) throw new Error(bounded(`pi refused to list its models: ${answer.error ?? "no reason given"}`));
+      return hostModels(answer.data);
+    } finally {
+      timer.clear();
+      await this.endProbe(probe);
+    }
+  };
+  /**
+   * Sends one fixed prompt to a model in a one-turn pi run with the children's
+   * flags, the model and thinking level, no tools and no saved session. Answered,
+   * or failed with a kind and a one-line reason; aborting kills pi.
+   */
+  checkModel = async (request) => {
+    const { model, thinking, projectRoot, signal } = request;
+    if (signal?.aborted) return checkFailed("cancelled", "the check was cancelled");
+    const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
+    let lastAssistant = null;
+    let markSettled;
+    const settled = new Promise((resolve) => markSettled = () => resolve("settled"));
+    const probe = this.probe(
+      [...childRpcArgs(), "--model", model, "--thinking", thinking, "--no-tools", "--no-session"],
+      projectRoot,
+      {
+        strict: false,
+        onEvent: (event) => {
+          if (event.type === "message_end" && event.message?.role === "assistant") lastAssistant = event.message;
+          if (event.type === "agent_settled") markSettled();
+        }
+      }
+    );
+    const timer = deadline(timeoutMs);
+    let onAbort = () => {
+    };
+    const aborted2 = new Promise((resolve) => {
+      onAbort = () => resolve("cancelled");
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    const ended = Promise.race([timer.promise, aborted2, probe.gone.then(() => "gone")]);
+    const unknown2 = (message) => probe.unknownModel ? checkFailed("unknown_model", `unknown model: ${model}: ${message}`) : checkFailed("failed", message);
+    try {
+      const prompt = await Promise.race([
+        probe.client.send({ type: "prompt", message: CHECK_PROMPT }).then(
+          (response) => response,
+          () => "gone"
+        ),
+        ended
+      ]);
+      const done = typeof prompt === "string" ? prompt : prompt.success ? await Promise.race([settled, ended]) : prompt;
+      if (done === "timeout" || done === "cancelled") {
+        probe.mustKill = true;
+        return done === "timeout" ? checkFailed("timeout", `no answer within ${seconds(timeoutMs)}`) : checkFailed("cancelled", "the check was cancelled");
+      }
+      if (done === "gone") {
+        const reason = await probe.whyGone("the model answered");
+        return probe.unknownModel ? checkFailed("unknown_model", `unknown model: ${model}`) : checkFailed("failed", reason);
+      }
+      if (done !== "settled") return unknown2(`pi refused the prompt: ${done.error ?? "no reason given"}`);
+      if (lastAssistant === null) return checkFailed("failed", "no assistant message");
+      if (lastAssistant.stopReason === "error") return unknown2(String(lastAssistant.errorMessage ?? "pi reported an error"));
+      if (lastAssistant.stopReason === "aborted") return checkFailed("failed", "pi aborted the turn");
+      return { ok: true };
+    } finally {
+      timer.clear();
+      signal?.removeEventListener("abort", onAbort);
+      await this.endProbe(probe);
+    }
+  };
+  probe(args, cwd, options) {
+    const probe = new PiProbe([...this.piCommand, ...args], cwd, this.options.env ?? process.env, options);
+    this.probes.add(probe);
+    return probe;
+  }
+  async endProbe(probe) {
+    try {
+      await probe.end(this.options.killWaitMs ?? 2e3);
+    } finally {
+      this.probes.delete(probe);
+    }
+  }
   get piCommand() {
     return this.options.piCommand ?? ["pi"];
   }
@@ -36300,8 +36770,140 @@ var PiDriver = class {
   /** Last resort when this process must exit now: SIGKILL every live child run. */
   killAll() {
     for (const run of this.live) run.forceKill();
+    for (const probe of this.probes) probe.kill();
   }
 };
+var PiProbe = class {
+  constructor(command, cwd, env2, options) {
+    this.command = command;
+    const [program, ...args] = command;
+    const child = spawn(program, args, {
+      ...cwd !== void 0 ? { cwd } : {},
+      env: { ...env2, ...CHILD_ENV },
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true
+    });
+    this.child = child;
+    this.exit = new Promise((resolve) => {
+      const done = (code, signal) => {
+        this.exited = true;
+        resolve({ code, signal });
+      };
+      child.once("close", (code, signal) => done(code, signal));
+      child.once("exit", (code, signal) => setTimeout(() => done(code, signal), 200).unref());
+      child.once("error", (err) => {
+        this.spawnError = err;
+        done(null, null);
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
+    });
+    let markBad;
+    const bad = new Promise((resolve) => markBad = resolve);
+    this.client = new PiRpcClient(child.stdin, child.stdout, {
+      onEvent: options.onEvent ?? (() => {
+      }),
+      onBadRecord: (record2) => {
+        if (!options.strict || this.badRecord !== null) return;
+        this.badRecord = record2;
+        markBad();
+      }
+    });
+    this.gone = Promise.race([this.exit.then(() => void 0), this.client.lost, bad]);
+  }
+  command;
+  client;
+  /** Resolves when pi can no longer answer: it exited, its pipe was lost, or it printed a line that is not JSON. */
+  gone;
+  unknownModel = false;
+  /** Set when the run timed out or was cancelled: end() kills pi rather than closing stdin. */
+  mustKill = false;
+  child;
+  exit;
+  exited = false;
+  spawnError = null;
+  badRecord = null;
+  stderrTail = "";
+  /** One line saying why pi stopped answering before `what`. */
+  async whyGone(what) {
+    await this.exitedWithin(300);
+    if (this.spawnError !== null) return bounded(`could not start pi (${this.command[0]}): ${this.spawnError.message}`);
+    if (this.badRecord !== null) return bounded(`pi printed a line that is not JSON before ${what}: ${this.badRecord.slice(0, 120)}`);
+    const tail = this.stderrTail.trim();
+    if (!this.exited) return bounded(`lost the pipe to pi before ${what}${tail ? `: ${tail}` : ""}`);
+    const exit = await this.exit;
+    const how = exit.signal !== null ? `on signal ${exit.signal}` : `with code ${exit.code}`;
+    return bounded(`pi exited ${how} before ${what}${tail ? `: ${tail}` : ""}`);
+  }
+  /** Close stdin and wait; then SIGTERM and SIGKILL the group. A killed probe is killed at once. */
+  async end(waitMs) {
+    this.client.close();
+    if (!this.mustKill && !await this.exitedWithin(waitMs)) {
+      this.signal("SIGTERM");
+      await this.exitedWithin(waitMs);
+    }
+    this.kill();
+    await this.exit;
+  }
+  kill() {
+    this.signal("SIGKILL");
+  }
+  signal(signal) {
+    signalProcessTree(this.child.pid, this.exited, signal);
+  }
+  exitedWithin(ms) {
+    return waitForExit(this.exit, this.exited, ms);
+  }
+};
+function checkFailed(kind, message) {
+  return { ok: false, kind, message: bounded(message) };
+}
+function hostModels(data2) {
+  const list = data2?.models;
+  if (!Array.isArray(list)) throw new Error("pi returned a malformed model list: it has no models array");
+  if (list.length === 0) throw new Error(NO_MODELS);
+  return list.map((model, i) => hostModel(model, i));
+}
+function hostModel(model, index) {
+  const named = (value) => typeof value === "string" && value !== "";
+  if (typeof model !== "object" || model === null || !named(model.provider) || !named(model.id)) {
+    throw new Error(`pi returned a malformed model list: entry ${index + 1} has no provider or id`);
+  }
+  const name = `${model.provider}/${model.id}`;
+  const reasoning = model.reasoning === true;
+  const cost = model.cost;
+  const number4 = (value) => typeof value === "number" && Number.isFinite(value);
+  return {
+    name,
+    endpoint: modelEndpoint(name),
+    reasoning,
+    thinkingLevels: supportedThinkingLevels(reasoning, model.thinkingLevelMap),
+    ...number4(model.contextWindow) ? { contextWindow: model.contextWindow } : {},
+    ...number4(model.maxTokens) ? { maxTokens: model.maxTokens } : {},
+    input: Array.isArray(model.input) ? model.input.filter((kind) => typeof kind === "string") : [],
+    ...typeof cost === "object" && cost !== null && [cost.input, cost.output, cost.cacheRead, cost.cacheWrite].every(number4) ? { cost: { input: cost.input, output: cost.output, cacheRead: cost.cacheRead, cacheWrite: cost.cacheWrite } } : {}
+  };
+}
+function supportedThinkingLevels(reasoning, thinkingLevelMap) {
+  if (!reasoning) return ["off"];
+  const map2 = typeof thinkingLevelMap === "object" && thinkingLevelMap !== null ? thinkingLevelMap : {};
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = map2[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== void 0;
+    return true;
+  });
+}
+function seconds(ms) {
+  return `${ms / 1e3}s`;
+}
+function deadline(ms) {
+  let timer;
+  const promise2 = new Promise((resolve) => timer = setTimeout(() => resolve("timeout"), ms));
+  return { promise: promise2, clear: () => clearTimeout(timer) };
+}
 var PiChildRun = class {
   constructor(driver, options, request, emit) {
     this.driver = driver;
@@ -36365,11 +36967,11 @@ var PiChildRun = class {
     if (this.stop !== null) return this.stoppedBeforeSpawn();
     const overlay = prepareOverlay(driverFilesFolder, agent.skills);
     const env2 = this.options.env ?? process.env;
-    const agentDir = this.options.piAgentDir ?? env2.PI_CODING_AGENT_DIR ?? path2.join(homedir(), ".pi", "agent");
-    if (existsSync2(path2.join(agentDir, "SYSTEM.md"))) {
+    const agentDir = this.options.piAgentDir ?? env2.PI_CODING_AGENT_DIR ?? path3.join(homedir(), ".pi", "agent");
+    if (existsSync2(path3.join(agentDir, "SYSTEM.md"))) {
       this.emit({
         kind: "warning",
-        message: `${path2.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
+        message: `${path3.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
       });
     }
     const command = [
@@ -36442,7 +37044,7 @@ var PiChildRun = class {
     });
     child.stderr.on("data", (chunk) => {
       this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
-      if (/model\b.*\bnot found/i.test(this.stderrTail)) this.unknownModel = true;
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
     });
     this.client = new PiRpcClient(child.stdin, child.stdout, {
       onEvent: (event) => this.onPiEvent(event),
@@ -36652,74 +37254,71 @@ var PiChildRun = class {
     this.signalTree("SIGKILL");
     await this.exit;
   }
-  async exitedWithin(ms) {
-    if (this.exited) return true;
-    let timer;
-    const timedOut = new Promise((resolve) => timer = setTimeout(() => resolve(false), ms));
-    const result = await Promise.race([this.exit.then(() => true), timedOut]);
-    clearTimeout(timer);
-    return result;
+  exitedWithin(ms) {
+    return waitForExit(this.exit, this.exited, ms);
   }
   /**
    * Signal pi's group and the group of every descendant of pi. pi's bash tool
    * spawns detached shells, which a signal to pi's own group does not reach.
    */
   signalTree(signal) {
-    const pid = this.child?.pid;
-    if (pid === void 0 || this.exited) return this.signalGroup(signal);
-    const targets = [pid, ...descendants(pid)];
-    for (const target of targets) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-        }
-      }
-    }
+    signalProcessTree(this.child?.pid, this.exited, signal);
   }
   /** Signal the groups of pi's descendants, not pi itself, while pi is alive. */
   signalDescendants(signal) {
     const pid = this.child?.pid;
     if (pid === void 0 || this.exited) return;
-    for (const target of descendants(pid)) {
+    signalTargets(descendants(pid), signal);
+  }
+  /** Signal pi's own process group. */
+  signalGroup(signal) {
+    signalOwnGroup(this.child?.pid, this.exited, signal);
+  }
+};
+async function waitForExit(exit, exited, ms) {
+  if (exited) return true;
+  let timer;
+  const timedOut = new Promise((resolve) => timer = setTimeout(() => resolve(false), ms));
+  const result = await Promise.race([exit.then(() => true), timedOut]);
+  clearTimeout(timer);
+  return result;
+}
+function signalTargets(targets, signal) {
+  for (const target of targets) {
+    try {
+      process.kill(-target, signal);
+    } catch {
       try {
-        process.kill(-target, signal);
+        process.kill(target, signal);
       } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-        }
       }
     }
   }
-  /**
-   * Signal pi's own process group. After pi is reaped its id is safe to use only
-   * while a member of the group is still alive.
-   */
-  signalGroup(signal) {
-    const pid = this.child?.pid;
-    if (pid === void 0) return;
-    if (this.exited && !groupHasMembers(pid)) return;
-    try {
-      process.kill(-pid, signal);
-    } catch {
-    }
+}
+function signalOwnGroup(pid, exited, signal) {
+  if (pid === void 0) return;
+  if (exited && !groupHasMembers(pid)) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
   }
-};
+}
+function signalProcessTree(pid, exited, signal) {
+  if (pid === void 0 || exited) return signalOwnGroup(pid, exited, signal);
+  signalTargets([pid, ...descendants(pid)], signal);
+}
 function failed(failureKind, message) {
   return { lastAssistantText: null, usage: unavailableUsage("pi did not run a turn"), status: "failed", failureKind, message };
 }
 function expectedSkillName(folder) {
   try {
-    const text2 = readFileSync(path2.join(folder, "SKILL.md"), "utf8");
+    const text2 = readFileSync2(path3.join(folder, "SKILL.md"), "utf8");
     const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text2);
-    const name = match ? (0, import_yaml.parse)(match[1])?.name : void 0;
+    const name = match ? (0, import_yaml2.parse)(match[1])?.name : void 0;
     if (typeof name === "string" && name !== "") return name;
   } catch {
   }
-  return path2.basename(folder);
+  return path3.basename(folder);
 }
 function verifySkills(expected, response) {
   if (!response.success) return bounded(`get_commands failed: ${response.error ?? "no reason given"}`);
@@ -36771,8 +37370,8 @@ function descendants(root) {
 function targetPath(args) {
   if (typeof args !== "object" || args === null) return void 0;
   const a = args;
-  for (const key of ["path", "file_path", "filePath", "file", "directory", "dir"]) {
-    if (typeof a[key] === "string" && a[key] !== "") return a[key];
+  for (const key2 of ["path", "file_path", "filePath", "file", "directory", "dir"]) {
+    if (typeof a[key2] === "string" && a[key2] !== "") return a[key2];
   }
   return void 0;
 }
@@ -36809,339 +37408,6 @@ function withTimeout(promise2, ms) {
     promise2.finally(() => clearTimeout(timer)),
     new Promise((_, reject) => timer = setTimeout(() => reject(new Error("timed out")), ms))
   ]);
-}
-
-// src/config/agent-config.ts
-var import_yaml2 = __toESM(require_dist(), 1);
-import { mkdirSync, readFileSync as readFileSync2, realpathSync, statSync as statSync2, writeFileSync } from "node:fs";
-import path3 from "node:path";
-import { fileURLToPath } from "node:url";
-var AGENT_FILE = path3.join(".agents", "subzero.yaml");
-var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-var DEFAULT_TIER = "default";
-var GENERAL_AGENT = "general";
-var FALLBACK_AGENT = "fallback";
-var LoadError = class extends Error {
-  code = "load_error";
-  constructor(message) {
-    super(message);
-    this.name = "LoadError";
-  }
-};
-var MissingDefaultTierError = class extends LoadError {
-  constructor() {
-    super("the default tier is required in models.tiers when agents holds an entry");
-    this.name = "MissingDefaultTierError";
-  }
-};
-var UnknownAgentError = class extends Error {
-  constructor(agent, configured) {
-    const list = configured.length > 0 ? configured.join(", ") : "(none)";
-    super(
-      agent === void 0 ? `no agent was named and no general agent is configured; configured agents: ${list}` : `unknown agent "${agent}"; configured agents: ${list}`
-    );
-    this.agent = agent;
-    this.configured = configured;
-    this.name = "UnknownAgentError";
-  }
-  agent;
-  configured;
-  code = "unknown_agent";
-};
-var TierError = class extends Error {
-  constructor(tier, configured, host, supportedHosts) {
-    const list = configured.length > 0 ? configured.join(", ") : "(none)";
-    super(
-      host === void 0 ? `unknown tier "${tier}"; configured tiers: ${list}` : `tier "${tier}" runs on the host "${host}", which has no registered child driver; supported hosts: ${(supportedHosts ?? []).length === 0 ? "(none)" : supportedHosts.join(", ")}; configured tiers: ${list}`
-    );
-    this.tier = tier;
-    this.configured = configured;
-    this.host = host;
-    this.supportedHosts = supportedHosts;
-    this.name = "TierError";
-  }
-  tier;
-  configured;
-  host;
-  supportedHosts;
-  code = "unknown_tier";
-};
-var UnresolvedRootError = class extends Error {
-  code = "unresolved_root";
-  constructor(detail) {
-    super(
-      `subzero could not resolve the project root${detail ? ` (${detail})` : ""}. Set SUBZERO_PROJECT_DIR to the absolute path of the project.`
-    );
-    this.name = "UnresolvedRootError";
-  }
-};
-function modelEndpoint(model) {
-  const slash = model.indexOf("/");
-  return slash === -1 ? model : model.slice(0, slash);
-}
-var TIER_KEYS = ["host", "model", "thinking"];
-var AGENT_KEYS = ["description", "skills", "tools", "timeout", "tier", "tiers"];
-var ROUTING_KEYS = ["hook", "generic_agents"];
-var agentSchema = external_exports.object({
-  description: external_exports.string().min(1, "needs a description").optional(),
-  skills: external_exports.array(external_exports.string().min(1)).default([]),
-  tools: external_exports.array(external_exports.string().min(1)).min(1, "needs at least one tool"),
-  timeout: external_exports.number().positive(),
-  tier: external_exports.string().min(1).optional()
-});
-var tierFieldSchemas = {
-  host: external_exports.string().min(1, "must be a non-empty string"),
-  model: external_exports.string().min(1, "must be a non-empty string"),
-  thinking: external_exports.enum(THINKING_LEVELS)
-};
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function loadAgentFile(projectRoot) {
-  const agentFile = path3.join(projectRoot, AGENT_FILE);
-  return parseCatalog(readAgentText(agentFile), agentFile);
-}
-function readAgentText(agentFile) {
-  try {
-    return readFileSync2(agentFile, "utf8");
-  } catch (err) {
-    const code = err.code;
-    if (code === "ENOENT") throw new LoadError(`agent file is missing: ${agentFile}`);
-    throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
-  }
-}
-function parseCatalog(text2, agentFile) {
-  const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
-  let parsed;
-  try {
-    parsed = (0, import_yaml2.parse)(text2);
-  } catch (err) {
-    throw malformed(err.message);
-  }
-  const doc = parsed === null ? {} : parsed;
-  if (!isRecord(doc)) throw malformed("expected a map");
-  const agentsMap = doc.agents ?? {};
-  if (!isRecord(agentsMap)) throw malformed('expected an "agents" map');
-  const skillsMap = doc.skills ?? {};
-  const endpointsMap = doc.endpoints ?? {};
-  if (!isRecord(skillsMap)) throw malformed('"skills" must be a map');
-  if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
-  if (doc.models !== void 0 && !isRecord(doc.models)) throw malformed('"models" must be a map');
-  const modelsMap = doc.models ?? {};
-  if (modelsMap.tiers !== void 0 && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
-  const baseDir = path3.dirname(agentFile);
-  const skillFolders = /* @__PURE__ */ new Map();
-  for (const [name, value] of Object.entries(skillsMap)) {
-    if (typeof value !== "string" || value.length === 0) {
-      throw new LoadError(`skill "${name}" must map to a folder path`);
-    }
-    skillFolders.set(name, path3.resolve(baseDir, value));
-  }
-  const limits = /* @__PURE__ */ new Map();
-  for (const [endpoint, entry] of Object.entries(endpointsMap)) {
-    const parallel = isRecord(entry) ? entry.parallel : void 0;
-    if (typeof parallel !== "number" || !Number.isInteger(parallel) || parallel < 1) {
-      throw new LoadError(`endpoint "${endpoint}": parallel must be a positive whole number`);
-    }
-    limits.set(endpoint, parallel);
-  }
-  const tiers = /* @__PURE__ */ new Map();
-  for (const [name, raw] of Object.entries(modelsMap.tiers ?? {})) {
-    tiers.set(name, validateTier(name, raw));
-  }
-  const entries = /* @__PURE__ */ new Map();
-  for (const [name, raw] of Object.entries(agentsMap)) {
-    entries.set(name, validateAgent(name, raw, skillFolders, tiers));
-  }
-  const routing = validateRouting(doc.routing);
-  const used = /* @__PURE__ */ new Set();
-  for (const tier of tiers.values()) used.add(modelEndpoint(tier.model));
-  for (const entry of entries.values()) {
-    for (const override of entry.overrides.values()) {
-      if (override.model !== void 0) used.add(modelEndpoint(override.model));
-    }
-  }
-  for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint)) {
-      throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
-    }
-  }
-  if (entries.size > 0 && !tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
-  return { agentFile, entries, tiers, routing, limits };
-}
-function validateTier(name, raw) {
-  if (!isRecord(raw)) throw new LoadError(`tier "${name}": must be a map of host, model and thinking`);
-  for (const key of TIER_KEYS) {
-    if (raw[key] === void 0 || raw[key] === null || raw[key] === "") {
-      throw new LoadError(`tier "${name}": ${key} is required`);
-    }
-  }
-  for (const key of Object.keys(raw)) {
-    if (!TIER_KEYS.includes(key)) throw new LoadError(`tier "${name}": unknown key "${key}"`);
-  }
-  return {
-    host: checkField(`tier "${name}"`, "host", raw.host),
-    model: checkField(`tier "${name}"`, "model", raw.model),
-    thinking: checkField(`tier "${name}"`, "thinking", raw.thinking)
-  };
-}
-function checkField(label, key, value) {
-  const parsed = tierFieldSchemas[key].safeParse(value);
-  if (!parsed.success) throw new LoadError(`${label}: ${key}: ${parsed.error.issues[0]?.message ?? "invalid"}`);
-  return parsed.data;
-}
-function agentLabel(name) {
-  return name === GENERAL_AGENT || name === FALLBACK_AGENT ? name : `agent "${name}"`;
-}
-function validateAgent(name, raw, skillFolders, tiers) {
-  const label = agentLabel(name);
-  const reserved = name === GENERAL_AGENT || name === FALLBACK_AGENT;
-  if (!isRecord(raw)) throw new LoadError(`${label}: must be a map`);
-  for (const key of TIER_KEYS) {
-    if (raw[key] !== void 0) {
-      throw new LoadError(`${label}: ${key} cannot be set on an agent; host, model and thinking belong to a tier in models.tiers`);
-    }
-  }
-  for (const key of Object.keys(raw)) {
-    if (!AGENT_KEYS.includes(key)) throw new LoadError(`${label}: unknown key "${key}"`);
-  }
-  if (reserved && raw.description !== void 0) {
-    throw new LoadError(`${label}: a description is not allowed; ${name} is never chosen by its description`);
-  }
-  if (!reserved && (raw.description === void 0 || raw.description === null || raw.description === "")) {
-    throw new LoadError(`${label}: description is required`);
-  }
-  if (raw.timeout === void 0 || raw.timeout === null) {
-    throw new LoadError(`${label}: timeout is required (seconds)`);
-  }
-  if (typeof raw.timeout !== "number" || !(raw.timeout > 0)) {
-    throw new LoadError(`${label}: timeout must be a positive number of seconds`);
-  }
-  const parsed = agentSchema.safeParse(raw);
-  if (!parsed.success) {
-    const issue2 = parsed.error.issues[0];
-    const where = issue2?.path.join(".") || "entry";
-    throw new LoadError(`${label}: ${where}: ${issue2?.message ?? "invalid"}`);
-  }
-  const def = parsed.data;
-  if (def.tier !== void 0 && !tiers.has(def.tier)) {
-    throw new LoadError(`${label}: tier "${def.tier}" is not configured in models.tiers`);
-  }
-  const overrides = /* @__PURE__ */ new Map();
-  if (raw.tiers !== void 0) {
-    if (!isRecord(raw.tiers)) throw new LoadError(`${label}: tiers must be a map of tier name to overrides`);
-    for (const [tier, override] of Object.entries(raw.tiers)) {
-      const where = `${label}: tiers.${tier}`;
-      if (!tiers.has(tier)) throw new LoadError(`${where}: tier "${tier}" is not configured in models.tiers`);
-      if (!isRecord(override)) throw new LoadError(`${where}: must be a map of host, model and thinking`);
-      const fields = {};
-      for (const [key, value] of Object.entries(override)) {
-        if (!TIER_KEYS.includes(key)) {
-          throw new LoadError(`${where}: ${key} cannot be overridden; only host, model and thinking can`);
-        }
-        fields[key] = checkField(where, key, value);
-      }
-      overrides.set(tier, fields);
-    }
-  }
-  const skills = def.skills.map((skill) => {
-    const folder = skillFolders.get(skill);
-    if (folder === void 0) {
-      throw new LoadError(`${label}: skill "${skill}" is not in the skills map`);
-    }
-    return { name: skill, folder };
-  });
-  return {
-    name,
-    ...def.description !== void 0 ? { description: def.description } : {},
-    skills,
-    tools: def.tools,
-    timeout: def.timeout,
-    ...def.tier !== void 0 ? { tier: def.tier } : {},
-    overrides
-  };
-}
-function validateRouting(raw) {
-  if (raw === void 0 || raw === null) return { hook: true };
-  if (!isRecord(raw)) throw new LoadError("routing: must be a map");
-  for (const key of Object.keys(raw)) {
-    if (!ROUTING_KEYS.includes(key)) throw new LoadError(`routing: unknown key "${key}"`);
-  }
-  if (raw.hook !== void 0 && typeof raw.hook !== "boolean") throw new LoadError("routing: hook must be true or false");
-  const list = raw.generic_agents;
-  if (list !== void 0 && !(Array.isArray(list) && list.every((v) => typeof v === "string" && v !== ""))) {
-    throw new LoadError("routing: generic_agents must be a list of agent type names");
-  }
-  return { hook: raw.hook !== false, genericAgents: list };
-}
-function resolveAgent(catalog, name, options = {}) {
-  const entryName = name ?? GENERAL_AGENT;
-  const entry = catalog.entries.get(entryName);
-  if (entry === void 0) throw new UnknownAgentError(name, [...catalog.entries.keys()]);
-  const tierName = options.tier ?? entry.tier ?? DEFAULT_TIER;
-  const configured = [...catalog.tiers.keys()];
-  const base = catalog.tiers.get(tierName);
-  if (base === void 0) throw new TierError(tierName, configured);
-  const resolved = { ...base, ...entry.overrides.get(tierName) };
-  const supported = options.supportedHosts;
-  if (supported !== void 0 && !supported.includes(resolved.host)) {
-    throw new TierError(tierName, configured, resolved.host, supported);
-  }
-  const endpoint = modelEndpoint(resolved.model);
-  return {
-    name: options.tier !== void 0 ? `${entryName}:${options.tier}` : entryName,
-    ...entry.description !== void 0 ? { description: entry.description } : {},
-    host: resolved.host,
-    model: resolved.model,
-    thinking: resolved.thinking,
-    skills: entry.skills,
-    tools: entry.tools,
-    timeout: entry.timeout,
-    endpoint,
-    parallel: catalog.limits.get(endpoint) ?? null
-  };
-}
-function routableTiers(projectRoot, supportedHosts) {
-  const catalog = loadAgentFile(projectRoot);
-  const general = catalog.entries.get(GENERAL_AGENT);
-  if (general === void 0) return [];
-  const out = [];
-  for (const [tier, base] of catalog.tiers) {
-    const resolved = { ...base, ...general.overrides.get(tier) };
-    if (supportedHosts === void 0 || supportedHosts.includes(resolved.host)) out.push({ tier, ...resolved });
-  }
-  return out;
-}
-async function resolveProjectRoot(sources) {
-  const fromEnv = sources.env?.SUBZERO_PROJECT_DIR;
-  if (fromEnv !== void 0 && fromEnv !== "") {
-    return canonicalDir(fromEnv, "SUBZERO_PROJECT_DIR");
-  }
-  if (sources.roots) {
-    let reported = [];
-    try {
-      reported = await sources.roots();
-    } catch {
-      reported = [];
-    }
-    const first = reported[0];
-    if (first !== void 0) {
-      const dir = first.startsWith("file:") ? fileURLToPath(first) : first;
-      return canonicalDir(dir, "the first root reported by the parent");
-    }
-  }
-  if (sources.cwd !== void 0) return canonicalDir(sources.cwd, "the working directory");
-  return new UnresolvedRootError("SUBZERO_PROJECT_DIR is unset and the parent reported no root");
-}
-function canonicalDir(dir, source) {
-  if (!path3.isAbsolute(dir)) return new UnresolvedRootError(`${source} is not absolute: ${dir}`);
-  try {
-    const real = realpathSync(dir);
-    if (!statSync2(real).isDirectory()) return new UnresolvedRootError(`${source} is not a directory: ${dir}`);
-    return real;
-  } catch {
-    return new UnresolvedRootError(`${source} does not exist: ${dir}`);
-  }
 }
 
 // src/core/ids.ts
@@ -37255,6 +37521,10 @@ var Task = class {
       this.run?.cancel();
     }
     return this.result;
+  }
+  /** Record cancellation when a child did not stop before shutdown's deadline. */
+  forceCancel() {
+    if (this.finalResult === void 0) this.finish({ taskId: this.taskId, agent: this.agent.name, status: "cancelled" });
   }
   handleEvent(event) {
     if (this.finalResult !== void 0) return;
@@ -37604,6 +37874,96 @@ function writeAtomic(file2, value) {
   renameSync(tmp, file2);
 }
 
+// src/service/status-text.ts
+function formatProgress(agent, latest, elapsedMs) {
+  return `${agent} \xB7 ${latest} \xB7 ${formatElapsed(elapsedMs)}`;
+}
+function describeTaskReply(reply, view, tools, now = Date.now()) {
+  if (reply.kind === "result") return formatResult(reply.result);
+  const id = `task: ${reply.taskId}`;
+  const lead = view !== void 0 ? `${id} \xB7 ${view.agent}` : id;
+  if (reply.kind === "abandoned") return `${lead} \xB7 abandoned: its owner process died, so it has no result`;
+  if (reply.kind === "not_found") return `${id} \xB7 no such task`;
+  const line = reply.kind === "started" || reply.kind === "running" ? formatStatusLine({ state: "running", startedAt: reply.startedAt }, now) : reply.kind === "queued" ? formatStatusLine({ state: "queued", endpoint: reply.endpoint, ...reply.place !== void 0 ? { place: reply.place } : {}, enqueuedAt: reply.enqueuedAt }, now) : formatStatusLine(statusFacts({ ...reply.startedAt !== void 0 ? { startedAt: reply.startedAt } : {}, ...reply.endpoint !== void 0 ? { endpoint: reply.endpoint } : {}, createdAt: reply.enqueuedAt }), now);
+  if (reply.kind === "started" || reply.kind === "queued") return `${lead} \xB7 ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
+  if (reply.kind === "other_process") return `${lead} \xB7 ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
+  return `${lead} \xB7 ${line}`;
+}
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.floor(ms / 1e3));
+  const minutes = Math.floor(total / 60);
+  const seconds2 = total % 60;
+  return minutes > 0 ? `${minutes}m${String(seconds2).padStart(2, "0")}s` : `${seconds2}s`;
+}
+function describeEvent(event) {
+  if (event.kind === "tool_activity") return [event.kind, event.tool, event.path].filter(Boolean).join(" ");
+  return event.kind;
+}
+function show(value, digits = 0) {
+  if (isUnavailable(value)) return "unavailable";
+  return digits > 0 ? value.toFixed(digits) : String(value);
+}
+function formatUsage(usage) {
+  return [
+    `tokens ${show(usage.totalTokens)} (in ${show(usage.inputTokens)}, out ${show(usage.outputTokens)})`,
+    `cost ${show(usage.cost, 4)}`,
+    `context at settle ${show(usage.contextTokens)}/${show(usage.contextWindow)}`
+  ].join(" \xB7 ");
+}
+function formatResult(result) {
+  const head = [`task: ${result.taskId}`, result.agent, `status: ${result.status}`];
+  if (result.failureKind !== void 0) head.push(`failure: ${result.failureKind}`);
+  const lines = [head.join(" \xB7 ")];
+  if (result.message !== void 0) lines.push(`message: ${result.message}`);
+  if (result.summary !== void 0) lines.push("summary:", result.summary === "" ? "(empty)" : result.summary);
+  if (result.usage !== void 0) {
+    const duration3 = result.durationMs !== void 0 ? ` \xB7 duration ${Math.round(result.durationMs / 1e3)}s` : "";
+    lines.push(`usage: ${formatUsage(result.usage)}${duration3}`);
+  }
+  return lines.join("\n");
+}
+function statusFacts(task) {
+  if (task.startedAt !== void 0) return { state: "running", startedAt: task.startedAt };
+  return {
+    state: "queued",
+    ...task.endpoint !== void 0 ? { endpoint: task.endpoint } : {},
+    ...task.queuePlace !== void 0 ? { place: task.queuePlace } : {},
+    enqueuedAt: task.createdAt
+  };
+}
+function formatStatusLine(facts, now = Date.now()) {
+  if (facts.state === "running") {
+    return `running, started ${facts.startedAt} (${formatElapsed(now - Date.parse(facts.startedAt))} ago)`;
+  }
+  const waiting = formatElapsed(now - Date.parse(facts.enqueuedAt));
+  const endpoint = facts.endpoint ?? "unknown";
+  const where = facts.place !== void 0 ? `place ${facts.place} in this session's queue, waiting ${waiting}` : `in another session's queue, waiting ${waiting}`;
+  return `queued, not launched yet: no child is running; it starts when endpoint ${endpoint} has room (${where})`;
+}
+function withNotice(text2, notice) {
+  if (notice === void 0) return text2;
+  const newline = text2.indexOf("\n");
+  const line = `notice: ${notice}`;
+  return newline < 0 ? `${text2}
+${line}` : `${text2.slice(0, newline)}
+${line}${text2.slice(newline)}`;
+}
+function listingStatus(t, now = Date.now()) {
+  return t.status === "running" ? formatStatusLine(statusFacts(t), now) : t.status;
+}
+function completionNotice(taskId, status, live, collectTool, now = Date.now()) {
+  const lines = [`task ${taskId} ${status}; collect its result with ${collectTool}.`];
+  if (live.length > 0) {
+    lines.push("Still running:");
+    for (const task of live) lines.push(`- ${task.taskId} \xB7 ${task.agent} \xB7 ${listingStatus(task, now)}`);
+    lines.push("Wait for these tasks before using their results together.");
+  }
+  return lines.join("\n");
+}
+function stopNotice(taskId) {
+  return `task ${taskId} was stopped; no action is needed.`;
+}
+
 // src/service/delegation-service.ts
 var EmptyBriefError = class extends Error {
   code = "empty_brief";
@@ -37694,6 +38054,8 @@ var DelegationService = class {
   connected = null;
   starting = null;
   registry = /* @__PURE__ */ new Map();
+  taskTiers = /* @__PURE__ */ new Map();
+  sessions = /* @__PURE__ */ new Map();
   limiter = new EndpointLimiter();
   warn;
   get projectRoot() {
@@ -37702,6 +38064,9 @@ var DelegationService = class {
   /** The hosts the Kernel registry runs a child on, for front ends that hand them to AgentConfig. */
   supportedHosts() {
     return this.options.kernel.supportedHosts();
+  }
+  hasLiveSessionTasks() {
+    return [...this.sessions.values()].some((tasks) => tasks.size > 0);
   }
   /** The task store, for front ends that read task records. Requires start(). */
   get store() {
@@ -37738,7 +38103,7 @@ var DelegationService = class {
   async delegate(delegation, options) {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === "") throw new EmptyBriefError();
-    const { agent, notice } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
     const task = core.start({
       agent,
@@ -37747,6 +38112,17 @@ var DelegationService = class {
       ...delegation.parentSessionId !== void 0 ? { parentSessionId: delegation.parentSessionId } : {}
     });
     this.registry.set(task.taskId, task);
+    this.taskTiers.set(task.taskId, tier);
+    void task.result.then(() => this.taskTiers.delete(task.taskId));
+    if (delegation.parentSessionId !== void 0) {
+      const session = this.sessions.get(delegation.parentSessionId) ?? /* @__PURE__ */ new Set();
+      this.sessions.set(delegation.parentSessionId, session);
+      session.add(task.taskId);
+      void task.result.finally(() => {
+        session.delete(task.taskId);
+        if (session.size === 0) this.sessions.delete(delegation.parentSessionId);
+      });
+    }
     if (options.onEvent) task.onEvent(options.onEvent);
     if (options.onState) task.onStateChange(options.onState);
     if (options.signal) {
@@ -37757,6 +38133,7 @@ var DelegationService = class {
       void task.result.finally(() => signal.removeEventListener("abort", onAbort));
     }
     this.limiter.admit(task, agent.endpoint, agent.parallel);
+    options.onTask?.(task.taskId);
     if (task.state === "Pending") options.onState?.("Pending");
     const withNotice2 = (reply) => notice !== void 0 ? { ...reply, notice } : reply;
     if (!options.wait) return withNotice2(this.liveReply(task));
@@ -37774,11 +38151,12 @@ var DelegationService = class {
     const options = { supportedHosts, ...tier !== void 0 && tier !== "" ? { tier } : {} };
     const named = delegation.agent;
     if (named === void 0 || named === GENERAL_AGENT || catalog.entries.has(named)) {
-      return { agent: resolveAgent(catalog, named, options) };
+      return { agent: resolveAgent(catalog, named, options), tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
     return {
       agent: resolveAgent(catalog, FALLBACK_AGENT, options),
+      tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(", ")}`
     };
   }
@@ -37816,12 +38194,27 @@ var DelegationService = class {
     clearTimeout(timer);
     return result === null ? this.collect(taskId) : { kind: "result", result };
   }
+  /** Wait for a task owned by this process without a polling deadline. */
+  async waitForCompletion(taskId) {
+    const live = this.registry.get(taskId);
+    return live === void 0 ? this.collect(taskId) : { kind: "result", result: await live.result };
+  }
   async cancel(taskId) {
     const { store } = await this.connect();
     store.sweep();
     const live = this.registry.get(taskId);
     if (live !== void 0) return { kind: "result", result: await live.cancel() };
     return this.fromRecord(store, taskId);
+  }
+  async cancelSession(parentSessionId) {
+    if (parentSessionId === void 0 || parentSessionId === "") return { kind: "unknown_session", taskIds: [], count: 0 };
+    const taskIds = [...this.sessions.get(parentSessionId) ?? []];
+    const tasks = taskIds.map((id) => this.registry.get(id)).filter((task) => task !== void 0 && task.settledResult === void 0);
+    const pending = tasks.filter((task) => task.state === "Pending");
+    const live = tasks.filter((task) => task.state !== "Pending");
+    await Promise.all(pending.map((task) => task.cancel()));
+    await Promise.all(live.map((task) => task.cancel()));
+    return { kind: "cancelled", taskIds: tasks.map((task) => task.taskId), count: tasks.length };
   }
   async list(parentSessionId) {
     const { store } = await this.connect();
@@ -37831,6 +38224,35 @@ var DelegationService = class {
       const place = live !== void 0 ? this.limiter.place(live) : null;
       return place !== null ? { ...view, queuePlace: place } : view;
     });
+  }
+  async listLiveSession(parentSessionId) {
+    const ids = this.sessions.get(parentSessionId) ?? /* @__PURE__ */ new Set();
+    return (await this.list(parentSessionId)).filter((task) => ids.has(task.taskId) && task.status === "running").map((task) => ({
+      ...task,
+      model: this.registry.get(task.taskId)?.agent.model,
+      tier: this.taskTiers.get(task.taskId)
+    }));
+  }
+  async attachCommand(taskId) {
+    const { store } = await this.connect();
+    store.sweep();
+    const record2 = store.readTask(taskId);
+    if (!record2) return { kind: "error", message: `no such task ${taskId}` };
+    if (record2.status === "running") return { kind: "error", message: `task ${taskId} is still running; wait until it ends before attaching` };
+    const spec = record2.task?.launchSpec;
+    if (!spec) return { kind: "error", message: `no launch spec was recorded for task ${taskId}` };
+    const host = record2.task?.agent.host ?? "(not recorded)";
+    try {
+      const attach = this.options.kernel.attachCommand(host);
+      if (!attach) return { kind: "error", message: `the child driver of host ${host} offers no attach command` };
+      return { kind: "command", command: attach(spec) };
+    } catch (err) {
+      return { kind: "error", message: err.message };
+    }
+  }
+  async notice(taskId, status, parentSessionId, collectTool) {
+    if (status === "cancelled") return stopNotice(taskId);
+    return completionNotice(taskId, status, (await this.listLiveSession(parentSessionId)).filter((task) => task.taskId !== taskId), collectTool);
   }
   fromRecord(store, taskId) {
     const record2 = store.readTask(taskId);
@@ -37858,15 +38280,27 @@ var DelegationService = class {
       new Promise((resolve) => timer = setTimeout(() => resolve(false), deadlineMs))
     ]);
     clearTimeout(timer);
+    if (!ended) for (const task of live) task.forceCancel();
     return ended;
   }
 };
 
 // src/mcp/parent-session.ts
 import { createHash } from "node:crypto";
+import { execFileSync as execFileSync3 } from "node:child_process";
 import { mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync4, renameSync as renameSync2, rmSync, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import path5 from "node:path";
+function parentIsNonInteractive(pid = process.ppid) {
+  try {
+    const row = execFileSync3("ps", ["-ww", "-p", String(pid), "-o", "tty=", "-o", "command="], { encoding: "utf8", timeout: 2e3 }).trim();
+    const [, tty, command] = /^(\S+)\s+([\s\S]+)$/.exec(row) ?? [];
+    if (!tty || !command || /^\?+$/.test(tty)) return true;
+    return /(?:^|\s)(?:--print(?:=\S*)?|-p\S*)(?:\s|$)/.test(command);
+  } catch {
+    return true;
+  }
+}
 function setting(value) {
   if (value === void 0 || value === "" || /^\$\{[^}]*\}$/.test(value)) return void 0;
   return value;
@@ -37907,12 +38341,12 @@ function readParentSessionId(dir, projectRoot, ppid) {
 function readinessDir(dir, projectRoot) {
   return path5.join(dir, "ready", projectKey(projectRoot));
 }
-function writeReadinessMarker(dir, projectRoot, pid, ppid) {
+function writeReadinessMarker(dir, projectRoot, pid, ppid, taskMode = false) {
   const folder = readinessDir(dir, projectRoot);
   mkdirSync3(folder, { recursive: true, mode: 448 });
   const file2 = path5.join(folder, `${pid}.json`);
   const tmp = `${file2}.tmp`;
-  writeFileSync3(tmp, JSON.stringify({ pid, ppid, projectRoot, startedAt: (/* @__PURE__ */ new Date()).toISOString() }) + "\n", { mode: 384 });
+  writeFileSync3(tmp, JSON.stringify({ pid, ppid, projectRoot, taskMode, startedAt: (/* @__PURE__ */ new Date()).toISOString() }) + "\n", { mode: 384 });
   renameSync2(tmp, file2);
 }
 function removeReadinessMarker(dir, projectRoot, pid) {
@@ -38973,8 +39407,8 @@ function isPlainObject2(value) {
 }
 function mergeCapabilities(base, additional) {
   const result = { ...base };
-  for (const key in additional) {
-    const k = key;
+  for (const key2 in additional) {
+    const k = key2;
     const addValue = additional[k];
     if (addValue === void 0)
       continue;
@@ -39675,68 +40109,22 @@ var Server = class extends Protocol {
   }
 };
 
-// src/service/status-text.ts
-function formatElapsed(ms) {
-  const total = Math.max(0, Math.floor(ms / 1e3));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+// src/config/tier-words.ts
+var TIER_WORDS = [
+  { tier: "small", phrase: "cheapest capable" },
+  { tier: "medium", phrase: "mid-tier" },
+  { tier: "large", phrase: "session model" }
+];
+function tierForPhrase(value) {
+  return TIER_WORDS.find(({ phrase }) => phrase === value)?.tier;
 }
-function describeEvent(event) {
-  if (event.kind === "tool_activity") return [event.kind, event.tool, event.path].filter(Boolean).join(" ");
-  return event.kind;
-}
-function show(value, digits = 0) {
-  if (isUnavailable(value)) return "unavailable";
-  return digits > 0 ? value.toFixed(digits) : String(value);
-}
-function formatUsage(usage) {
-  return [
-    `tokens ${show(usage.totalTokens)} (in ${show(usage.inputTokens)}, out ${show(usage.outputTokens)})`,
-    `cost ${show(usage.cost, 4)}`,
-    `context at settle ${show(usage.contextTokens)}/${show(usage.contextWindow)}`
-  ].join(" \xB7 ");
-}
-function formatResult(result) {
-  const head = [`task: ${result.taskId}`, result.agent, `status: ${result.status}`];
-  if (result.failureKind !== void 0) head.push(`failure: ${result.failureKind}`);
-  const lines = [head.join(" \xB7 ")];
-  if (result.message !== void 0) lines.push(`message: ${result.message}`);
-  if (result.summary !== void 0) lines.push("summary:", result.summary === "" ? "(empty)" : result.summary);
-  if (result.usage !== void 0) {
-    const duration3 = result.durationMs !== void 0 ? ` \xB7 duration ${Math.round(result.durationMs / 1e3)}s` : "";
-    lines.push(`usage: ${formatUsage(result.usage)}${duration3}`);
-  }
-  return lines.join("\n");
-}
-function statusFacts(task) {
-  if (task.startedAt !== void 0) return { state: "running", startedAt: task.startedAt };
-  return {
-    state: "queued",
-    ...task.endpoint !== void 0 ? { endpoint: task.endpoint } : {},
-    ...task.queuePlace !== void 0 ? { place: task.queuePlace } : {},
-    enqueuedAt: task.createdAt
-  };
-}
-function formatStatusLine(facts, now = Date.now()) {
-  if (facts.state === "running") {
-    return `running, started ${facts.startedAt} (${formatElapsed(now - Date.parse(facts.startedAt))} ago)`;
-  }
-  const waiting = formatElapsed(now - Date.parse(facts.enqueuedAt));
-  const endpoint = facts.endpoint ?? "unknown";
-  const where = facts.place !== void 0 ? `place ${facts.place} in this session's queue, waiting ${waiting}` : `in another session's queue, waiting ${waiting}`;
-  return `queued, not launched yet: no child is running; it starts when endpoint ${endpoint} has room (${where})`;
-}
-function withNotice(text2, notice) {
-  if (notice === void 0) return text2;
-  const newline = text2.indexOf("\n");
-  const line = `notice: ${notice}`;
-  return newline < 0 ? `${text2}
-${line}` : `${text2.slice(0, newline)}
-${line}${text2.slice(newline)}`;
-}
-function listingStatus(t, now = Date.now()) {
-  return t.status === "running" ? formatStatusLine(statusFacts(t), now) : t.status;
+function mapRequest(agent, tierText, configuredTiers) {
+  const mappedAgent = agent === "delegate" || agent === "general" || agent === "" ? void 0 : agent;
+  const value = tierText?.trim() ?? "";
+  if (!value) return { agent: mappedAgent, tier: { kind: "none" } };
+  const explicit = value.startsWith("tier:") ? value.slice(5) : value;
+  const name = value.startsWith("tier:") ? explicit : configuredTiers.includes(value) ? value : tierForPhrase(value);
+  return { agent: mappedAgent, tier: name ? { kind: "tier", name } : { kind: "unmatched", value } };
 }
 
 // src/mcp/format.ts
@@ -39744,66 +40132,26 @@ var TOOL_RESULT_LIMIT = 5e4;
 var REPLY_RESERVE = 2e3;
 var REPLY_BUDGET_CHARS = TOOL_RESULT_LIMIT - REPLY_RESERVE;
 var LISTING_CAP = 50;
-function replyStatusLine(reply, now) {
-  switch (reply.kind) {
-    case "started":
-    case "running":
-      return formatStatusLine({ state: "running", startedAt: reply.startedAt }, now);
-    case "queued":
-      return formatStatusLine(
-        { state: "queued", endpoint: reply.endpoint, ...reply.place !== void 0 ? { place: reply.place } : {}, enqueuedAt: reply.enqueuedAt },
-        now
-      );
-    case "other_process":
-      return formatStatusLine(
-        statusFacts({
-          ...reply.startedAt !== void 0 ? { startedAt: reply.startedAt } : {},
-          ...reply.endpoint !== void 0 ? { endpoint: reply.endpoint } : {},
-          createdAt: reply.enqueuedAt
-        }),
-        now
-      );
-    default:
-      return void 0;
-  }
-}
 function describeReply(reply, view, now = Date.now()) {
-  return withNotice(describeOne(reply, view, now), "notice" in reply ? reply.notice : void 0);
+  return withNotice(describeTaskReply(reply, view, { collect: "await", cancel: "cancel" }, now), "notice" in reply ? reply.notice : void 0);
 }
 function deferredLine(reply) {
   const { taskId, agent, status } = reply.result;
   return `task: ${taskId} \xB7 ${agent} \xB7 ${status} \xB7 result not shown here (reply size); read it whole with tasks(${taskId})`;
 }
-function formatAwait(replies, limit = TOOL_RESULT_LIMIT, now = Date.now()) {
+function formatAwaitWithShown(replies, limit = TOOL_RESULT_LIMIT, now = Date.now()) {
   const sections = [];
+  const shown = [];
   let length = 0;
   for (const reply of replies) {
     const whole = describeReply(reply, void 0, now);
     const joined = length + (sections.length > 0 ? 2 : 0) + whole.length;
     const section = reply.kind === "result" && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
+    if (reply.kind === "result" && section === whole) shown.push(reply.result.taskId);
     length += (sections.length > 0 ? 2 : 0) + section.length;
     sections.push(section);
   }
-  return sections.join("\n\n");
-}
-function describeOne(reply, view, now) {
-  if (reply.kind === "result") return formatResult(reply.result);
-  const id = `task: ${reply.taskId}`;
-  const lead = view !== void 0 ? `${id} \xB7 ${view.agent}` : id;
-  const line = replyStatusLine(reply, now);
-  switch (reply.kind) {
-    case "started":
-    case "queued":
-      return `${lead} \xB7 ${line}; collect it with await or cancel it with cancel`;
-    case "running":
-      return `${lead} \xB7 ${line}`;
-    case "other_process":
-      return `${lead} \xB7 ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
-    case "abandoned":
-      return `${lead} \xB7 abandoned: its owner process died, so it has no result`;
-    case "not_found":
-      return `${id} \xB7 no such task`;
-  }
+  return { body: sections.join("\n\n"), shown };
 }
 function formatListing(tasks, conversationKnown, now = Date.now()) {
   const rank = (t) => t.status !== "running" ? 2 : t.startedAt !== void 0 ? 0 : 1;
@@ -39874,7 +40222,7 @@ var ProgressReporter = class {
     }
   }
   line() {
-    return `${this.agent} \xB7 ${this.latest} \xB7 ${formatElapsed(this.now() - this.started)}`;
+    return formatProgress(this.agent, this.latest, this.now() - this.started);
   }
   flush() {
     if (this.stopped) return;
@@ -39895,6 +40243,294 @@ var ProgressReporter = class {
   }
 };
 
+// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/stores/in-memory.js
+import { randomBytes as randomBytes3 } from "node:crypto";
+var InMemoryTaskStore = class {
+  constructor() {
+    this.tasks = /* @__PURE__ */ new Map();
+    this.cleanupTimers = /* @__PURE__ */ new Map();
+  }
+  /**
+   * Generates a unique task ID.
+   * Uses 16 bytes of random data encoded as hex (32 characters).
+   */
+  generateTaskId() {
+    return randomBytes3(16).toString("hex");
+  }
+  /**
+   * Returns the stored task unless it belongs to a different session than the caller's.
+   */
+  lookup(taskId, sessionId) {
+    const stored = this.tasks.get(taskId);
+    if (stored && sessionId !== void 0 && stored.sessionId !== void 0 && stored.sessionId !== sessionId) {
+      return void 0;
+    }
+    return stored;
+  }
+  async createTask(taskParams, requestId, request, sessionId) {
+    const taskId = this.generateTaskId();
+    if (this.tasks.has(taskId)) {
+      throw new Error(`Task with ID ${taskId} already exists`);
+    }
+    const actualTtl = taskParams.ttl ?? null;
+    const createdAt = (/* @__PURE__ */ new Date()).toISOString();
+    const task = {
+      taskId,
+      status: "working",
+      ttl: actualTtl,
+      createdAt,
+      lastUpdatedAt: createdAt,
+      pollInterval: taskParams.pollInterval ?? 1e3
+    };
+    this.tasks.set(taskId, {
+      task,
+      request,
+      requestId,
+      sessionId
+    });
+    if (actualTtl) {
+      const timer = setTimeout(() => {
+        this.tasks.delete(taskId);
+        this.cleanupTimers.delete(taskId);
+      }, actualTtl);
+      this.cleanupTimers.set(taskId, timer);
+    }
+    return task;
+  }
+  async getTask(taskId, sessionId) {
+    const stored = this.lookup(taskId, sessionId);
+    return stored ? { ...stored.task } : null;
+  }
+  async storeTaskResult(taskId, status, result, sessionId) {
+    const stored = this.lookup(taskId, sessionId);
+    if (!stored) {
+      throw new Error(`Task with ID ${taskId} not found`);
+    }
+    if (isTerminal(stored.task.status)) {
+      throw new Error(`Cannot store result for task ${taskId} in terminal status '${stored.task.status}'. Task results can only be stored once.`);
+    }
+    stored.result = result;
+    stored.task.status = status;
+    stored.task.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (stored.task.ttl) {
+      const existingTimer = this.cleanupTimers.get(taskId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const timer = setTimeout(() => {
+        this.tasks.delete(taskId);
+        this.cleanupTimers.delete(taskId);
+      }, stored.task.ttl);
+      this.cleanupTimers.set(taskId, timer);
+    }
+  }
+  async getTaskResult(taskId, sessionId) {
+    const stored = this.lookup(taskId, sessionId);
+    if (!stored) {
+      throw new Error(`Task with ID ${taskId} not found`);
+    }
+    if (!stored.result) {
+      throw new Error(`Task ${taskId} has no result stored`);
+    }
+    return stored.result;
+  }
+  async updateTaskStatus(taskId, status, statusMessage, sessionId) {
+    const stored = this.lookup(taskId, sessionId);
+    if (!stored) {
+      throw new Error(`Task with ID ${taskId} not found`);
+    }
+    if (isTerminal(stored.task.status)) {
+      throw new Error(`Cannot update task ${taskId} from terminal status '${stored.task.status}' to '${status}'. Terminal states (completed, failed, cancelled) cannot transition to other states.`);
+    }
+    stored.task.status = status;
+    if (statusMessage) {
+      stored.task.statusMessage = statusMessage;
+    }
+    stored.task.lastUpdatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    if (isTerminal(status) && stored.task.ttl) {
+      const existingTimer = this.cleanupTimers.get(taskId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      const timer = setTimeout(() => {
+        this.tasks.delete(taskId);
+        this.cleanupTimers.delete(taskId);
+      }, stored.task.ttl);
+      this.cleanupTimers.set(taskId, timer);
+    }
+  }
+  async listTasks(cursor, sessionId) {
+    const PAGE_SIZE = 10;
+    const allTaskIds = Array.from(this.tasks.keys()).filter((taskId) => this.lookup(taskId, sessionId));
+    let startIndex = 0;
+    if (cursor) {
+      const cursorIndex = allTaskIds.indexOf(cursor);
+      if (cursorIndex >= 0) {
+        startIndex = cursorIndex + 1;
+      } else {
+        throw new Error(`Invalid cursor: ${cursor}`);
+      }
+    }
+    const pageTaskIds = allTaskIds.slice(startIndex, startIndex + PAGE_SIZE);
+    const tasks = pageTaskIds.map((taskId) => {
+      const stored = this.tasks.get(taskId);
+      return { ...stored.task };
+    });
+    const nextCursor = startIndex + PAGE_SIZE < allTaskIds.length ? pageTaskIds[pageTaskIds.length - 1] : void 0;
+    return { tasks, nextCursor };
+  }
+  /**
+   * Cleanup all timers (useful for testing or graceful shutdown)
+   */
+  cleanup() {
+    for (const timer of this.cleanupTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.cleanupTimers.clear();
+    this.tasks.clear();
+  }
+  /**
+   * Get all tasks of all sessions (useful for debugging)
+   */
+  getAllTasks() {
+    return Array.from(this.tasks.values()).map((stored) => ({ ...stored.task }));
+  }
+};
+
+// src/mcp/task-store.ts
+var SubzeroTaskStore = class extends InMemoryTaskStore {
+  constructor(service2) {
+    super();
+    this.service = service2;
+  }
+  service;
+  children = /* @__PURE__ */ new Map();
+  bind(taskId, childId) {
+    this.children.set(taskId, childId);
+  }
+  release(taskId) {
+    this.children.delete(taskId);
+  }
+  reset() {
+    this.children.clear();
+    this.cleanup();
+  }
+  async updateTaskStatus(taskId, status, message, sessionId) {
+    await super.updateTaskStatus(taskId, status, message, sessionId);
+    const child = this.children.get(taskId);
+    if (status === "cancelled" && child) await this.service.cancel(child);
+  }
+  async getTaskResult(taskId, sessionId) {
+    const task = await this.getTask(taskId, sessionId);
+    if (task?.status === "cancelled") return { content: [{ type: "text", text: "The task was stopped; no action is needed." }] };
+    return super.getTaskResult(taskId, sessionId);
+  }
+};
+
+// src/mcp/wake-markers.ts
+import { createHash as createHash2, randomUUID } from "node:crypto";
+import { mkdirSync as mkdirSync4, readFileSync as readFileSync5, readdirSync as readdirSync3, renameSync as renameSync3, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import path6 from "node:path";
+var key = (value) => createHash2("sha256").update(value).digest("hex");
+function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+var WakeMarkers = class {
+  constructor(dataDir2, projectRoot) {
+    this.dataDir = dataDir2;
+    this.projectRoot = projectRoot;
+  }
+  dataDir;
+  projectRoot;
+  folder(session) {
+    return path6.join(this.dataDir, "wake", key(this.projectRoot), key(session));
+  }
+  taskFolder(session, task) {
+    return path6.join(this.folder(session), key(task));
+  }
+  start(session, task) {
+    const folder = this.folder(session);
+    mkdirSync4(folder, { recursive: true, mode: 448 });
+    const temp = path6.join(folder, `${randomUUID()}.tmp`);
+    mkdirSync4(temp, { mode: 448 });
+    try {
+      writeFileSync4(path6.join(temp, "owner"), String(process.pid), { mode: 384 });
+      renameSync3(temp, this.taskFolder(session, task));
+    } finally {
+      rmSync2(temp, { recursive: true, force: true });
+    }
+  }
+  finish(session, task, notice) {
+    const folder = this.taskFolder(session, task);
+    const temp = path6.join(folder, `${randomUUID()}.tmp`);
+    try {
+      writeFileSync4(temp, notice, { mode: 384 });
+      renameSync3(temp, path6.join(folder, "done"));
+    } catch {
+      try {
+        this.clear(session, task);
+      } catch {
+      }
+    } finally {
+      rmSync2(temp, { force: true });
+    }
+  }
+  clear(session, task) {
+    rmSync2(this.taskFolder(session, task), { recursive: true, force: true });
+  }
+  read(session) {
+    const folder = this.folder(session);
+    let names;
+    try {
+      names = readdirSync3(folder).filter((name) => /^[a-f0-9]{64}$/.test(name));
+    } catch {
+      return { pending: false, notice: void 0 };
+    }
+    let pending = false;
+    let notice;
+    for (const name of names) {
+      const taskFolder = path6.join(folder, name);
+      if (notice !== void 0) {
+        pending = true;
+        continue;
+      }
+      const claimed = path6.join(taskFolder, `${process.pid}.${randomUUID()}.claim`);
+      try {
+        renameSync3(path6.join(taskFolder, "done"), claimed);
+        notice = readFileSync5(claimed, "utf8");
+        rmSync2(taskFolder, { recursive: true, force: true });
+      } catch {
+        try {
+          const claims = readdirSync3(taskFolder).filter((name2) => name2.endsWith(".claim"));
+          if (claims.length) {
+            for (const claim2 of claims) {
+              if (!alive(Number(claim2.split(".")[0]))) {
+                try {
+                  renameSync3(path6.join(taskFolder, claim2), path6.join(taskFolder, "done"));
+                } catch {
+                }
+              }
+            }
+            pending = true;
+            continue;
+          }
+          const pid = Number(readFileSync5(path6.join(taskFolder, "owner"), "utf8"));
+          if (!Number.isInteger(pid) || pid <= 0) throw new Error("invalid owner");
+          if (alive(pid)) pending = true;
+        } catch {
+        }
+      }
+    }
+    return { pending, notice };
+  }
+};
+
 // src/mcp/server.ts
 var SERVER_INSTRUCTIONS = [
   "Use the delegate tool to hand a task to a child on another model, naming an agent, a model tier, both or neither.",
@@ -39902,10 +40538,11 @@ var SERVER_INSTRUCTIONS = [
   "The child cannot see this conversation; it sees only the brief."
 ].join(" ");
 var MAX_AWAIT_SECONDS = 600;
-var DELEGATE_DESCRIPTION = "Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Returns the result with the task id first, or the task id at once when wait is false.";
+var DELEGATE_DESCRIPTION = "Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Returns the result with the task id first, or a task handle or id when running in the background.";
 var TOOLS = [
   {
     name: "delegate",
+    execution: { taskSupport: "optional" },
     description: DELEGATE_DESCRIPTION,
     inputSchema: {
       type: "object",
@@ -39915,7 +40552,7 @@ var TOOLS = [
         brief: { type: "string", description: "A self-contained brief; the child cannot see this conversation" },
         files: { type: "array", items: { type: "string" }, description: "Paths the child should read" },
         expected_output: { type: "string", description: "What the result should contain" },
-        wait: { type: "boolean", description: "Wait for the result (default true)" }
+        wait: { type: "boolean", description: "Wait for the result; defaults to true unless the call requests an MCP task" }
       },
       required: ["brief"]
     },
@@ -39943,8 +40580,8 @@ var TOOLS = [
   },
   {
     name: "cancel",
-    description: "Cancel a task; it ends with the status cancelled.",
-    inputSchema: { type: "object", properties: { task: { type: "string" } }, required: ["task"] }
+    description: "Cancel one task, or all tasks of this session when no task is given.",
+    inputSchema: { type: "object", properties: { task: { type: "string" } } }
   }
 ];
 function text(body, isError = false) {
@@ -39958,21 +40595,52 @@ function toolError(err) {
       true
     );
   }
-  if (err instanceof TierError || err instanceof UnsupportedHostError) return text(`${err.message}. ${PASS_BACK}`, true);
+  if (err instanceof TierError || err instanceof UnsupportedHostError || err instanceof MissingAgentFileError) return text(`${err.message}. ${PASS_BACK}`, true);
   if (err instanceof UnknownAgentError || err instanceof LoadError || err instanceof EmptyBriefError) {
     return text(err.message, true);
   }
   return text(`subzero failed: ${err?.message ?? String(err)}`, true);
 }
-function stringArg(args, key) {
-  return typeof args[key] === "string" ? args[key] : void 0;
+function stringArg(args, key2) {
+  return typeof args[key2] === "string" ? args[key2] : void 0;
 }
 function createSubzeroServer(options) {
   const { service: service2 } = options;
+  const taskMode = options.taskMode === true && options.nonInteractive !== true;
+  const taskStore = new SubzeroTaskStore(service2);
   const server2 = new Server(
     { name: "subzero", version: options.version ?? "0.0.0-dev" },
-    { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS }
+    { capabilities: { tools: {}, ...taskMode ? { tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } } } : {} }, ...taskMode ? { taskStore } : {}, instructions: SERVER_INSTRUCTIONS }
   );
+  let lastSession;
+  let watcher;
+  const syncSession = async () => {
+    await service2.start();
+    const current = options.parentSessionId();
+    const previous = lastSession;
+    if (current !== void 0) lastSession = current;
+    if (current !== void 0 && previous !== void 0 && current !== previous) {
+      taskStore.reset();
+      await service2.cancelSession(previous);
+    }
+    return current;
+  };
+  const stopWatchingIfIdle = () => {
+    if (watcher && !service2.hasLiveSessionTasks()) {
+      clearInterval(watcher);
+      watcher = void 0;
+    }
+  };
+  const watchSessions = () => {
+    if (watcher || !service2.hasLiveSessionTasks()) return;
+    watcher = setInterval(() => void syncSession().catch(() => void 0).finally(stopWatchingIfIdle), 5e3);
+    watcher.unref();
+  };
+  server2.onclose = () => {
+    if (watcher) clearInterval(watcher);
+    watcher = void 0;
+    taskStore.cleanup();
+  };
   async function delegateDescription() {
     try {
       await service2.start();
@@ -39987,50 +40655,161 @@ function createSubzeroServer(options) {
     }
   }
   server2.setRequestHandler(ListToolsRequestSchema, async () => {
+    try {
+      await syncSession();
+    } catch {
+    }
     const description = await delegateDescription();
-    return { tools: TOOLS.map((tool) => tool.name === "delegate" ? { ...tool, description } : tool) };
+    return { tools: TOOLS.map((tool) => {
+      if (tool.name !== "delegate") return tool;
+      const { execution, ...base } = tool;
+      return { ...base, description, ...taskMode ? { execution } : {} };
+    }) };
   });
   server2.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const args = request.params.arguments ?? {};
+    const startedAt = Date.now();
     try {
+      if (request.params.task && request.params.name !== "delegate") throw new Error("only delegate supports tasks");
+      const currentSession = await syncSession();
       switch (request.params.name) {
         case "delegate": {
+          options.onTaskMode?.(request.params.task !== void 0 && taskMode);
           const agent = stringArg(args, "agent");
           const brief = stringArg(args, "brief");
-          if (brief === void 0) return text("delegate needs a brief", true);
+          if (brief === void 0) {
+            if (request.params.task) throw new Error("delegate needs a brief");
+            return text("delegate needs a brief", true);
+          }
           const tier = stringArg(args, "tier");
           const files = Array.isArray(args.files) ? args.files.filter((f) => typeof f === "string") : void 0;
           const expectedOutput = stringArg(args, "expected_output");
-          const wait = args.wait !== false;
+          const wait = options.nonInteractive === true || args.wait !== false || options.wakeDataDir !== void 0 && currentSession === void 0 && !request.params.task;
           await service2.start();
-          const parentSessionId = options.parentSessionId();
+          const parentSessionId = currentSession;
+          let ownTask;
+          let cancelOwnWhenCreated = false;
+          const onAbort = () => {
+            if (Date.now() - startedAt < 12e4 && parentSessionId !== void 0) void service2.cancelSession(parentSessionId);
+            else if (ownTask) void service2.cancel(ownTask);
+            else cancelOwnWhenCreated = true;
+          };
+          const tiers = configuredTierNames(service2.projectRoot);
+          const mapped = mapRequest(agent, tier, tiers);
+          if (mapped.tier.kind === "unmatched") throw new TierError(mapped.tier.value, tiers);
           const progressToken = request.params._meta?.progressToken;
-          const reporter = wait && progressToken !== void 0 ? new ProgressReporter(
+          const reporter = (request.params.task ? args.wait === true : wait) && progressToken !== void 0 ? new ProgressReporter(
             agent ?? "general",
             (progress, message) => void extra.sendNotification({ method: "notifications/progress", params: { progressToken, progress, message } }).catch(() => void 0),
             options.progress
           ) : null;
+          const delegation = {
+            ...mapped.agent !== void 0 ? { agent: mapped.agent } : {},
+            ...mapped.tier.kind === "tier" ? { tier: mapped.tier.name } : {},
+            briefText: brief,
+            ...files !== void 0 ? { files } : {},
+            ...expectedOutput !== void 0 ? { expectedOutput } : {},
+            replyBudgetChars: REPLY_BUDGET_CHARS,
+            ...parentSessionId !== void 0 ? { parentSessionId } : {}
+          };
+          const onState = (state) => {
+            reporter?.onState(state);
+            if (parentSessionId !== void 0 && lastSession !== void 0 && parentSessionId !== lastSession) {
+              void service2.cancelSession(parentSessionId);
+            }
+            watchSessions();
+            if (state === "Settled" || state === "Failed" || state === "Cancelled") setImmediate(stopWatchingIfIdle);
+          };
+          if (request.params.task) {
+            try {
+              if (!extra.taskStore) throw new Error("task storage unavailable");
+              const reply = await service2.delegate(delegation, {
+                wait: false,
+                ...reporter ? { onEvent: (event) => reporter.onEvent(event) } : {},
+                onState
+              });
+              if (reply.kind === "result") throw new Error("expected a live task");
+              let task;
+              try {
+                task = await extra.taskStore.createTask({ ttl: null, pollInterval: 100 });
+              } catch (err) {
+                await service2.cancel(reply.taskId);
+                throw err;
+              }
+              taskStore.bind(task.taskId, reply.taskId);
+              const store = extra.taskStore;
+              const completion = (async () => {
+                try {
+                  const result = await service2.waitForCompletion(reply.taskId);
+                  if ((await store.getTask(task.taskId)).status === "cancelled") return;
+                  const notice = result.kind === "result" && parentSessionId !== void 0 ? await service2.notice(reply.taskId, result.result.status, parentSessionId, "await") : "";
+                  const withNotice2 = reply.notice === void 0 ? result : { ...result, notice: reply.notice };
+                  const body = `${describeReply(withNotice2)}${notice ? `
+
+${notice}` : ""}`;
+                  await store.storeTaskResult(task.taskId, result.kind === "result" && result.result.status === "failed" ? "failed" : "completed", text(body));
+                } finally {
+                  taskStore.release(task.taskId);
+                }
+              })();
+              if (args.wait === true || options.nonInteractive === true) {
+                const onAbort2 = () => {
+                  if (Date.now() - startedAt < 12e4 && parentSessionId !== void 0) void service2.cancelSession(parentSessionId);
+                  else void service2.cancel(reply.taskId);
+                };
+                if (extra.signal.aborted) onAbort2();
+                else extra.signal.addEventListener("abort", onAbort2, { once: true });
+                try {
+                  await completion;
+                  return { task: await store.getTask(task.taskId) };
+                } finally {
+                  extra.signal.removeEventListener("abort", onAbort2);
+                }
+              }
+              void completion.catch(() => void 0);
+              return { task };
+            } finally {
+              reporter?.stop();
+            }
+          }
+          if (wait) {
+            if (extra.signal.aborted) onAbort();
+            else extra.signal.addEventListener("abort", onAbort, { once: true });
+          }
           try {
             const reply = await service2.delegate(
-              {
-                ...agent !== void 0 ? { agent } : {},
-                ...tier !== void 0 ? { tier } : {},
-                briefText: brief,
-                ...files !== void 0 ? { files } : {},
-                ...expectedOutput !== void 0 ? { expectedOutput } : {},
-                // The child's result comes back whole; this keeps it within Claude Code's inline limit.
-                replyBudgetChars: REPLY_BUDGET_CHARS,
-                ...parentSessionId !== void 0 ? { parentSessionId } : {}
-              },
+              delegation,
               {
                 wait,
-                ...reporter ? { onEvent: (e) => reporter.onEvent(e), onState: (s) => reporter.onState(s) } : {},
-                // notifications/cancelled for a waited call cancels its task.
-                ...wait ? { signal: extra.signal } : {}
+                onTask: (taskId) => {
+                  ownTask = taskId;
+                  if (wait && (cancelOwnWhenCreated || extra.signal.aborted && Date.now() - startedAt < 12e4)) void service2.cancel(taskId);
+                },
+                ...reporter ? { onEvent: (e) => reporter.onEvent(e) } : {},
+                onState
               }
             );
+            if (!wait && reply.kind !== "result" && parentSessionId !== void 0 && options.wakeDataDir !== void 0 && service2.projectRoot !== void 0) {
+              const markers = new WakeMarkers(options.wakeDataDir, service2.projectRoot);
+              try {
+                markers.start(parentSessionId, reply.taskId);
+                void service2.waitForCompletion(reply.taskId).then(async (done) => {
+                  if (done.kind !== "result" || done.result.status === "cancelled") markers.clear(parentSessionId, reply.taskId);
+                  else markers.finish(parentSessionId, reply.taskId, `${describeReply(done)}
+
+${await service2.notice(reply.taskId, done.result.status, parentSessionId, "await")}`);
+                }).catch(() => {
+                  try {
+                    markers.clear(parentSessionId, reply.taskId);
+                  } catch {
+                  }
+                });
+              } catch {
+              }
+            }
             return text(describeReply(reply));
           } finally {
+            extra.signal.removeEventListener("abort", onAbort);
             reporter?.stop();
           }
         }
@@ -40041,29 +40820,66 @@ function createSubzeroServer(options) {
             const views2 = await service2.list();
             const view = views2.find((v) => v.taskId === task);
             if (view === void 0) return text(`task: ${task} \xB7 no such task`);
-            return text(describeReply(await service2.collect(task), view));
+            const reply = await service2.collect(task);
+            if (reply.kind === "result" && view.parentSessionId !== void 0 && options.wakeDataDir && service2.projectRoot) {
+              try {
+                new WakeMarkers(options.wakeDataDir, service2.projectRoot).clear(view.parentSessionId, task);
+              } catch {
+              }
+            }
+            return text(describeReply(reply, view));
           }
           await service2.start();
-          const parentSessionId = options.parentSessionId();
+          const parentSessionId = currentSession;
           const views = await service2.list(parentSessionId);
           return text(formatListing(views, parentSessionId !== void 0));
         }
         case "await": {
           const ids = Array.isArray(args.tasks) ? args.tasks.filter((t) => typeof t === "string") : [];
           if (ids.length === 0) return text("await needs at least one task id", true);
-          const seconds = typeof args.timeout_s === "number" && args.timeout_s >= 0 ? Math.min(args.timeout_s, MAX_AWAIT_SECONDS) : 30;
-          const replies = await Promise.all(ids.map((id) => service2.waitFor(id, seconds * 1e3)));
-          return text(formatAwait(replies));
+          const seconds2 = typeof args.timeout_s === "number" && args.timeout_s >= 0 ? Math.min(args.timeout_s, MAX_AWAIT_SECONDS) : 30;
+          const onAbort = () => {
+            if (Date.now() - startedAt < 12e4) void service2.cancelSession(currentSession);
+          };
+          if (extra.signal.aborted) onAbort();
+          else extra.signal.addEventListener("abort", onAbort, { once: true });
+          let replies;
+          try {
+            replies = await Promise.all(ids.map((id) => service2.waitFor(id, seconds2 * 1e3)));
+          } finally {
+            extra.signal.removeEventListener("abort", onAbort);
+          }
+          const formatted = formatAwaitWithShown(replies);
+          if (formatted.shown.length && options.wakeDataDir && service2.projectRoot) {
+            const markers = new WakeMarkers(options.wakeDataDir, service2.projectRoot);
+            const owners = await service2.list().catch(() => []);
+            for (const id of formatted.shown) {
+              const owner = owners.find((task) => task.taskId === id)?.parentSessionId;
+              if (owner !== void 0) try {
+                markers.clear(owner, id);
+              } catch {
+              }
+            }
+          }
+          return text(formatted.body);
         }
         case "cancel": {
           const task = stringArg(args, "task");
-          if (task === void 0) return text("cancel needs a task id", true);
+          if (task === void 0) {
+            await service2.start();
+            const cancelled = await service2.cancelSession(currentSession);
+            return cancelled.kind === "unknown_session" ? text("session is unknown; no tasks were cancelled", true) : text(`${cancelled.count} tasks cancelled${cancelled.count ? `: ${cancelled.taskIds.join(", ")}` : ""}`);
+          }
           return text(describeReply(await service2.cancel(task)));
         }
         default:
           return text(`unknown tool ${request.params.name}`, true);
       }
     } catch (err) {
+      if (request.params.task) {
+        const result = toolError(err);
+        throw new McpError(ErrorCode.InvalidParams, result.content.map((part) => part.type === "text" ? part.text : "").join("\n"));
+      }
       return toolError(err);
     }
   });
@@ -40091,11 +40907,12 @@ var service = new DelegationService({
 });
 var data = dataDir(env);
 var markedRoot;
+var readyTaskMode = false;
 function markReady() {
   const root = service.projectRoot;
   if (root === void 0 || markedRoot !== void 0) return;
   try {
-    writeReadinessMarker(data, root, process.pid, process.ppid);
+    writeReadinessMarker(data, root, process.pid, process.ppid, readyTaskMode);
     markedRoot = root;
   } catch {
   }
@@ -40107,9 +40924,28 @@ process.on("exit", () => {
   } catch {
   }
 });
+var nonInteractive = parentIsNonInteractive();
 server = createSubzeroServer({
   service,
   version: version2,
+  wakeDataDir: data,
+  nonInteractive,
+  taskMode: !nonInteractive,
+  onTaskMode: (enabled) => {
+    if (readyTaskMode === enabled) return;
+    if (markedRoot !== void 0) {
+      try {
+        writeReadinessMarker(data, markedRoot, process.pid, process.ppid, enabled);
+      } catch {
+        try {
+          removeReadinessMarker(data, markedRoot, process.pid);
+        } catch {
+        }
+        markedRoot = void 0;
+      }
+    }
+    readyTaskMode = enabled;
+  },
   parentSessionId: () => {
     markReady();
     return readParentSessionId(data, service.projectRoot, process.ppid);

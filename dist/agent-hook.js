@@ -117,17 +117,17 @@ var require_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    function visit_(key, node2, visitor, path4) {
-      const ctrl = callVisitor(key, node2, visitor, path4);
+    function visit_(key, node2, visitor, path5) {
+      const ctrl = callVisitor(key, node2, visitor, path5);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path4, ctrl);
-        return visit_(key, ctrl, visitor, path4);
+        replaceNode(key, path5, ctrl);
+        return visit_(key, ctrl, visitor, path5);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path4 = Object.freeze(path4.concat(node2));
+          path5 = Object.freeze(path5.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = visit_(i, node2.items[i], visitor, path4);
+            const ci = visit_(i, node2.items[i], visitor, path5);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -138,13 +138,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path4 = Object.freeze(path4.concat(node2));
-          const ck = visit_("key", node2.key, visitor, path4);
+          path5 = Object.freeze(path5.concat(node2));
+          const ck = visit_("key", node2.key, visitor, path5);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = visit_("value", node2.value, visitor, path4);
+          const cv = visit_("value", node2.value, visitor, path5);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -165,17 +165,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node2, visitor, path4) {
-      const ctrl = await callVisitor(key, node2, visitor, path4);
+    async function visitAsync_(key, node2, visitor, path5) {
+      const ctrl = await callVisitor(key, node2, visitor, path5);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path4, ctrl);
-        return visitAsync_(key, ctrl, visitor, path4);
+        replaceNode(key, path5, ctrl);
+        return visitAsync_(key, ctrl, visitor, path5);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path4 = Object.freeze(path4.concat(node2));
+          path5 = Object.freeze(path5.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = await visitAsync_(i, node2.items[i], visitor, path4);
+            const ci = await visitAsync_(i, node2.items[i], visitor, path5);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -186,13 +186,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path4 = Object.freeze(path4.concat(node2));
-          const ck = await visitAsync_("key", node2.key, visitor, path4);
+          path5 = Object.freeze(path5.concat(node2));
+          const ck = await visitAsync_("key", node2.key, visitor, path5);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = await visitAsync_("value", node2.value, visitor, path4);
+          const cv = await visitAsync_("value", node2.value, visitor, path5);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -219,23 +219,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node2, visitor, path4) {
+    function callVisitor(key, node2, visitor, path5) {
       if (typeof visitor === "function")
-        return visitor(key, node2, path4);
+        return visitor(key, node2, path5);
       if (identity.isMap(node2))
-        return visitor.Map?.(key, node2, path4);
+        return visitor.Map?.(key, node2, path5);
       if (identity.isSeq(node2))
-        return visitor.Seq?.(key, node2, path4);
+        return visitor.Seq?.(key, node2, path5);
       if (identity.isPair(node2))
-        return visitor.Pair?.(key, node2, path4);
+        return visitor.Pair?.(key, node2, path5);
       if (identity.isScalar(node2))
-        return visitor.Scalar?.(key, node2, path4);
+        return visitor.Scalar?.(key, node2, path5);
       if (identity.isAlias(node2))
-        return visitor.Alias?.(key, node2, path4);
+        return visitor.Alias?.(key, node2, path5);
       return void 0;
     }
-    function replaceNode(key, path4, node2) {
-      const parent = path4[path4.length - 1];
+    function replaceNode(key, path5, node2) {
+      const parent = path5[path5.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node2;
       } else if (identity.isPair(parent)) {
@@ -847,10 +847,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path4, value) {
+    function collectionFromPath(schema, path5, value) {
       let v = value;
-      for (let i = path4.length - 1; i >= 0; --i) {
-        const k = path4[i];
+      for (let i = path5.length - 1; i >= 0; --i) {
+        const k = path5[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -869,7 +869,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path4) => path4 == null || typeof path4 === "object" && !!path4[Symbol.iterator]().next().done;
+    var isEmptyPath = (path5) => path5 == null || typeof path5 === "object" && !!path5[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -899,11 +899,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path4, value) {
-        if (isEmptyPath(path4))
+      addIn(path5, value) {
+        if (isEmptyPath(path5))
           this.add(value);
         else {
-          const [key, ...rest] = path4;
+          const [key, ...rest] = path5;
           const node2 = this.get(key, true);
           if (identity.isCollection(node2))
             node2.addIn(rest, value);
@@ -917,8 +917,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path4) {
-        const [key, ...rest] = path4;
+      deleteIn(path5) {
+        const [key, ...rest] = path5;
         if (rest.length === 0)
           return this.delete(key);
         const node2 = this.get(key, true);
@@ -932,8 +932,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path4, keepScalar) {
-        const [key, ...rest] = path4;
+      getIn(path5, keepScalar) {
+        const [key, ...rest] = path5;
         const node2 = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node2) ? node2.value : node2;
@@ -951,8 +951,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path4) {
-        const [key, ...rest] = path4;
+      hasIn(path5) {
+        const [key, ...rest] = path5;
         if (rest.length === 0)
           return this.has(key);
         const node2 = this.get(key, true);
@@ -962,8 +962,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path4, value) {
-        const [key, ...rest] = path4;
+      setIn(path5, value) {
+        const [key, ...rest] = path5;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3478,9 +3478,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path4, value) {
+      addIn(path5, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path4, value);
+          this.contents.addIn(path5, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3555,14 +3555,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path4) {
-        if (Collection.isEmptyPath(path4)) {
+      deleteIn(path5) {
+        if (Collection.isEmptyPath(path5)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path4) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path5) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3577,10 +3577,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path4, keepScalar) {
-        if (Collection.isEmptyPath(path4))
+      getIn(path5, keepScalar) {
+        if (Collection.isEmptyPath(path5))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path4, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path5, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3591,10 +3591,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path4) {
-        if (Collection.isEmptyPath(path4))
+      hasIn(path5) {
+        if (Collection.isEmptyPath(path5))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path4) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path5) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3611,13 +3611,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path4, value) {
-        if (Collection.isEmptyPath(path4)) {
+      setIn(path5, value) {
+        if (Collection.isEmptyPath(path5)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path4), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path5), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path4, value);
+          this.contents.setIn(path5, value);
         }
       }
       /**
@@ -5578,9 +5578,9 @@ var require_cst_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path4) => {
+    visit2.itemAtPath = (cst, path5) => {
       let item = cst;
-      for (const [field, index] of path4) {
+      for (const [field, index] of path5) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5589,23 +5589,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit2.parentCollection = (cst, path4) => {
-      const parent = visit2.itemAtPath(cst, path4.slice(0, -1));
-      const field = path4[path4.length - 1][0];
+    visit2.parentCollection = (cst, path5) => {
+      const parent = visit2.itemAtPath(cst, path5.slice(0, -1));
+      const field = path5[path5.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path4, item, visitor) {
-      let ctrl = visitor(item, path4);
+    function _visit(path5, item, visitor) {
+      let ctrl = visitor(item, path5);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path4.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path5.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5616,10 +5616,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path4);
+            ctrl = ctrl(item, path5);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path4) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path5) : ctrl;
     }
     exports.visit = visit2;
   }
@@ -7414,7 +7414,7 @@ function liveReadinessMarkers(dir, projectRoot) {
     try {
       const value = JSON.parse(readFileSync(path.join(folder, name), "utf8"));
       if (Number.isInteger(value.pid) && Number.isInteger(value.ppid) && isAlive(value.pid)) {
-        live.push({ pid: value.pid, ppid: value.ppid });
+        live.push({ pid: value.pid, ppid: value.ppid, taskMode: typeof value.taskMode === "boolean" ? value.taskMode : null });
       }
     } catch {
     }
@@ -7425,8 +7425,8 @@ function liveReadinessMarkers(dir, projectRoot) {
 // src/routing/routing.ts
 import { execFileSync } from "node:child_process";
 import { createHash as createHash2 } from "node:crypto";
-import { existsSync, mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync3, rmSync as rmSync2, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import path3 from "node:path";
+import { existsSync as existsSync2, mkdirSync as mkdirSync4, readdirSync as readdirSync2, readFileSync as readFileSync3, rmSync as rmSync3, statSync as statSync3, writeFileSync as writeFileSync3 } from "node:fs";
+import path4 from "node:path";
 
 // src/config/agent-config.ts
 import { mkdirSync as mkdirSync2, readFileSync as readFileSync2, realpathSync, statSync as statSync2, writeFileSync as writeFileSync2 } from "node:fs";
@@ -8250,10 +8250,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path4) {
-  if (!path4)
+function getElementAtPath(obj, path5) {
+  if (!path5)
     return obj;
-  return path4.reduce((acc, key) => acc?.[key], obj);
+  return path5.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -8593,11 +8593,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path4, issues) {
+function prefixIssues(path5, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path4);
+    iss.path.unshift(path5);
     return iss;
   });
 }
@@ -9059,16 +9059,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9107,17 +9107,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result = { errors: [] };
-  const processError = (error63, path4 = []) => {
+  const processError = (error63, path5 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path4, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path5, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path4, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path5, ...issue2.path]);
       } else {
-        const fullpath = [...path4, ...issue2.path];
+        const fullpath = [...path5, ...issue2.path];
         if (fullpath.length === 0) {
           result.errors.push(mapper(issue2));
           continue;
@@ -9156,8 +9156,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path4 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path4) {
+  const path5 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path5) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -26295,13 +26295,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path4 = ref.slice(1).split("/").filter(Boolean);
-  if (path4.length === 0) {
+  const path5 = ref.slice(1).split("/").filter(Boolean);
+  if (path5.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path4[0] === defsKey) {
-    const key = path4[1] === void 0 ? void 0 : decodeJSONPointerSegment(path4[1]);
+  if (path5[0] === defsKey) {
+    const key = path5[1] === void 0 ? void 0 : decodeJSONPointerSegment(path5[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -27153,9 +27153,10 @@ function date4(params) {
 // src/config/agent-config.ts
 var AGENT_FILE = path2.join(".agents", "subzero.yaml");
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-var DEFAULT_TIER = "default";
+var DEFAULT_TIER = "medium";
 var GENERAL_AGENT = "general";
 var FALLBACK_AGENT = "fallback";
+var RUN_INIT = "; run /subzero:init in Claude Code or /subzero init in pi";
 var LoadError = class extends Error {
   code = "load_error";
   constructor(message) {
@@ -27163,9 +27164,15 @@ var LoadError = class extends Error {
     this.name = "LoadError";
   }
 };
+var MissingAgentFileError = class extends LoadError {
+  constructor(agentFile) {
+    super(`agent file is missing: ${agentFile}${RUN_INIT}`);
+    this.name = "MissingAgentFileError";
+  }
+};
 var MissingDefaultTierError = class extends LoadError {
   constructor() {
-    super("the default tier is required in models.tiers when agents holds an entry");
+    super(`the medium tier is required in models.tiers${RUN_INIT}`);
     this.name = "MissingDefaultTierError";
   }
 };
@@ -27200,11 +27207,12 @@ function readAgentText(agentFile) {
     return readFileSync2(agentFile, "utf8");
   } catch (err) {
     const code = err.code;
-    if (code === "ENOENT") throw new LoadError(`agent file is missing: ${agentFile}`);
+    if (code === "ENOENT") throw new MissingAgentFileError(agentFile);
     throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
   }
 }
-function parseCatalog(text, agentFile) {
+function parseCatalog(text, agentFile, options = {}) {
+  const allowMissingStarter = options.allowMissingStarter === true;
   const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
   let parsed;
   try {
@@ -27220,9 +27228,9 @@ function parseCatalog(text, agentFile) {
   const endpointsMap = doc.endpoints ?? {};
   if (!isRecord(skillsMap)) throw malformed('"skills" must be a map');
   if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
-  if (doc.models !== void 0 && !isRecord(doc.models)) throw malformed('"models" must be a map');
+  if (doc.models !== void 0 && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
   const modelsMap = doc.models ?? {};
-  if (modelsMap.tiers !== void 0 && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
+  if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
   const baseDir = path2.dirname(agentFile);
   const skillFolders = /* @__PURE__ */ new Map();
   for (const [name, value] of Object.entries(skillsMap)) {
@@ -27256,11 +27264,15 @@ function parseCatalog(text, agentFile) {
     }
   }
   for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint)) {
+    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
       throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
     }
   }
-  if (entries.size > 0 && !tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
+  if (!allowMissingStarter) {
+    if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+  }
   return { agentFile, entries, tiers, routing, limits };
 }
 function validateTier(name, raw) {
@@ -27383,14 +27395,54 @@ function getRouting(projectRoot) {
   return loadAgentFile(projectRoot).routing;
 }
 
-// src/routing/routing.ts
-var DELEGATE_TOOL = "mcp__plugin_subzero_subzero__delegate";
-var PASSBACK_WORD = "passback";
+// src/config/tier-words.ts
 var TIER_WORDS = [
   { tier: "small", phrase: "cheapest capable" },
   { tier: "medium", phrase: "mid-tier" },
   { tier: "large", phrase: "session model" }
 ];
+
+// src/routing/deny-lock.ts
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync as mkdirSync3, rmSync as rmSync2 } from "node:fs";
+import path3 from "node:path";
+var pause = new Int32Array(new SharedArrayBuffer(4));
+var helper = "require('node:fs').writeFileSync(process.argv[1], 'ready', { mode: 0o600 }); process.stdin.resume(); process.stdin.on('end', () => process.exit(0));";
+function withDenyLock(dataDir2, sessionKey, action, wait = true) {
+  const root = path3.join(dataDir2, "sessions", "deny-locks");
+  mkdirSync3(root, { recursive: true, mode: 448 });
+  const lock = path3.join(root, `${sessionKey}.lock`);
+  const ready = path3.join(root, `${process.pid}-${randomUUID()}.ready`);
+  const program = process.platform === "darwin" ? "lockf" : "flock";
+  const args = process.platform === "darwin" ? ["-k", "-t", wait ? "2" : "0", lock, process.execPath, "-e", helper, ready] : ["-w", wait ? "2" : "0", lock, process.execPath, "-e", helper, ready];
+  const child = spawn(program, args, { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+  child.on("error", () => void 0);
+  try {
+    if (child.pid === void 0) return void 0;
+    const deadline = Date.now() + (wait ? 2500 : 200);
+    while (!existsSync(ready) && Date.now() < deadline) Atomics.wait(pause, 0, 0, 5);
+    if (!existsSync(ready)) return void 0;
+    return action();
+  } finally {
+    if (child.pid !== void 0) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+      }
+    }
+    child.stdin?.destroy();
+    child.unref();
+    try {
+      rmSync2(ready, { force: true });
+    } catch {
+    }
+  }
+}
+
+// src/routing/routing.ts
+var DELEGATE_TOOL = "mcp__plugin_subzero_subzero__delegate";
+var PASSBACK_WORD = "passback";
 function aliasTier(model) {
   if (model === void 0) return "large";
   if (model === "haiku") return "small";
@@ -27398,8 +27450,8 @@ function aliasTier(model) {
   return void 0;
 }
 var DEFAULT_GENERIC_AGENTS = ["general-purpose", "claude"];
-function isGenericSpawn(spawn, genericAgents) {
-  const type = spawn.subagent_type;
+function isGenericSpawn(spawn2, genericAgents) {
+  const type = spawn2.subagent_type;
   if (type === void 0 || type === "") return true;
   return (genericAgents ?? DEFAULT_GENERIC_AGENTS).includes(type);
 }
@@ -27427,47 +27479,60 @@ function ancestorPids(pid = process.pid) {
 }
 var promptHash = (prompt) => createHash2("sha256").update(prompt).digest("hex");
 function denyRoot(dataDir2) {
-  return path3.join(dataDir2, "sessions", "deny");
+  return path4.join(dataDir2, "sessions", "deny");
 }
 function denyFolder(dataDir2, sessionId) {
-  return path3.join(denyRoot(dataDir2), createHash2("sha256").update(sessionId).digest("hex").slice(0, 32));
+  return path4.join(denyRoot(dataDir2), createHash2("sha256").update(sessionId).digest("hex").slice(0, 32));
 }
 function rememberedTier(dataDir2, sessionId, hash2) {
   try {
-    const value = JSON.parse(readFileSync3(path3.join(denyFolder(dataDir2, sessionId), hash2), "utf8"));
+    const value = JSON.parse(readFileSync3(path4.join(denyFolder(dataDir2, sessionId), hash2), "utf8"));
     return typeof value.tier === "string" ? value.tier : void 0;
   } catch (err) {
     if (err.code === "ENOENT") return void 0;
     throw err;
   }
 }
-function remember(dataDir2, sessionId, hash2, tier, now) {
+function remember(dataDir2, sessionId, hash2, tier) {
   const folder = denyFolder(dataDir2, sessionId);
-  mkdirSync3(folder, { recursive: true, mode: 448 });
-  sweepDenyMemory(dataDir2, now, path3.basename(folder));
+  mkdirSync4(folder, { recursive: true, mode: 448 });
   try {
-    writeFileSync3(path3.join(folder, hash2), JSON.stringify({ tier }) + "\n", { flag: "wx", mode: 384 });
+    writeFileSync3(path4.join(folder, hash2), JSON.stringify({ tier }) + "\n", { flag: "wx", mode: 384 });
   } catch (err) {
     if (err.code !== "EEXIST") throw err;
   }
 }
 function sweepDenyMemory(dataDir2, now, keep) {
   const root = denyRoot(dataDir2);
+  let names;
   try {
-    for (const name of readdirSync2(root)) {
-      if (name === keep) continue;
-      try {
-        const folder = path3.join(root, name);
-        if (now - statSync3(folder).mtimeMs > DENY_MEMORY_TTL_MS) rmSync2(folder, { recursive: true, force: true });
-      } catch {
-      }
+    names = readdirSync2(root);
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
+  for (const name of names) {
+    if (name === keep) continue;
+    try {
+      const folder = path4.join(root, name);
+      if (now - statSync3(folder).mtimeMs <= DENY_MEMORY_TTL_MS) continue;
+      const checked = withDenyLock(dataDir2, name, () => {
+        try {
+          if (now - statSync3(folder).mtimeMs > DENY_MEMORY_TTL_MS) rmSync3(folder, { recursive: true, force: true });
+        } catch (err) {
+          if (err.code !== "ENOENT") throw err;
+        }
+        return true;
+      });
+      if (!checked) throw new Error("could not lock deny memory for cleanup");
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
     }
-  } catch {
   }
 }
-function buildDenyReason(tier, prompt) {
+function buildDenyReason(tier, prompt, taskMode = false) {
   return [
-    `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}", brief set to this Agent call's prompt unchanged, and wait: false, then collect it with the await tool.`,
+    taskMode === true ? `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}" and brief set to this Agent call's prompt unchanged.` : taskMode === null ? `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}" and brief set to this Agent call's prompt unchanged. If it returns a task id, collect it with the await tool.` : `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}", brief set to this Agent call's prompt unchanged, and wait: false, then collect it with the await tool.`,
     "This is a routing rule, not an error; do not call Agent again for this subagent and do not change its model.",
     `Only if ${DELEGATE_TOOL} is refused or returns a tool error and made no task, call Agent again with the prompt unchanged and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails.`,
     `brief:
@@ -27475,33 +27540,42 @@ ${prompt}`
   ].join("\n");
 }
 function isPassback(description) {
-  return description !== void 0 && description.trimStart().startsWith(PASSBACK_WORD);
+  return description !== void 0 && /^passback\b/.test(description.trimStart());
 }
-function allowedByMarker(ctx) {
+function matchingMarker(ctx) {
   const markers = liveReadinessMarkers(ctx.dataDir, ctx.projectRoot);
-  if (markers.length === 0) return false;
+  if (markers.length === 0) return void 0;
   const ancestors = (ctx.ancestors ?? ancestorPids)();
-  return markers.some((m) => ancestors.has(m.ppid));
+  return markers.find((m) => ancestors.has(m.ppid));
 }
-function decideAgentSpawn(spawn, ctx) {
+function decideAgentSpawn(spawn2, ctx) {
   try {
-    const prompt = spawn.prompt;
-    if (typeof prompt !== "string" || prompt === "" || ctx.sessionId === "") return ALLOW;
+    if (typeof spawn2 !== "object" || spawn2 === null || Array.isArray(spawn2)) return ALLOW;
+    for (const key of ["prompt", "description", "subagent_type", "model", "isolation"]) {
+      if (spawn2[key] !== void 0 && typeof spawn2[key] !== "string") return ALLOW;
+    }
+    const prompt = spawn2.prompt;
+    if (typeof prompt !== "string" || prompt === "" || ctx.sessionId.trim() === "") return ALLOW;
     if (!getRouting(ctx.projectRoot).hook) return ALLOW;
     const routable = new Set(wordTiers(routableTiers(ctx.projectRoot)).map((t) => t.tier));
     if (routable.size === 0) return ALLOW;
-    if (!allowedByMarker(ctx)) return ALLOW;
-    if (spawn.subagent_type === "fork") return ALLOW;
-    if (typeof spawn.isolation === "string" && spawn.isolation !== "") return ALLOW;
-    const hash2 = promptHash(prompt);
-    const kept = rememberedTier(ctx.dataDir, ctx.sessionId, hash2);
-    if (kept !== void 0 && isPassback(spawn.description)) return ALLOW;
-    if (kept !== void 0 && routable.has(kept)) return { decision: "deny", tier: kept, reason: buildDenyReason(kept, prompt) };
-    if (!isGenericSpawn(spawn, getRouting(ctx.projectRoot).genericAgents)) return ALLOW;
-    const tier = aliasTier(spawn.model);
-    if (tier === void 0 || !routable.has(tier)) return ALLOW;
-    remember(ctx.dataDir, ctx.sessionId, hash2, tier, (ctx.now ?? Date.now)());
-    return { decision: "deny", tier, reason: buildDenyReason(tier, prompt) };
+    const marker = matchingMarker(ctx);
+    if (!marker) return ALLOW;
+    if (spawn2.subagent_type === "fork") return ALLOW;
+    if (typeof spawn2.isolation === "string" && spawn2.isolation !== "") return ALLOW;
+    const sessionKey = path4.basename(denyFolder(ctx.dataDir, ctx.sessionId));
+    sweepDenyMemory(ctx.dataDir, (ctx.now ?? Date.now)(), sessionKey);
+    return withDenyLock(ctx.dataDir, sessionKey, () => {
+      const hash2 = promptHash(prompt);
+      const kept = rememberedTier(ctx.dataDir, ctx.sessionId, hash2);
+      if (kept !== void 0 && isPassback(spawn2.description)) return ALLOW;
+      if (kept !== void 0 && routable.has(kept)) return { decision: "deny", tier: kept, reason: buildDenyReason(kept, prompt, marker.taskMode) };
+      if (!isGenericSpawn(spawn2, getRouting(ctx.projectRoot).genericAgents)) return ALLOW;
+      const tier = aliasTier(spawn2.model);
+      if (tier === void 0 || !routable.has(tier)) return ALLOW;
+      remember(ctx.dataDir, ctx.sessionId, hash2, tier);
+      return { decision: "deny", tier, reason: buildDenyReason(tier, prompt, marker.taskMode) };
+    }) ?? ALLOW;
   } catch {
     return ALLOW;
   }
