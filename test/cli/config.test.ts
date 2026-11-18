@@ -90,6 +90,17 @@ describe('subzero config', () => {
       expect(doc.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
     });
 
+    it('show prints the general file\'s own value of an overridden tier and limit as `general`', async () => {
+      useGeneralConfig(`endpoints:\n  local:\n    parallel: 3\n${GENERAL_MEDIUM_YAML}`);
+      const { run, json } = general(makeProject());
+      expect(await run('config', 'show')).toBe(0);
+      const doc = json();
+      const byTier = (name: string) => doc.state.tiers.find((t: { tier: string }) => t.tier === name);
+      expect(byTier('medium')).toMatchObject({ source: 'project', general: { host: 'pi', model: 'local/general-medium', thinking: 'low' } });
+      expect(byTier('small')).not.toHaveProperty('general');
+      expect(doc.state.limits).toEqual([expect.objectContaining({ endpoint: 'local', source: 'project', general: { parallel: 3 } })]);
+    });
+
     it('preview --scope general prints the overridden list for a project that overrides the tier', async () => {
       const file = useGeneralConfig(GENERAL_MEDIUM_YAML);
       const { run, json } = general(makeProject());

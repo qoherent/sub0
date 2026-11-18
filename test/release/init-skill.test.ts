@@ -102,13 +102,15 @@ describe('the shared guided-init guide', () => {
     expect(flat(GUIDE)).toMatch(/general scope[^.]*`overridden`[^.]*say[^.]*this project keeps its own[^.]*before you ask to confirm/i);
   });
 
-  it('under the general scope, defaults are only the source general tiers and limits, and a project override counts as unset', () => {
+  it('under the general scope, defaults come from the general file\'s own values, never from the project override', () => {
     const guide = flat(GUIDE);
-    expect(guide).toMatch(/When the scope is general, the defaults are only the tiers and limits marked `source: general`/);
-    expect(guide).toMatch(/a tier marked `source: project` as if it were not set for the general file: suggest a model as for an unset tier, and do not offer the project's override as the default/);
-    expect(guide).toMatch(/Offer "remove" only for tiers marked `source: general`/);
-    expect(guide).toMatch(/Under the general scope, a tier marked `source: project` counts as not set/);
-    expect(guide).toMatch(/Under the general scope, a limit marked `source: project` counts as not set/);
+    expect(guide).toMatch(/When this project overrides a tier or limit that the general file also holds, \*\*show\*\* gives the general file's own value as `general` on that tier \(`host`, `model`, `thinking`\) or limit \(`parallel`\)/);
+    expect(guide).toMatch(/When the scope is general, the defaults are the tiers and limits marked `source: general` and the `general` value of each one marked `source: project` that has one/);
+    expect(guide).toMatch(/Never offer the project's own value as the default/);
+    expect(guide).toMatch(/marked `source: project` with no `general` value is not set in the general file: suggest a model as for an unset tier/);
+    expect(guide).toMatch(/Offer "remove" for a tier marked `source: general` or one with a `general` value/);
+    expect(guide).toMatch(/Under the general scope, a kept model keeps the level of its `general` value; a tier marked `source: project` with no `general` value counts as not set/);
+    expect(guide).toMatch(/Under the general scope, the default of a limit marked `source: project` is its `general` parallel; with no `general` value it counts as not set/);
     expect(guide).toMatch(/A tier that is already set defaults to its current model\. Suggest a different model only for a tier that is not set yet/);
   });
 

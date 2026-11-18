@@ -25,6 +25,7 @@ import {
   isThinkingLevel,
   LoadError,
   modelEndpoint,
+  PLACEHOLDER_STARTER_AGENTS,
   PROJECT_IS_GENERAL,
   ProjectDisabledError,
   readGeneralText,
@@ -120,6 +121,8 @@ export interface TierState {
   otherHost: boolean;
   /** Whether the caller's model list holds the model; null when no list was given. */
   listed: boolean | null;
+  /** The general file's own value of this tier, present only when this project overrides a tier that file also holds. */
+  general?: ModelTier;
 }
 
 export interface LimitState {
@@ -133,6 +136,8 @@ export interface LimitState {
   overrideOnly: boolean;
   /** No model belongs to the endpoint: setup drops the limit. */
   unused: boolean;
+  /** The general file's own limit of this endpoint, present only when this project overrides a limit that file also holds. */
+  general?: { parallel: number };
 }
 
 /** The tier and endpoint names this project's agent file names, as an override or a removal of the general file's. */
@@ -240,6 +245,23 @@ function catalogOf(l: Layers, general: string | null, project: string | null, le
     allowMissingStarter: true,
     ...(lenient ? { allowUnusedLimits: true } : {}),
   });
+}
+
+/** Load text with the rules delegation uses: a null tiers or models map, an unused own limit and a missing medium tier are errors. */
+function strictCatalogOf(l: Layers, general: string | null, project: string | null): AgentCatalog {
+  return buildCatalog(general, project, { agentFile: l.agentFile, generalFile: l.generalPath, starterAgents: PLACEHOLDER_STARTER_AGENTS });
+}
+
+/** Whether the files as they are now load with the rules delegation uses. A project with no file has nothing to be broken already. */
+function loadsStrictly(l: Layers): boolean {
+  if (l.projectText === null) return true;
+  try {
+    strictCatalogOf(l, l.generalText, l.projectText);
+    return true;
+  } catch (err) {
+    if (err instanceof LoadError) return false;
+    throw err;
+  }
 }
 
 /** What one file names, before merging: a tier or limit with a value, or a removal entry. */
@@ -374,25 +396,42 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
   const generalNamed = namedIn(layers.generalText);
   const project = view.project ?? emptyCatalog(layers.agentFile);
   const fromProject = (own: boolean) => (scope === 'project' && own ? 'project' : 'general');
+  // What the general file holds itself, to tell where this project overrides it; the general scope lists those values already.
+  const generalTiers = scope === 'project' && layers.generalText !== null ? catalogOf(layers, layers.generalText, null, false).tiers : new Map<string, ModelTier>();
+  const generalLimits = scope === 'project' ? numericLimits(layers.generalText) : new Map<string, number>();
 
-  const tiers: TierState[] = [...view.tiers].map(([tier, t]) => ({
-    tier,
-    host: t.host,
-    model: t.model,
-    thinking: t.thinking,
-    endpoint: modelEndpoint(t.model),
-    source: fromProject(view.projectNamed.tiers.get(tier) === true),
-    dependents: dependentsOf(project, tier),
-    otherHost: options.host !== undefined && t.host !== options.host,
-    listed: listed === null ? null : listed.has(t.model),
-  }));
+  const tiers: TierState[] = [...view.tiers].map(([tier, t]) => {
+    const own = view.projectNamed.tiers.get(tier) === true;
+    const general = scope === 'project' && own ? generalTiers.get(tier) : undefined;
+    return {
+      tier,
+      host: t.host,
+      model: t.model,
+      thinking: t.thinking,
+      endpoint: modelEndpoint(t.model),
+      source: fromProject(own),
+      dependents: dependentsOf(project, tier),
+      otherHost: options.host !== undefined && t.host !== options.host,
+      listed: listed === null ? null : listed.has(t.model),
+      ...(general !== undefined ? { general: { host: general.host, model: general.model, thinking: general.thinking } } : {}),
+    };
+  });
   const byOverride = extraEndpoints(view, scope);
   const tierEndpoints = new Set(tiers.map((t) => t.endpoint));
   const limits: LimitState[] = [...view.limits].map(([endpoint, parallel]) => {
     const using = tiers.filter((t) => t.endpoint === endpoint).map((t) => t.tier);
     const overrideOnly = using.length === 0 && byOverride.has(endpoint);
     const own = typeof view.projectNamed.limits.get(endpoint) === 'number';
-    return { endpoint, parallel, source: fromProject(own), tiers: using, overrideOnly, unused: using.length === 0 && !overrideOnly };
+    const general = scope === 'project' && own ? generalLimits.get(endpoint) : undefined;
+    return {
+      endpoint,
+      parallel,
+      source: fromProject(own),
+      tiers: using,
+      overrideOnly,
+      unused: using.length === 0 && !overrideOnly,
+      ...(general !== undefined ? { general: { parallel: general } } : {}),
+    };
   });
   const unused = limits.find((l) => l.unused);
   const problem = view.problem ?? (unused === undefined ? undefined : `endpoint "${unused.endpoint}": no model of a tier or of a tier override belongs to it in ${agentFile}`);
@@ -644,7 +683,14 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   for (const [name, tier] of setTiers) if (hasTier(name)) edits.push(...replaceTier(first.doc, name, tier));
   // An entry the file holds is deleted when removed, or when a removal entry gives way to a value; the project scope then writes a removal entry for an inherited tier.
   const goneTiers = [...unsetTiers.filter((t) => own.tiers.has(t)), ...[...setTiers.keys()].filter((t) => own.tiers.get(t) === false)];
-  edits.push(...deleteEntries(first, ['models', 'tiers'], goneTiers));
+  if (goneTiers.length > 0 && [...own.tiers.keys()].every((t) => goneTiers.includes(t))) {
+    // A tiers map left with no entry would be an empty value, which the loader rejects: it goes whole, and an emptied models with it. New tiers then create it again.
+    const models = first.doc.get('models', true);
+    const onlyTiers = isMap(models) && models.items.length === 1;
+    edits.push(...(onlyTiers ? deleteEntries(first, [], ['models']) : deleteEntries(first, ['models'], ['tiers'])));
+  } else {
+    edits.push(...deleteEntries(first, ['models', 'tiers'], goneTiers));
+  }
   const goneLimits = [...clearedLimits, ...droppedLimits, ...[...setLimits.keys()].filter((e) => own.limits.has(e) && !hasLimit(e))].filter((e) => own.limits.has(e));
   const keptLimits = [...own.limits.keys()].filter((e) => !goneLimits.includes(e));
   if (goneLimits.length > 0) {
@@ -666,15 +712,21 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
 
   let invalid: string | undefined;
   if (!noMediumTier) {
+    // A file that loads with delegation's rules now must still load with them: setup does not write what stops delegation. A file already broken stays checked as before.
+    const strictBefore = loadsStrictly(l);
     try {
       if (scope === 'project') {
         const result = catalogOf(l, l.generalText, next, false);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(result.limits, finalLimits)) invalid = MISMATCH;
+        if (invalid === undefined && strictBefore) strictCatalogOf(l, l.generalText, next);
       } else {
         const result = catalogOf(l, next, null, false);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(numericLimits(next), finalLimits)) invalid = MISMATCH;
-        // The change must leave this project loading.
-        if (invalid === undefined && view.project !== null) catalogOf(l, next, l.projectText, true);
+        // The change must leave this project loading, with its own limits counted as delegation counts them.
+        if (invalid === undefined && view.project !== null) {
+          if (strictBefore) strictCatalogOf(l, next, l.projectText);
+          else catalogOf(l, next, l.projectText, true);
+        }
       }
     } catch (err) {
       if (!(err instanceof LoadError)) throw err;

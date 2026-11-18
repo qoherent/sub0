@@ -52,6 +52,7 @@ describe('pi /subzero init', () => {
     const description = String((fake.tools.get('subzero_init_show') as any).description);
     expect(description).toMatch(/merged current state/);
     expect(description).toMatch(/marked by `source`/);
+    expect(description).toMatch(/general file's own value as `general`/);
     expect(description).toMatch(/`overridden` list/);
     expect(description).toMatch(/takes no scope/);
   });

@@ -156,6 +156,14 @@ describe('SetupService.show', () => {
     ]);
     expect(shown.state.limits.map((l) => [l.endpoint, l.source])).toEqual([['local', 'project']]);
     expect(shown.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
+    // The general file's own medium rides on the overridden tier; a tier only one layer holds carries none.
+    expect(shown.state.tiers.map((t) => [t.tier, t.general])).toEqual([
+      ['large', undefined],
+      ['medium', { host: 'pi', model: 'local/general-medium', thinking: 'low' }],
+      ['small', undefined],
+      ['cloud', undefined],
+    ]);
+    expect(shown.state.limits.map((l) => l.general)).toEqual([undefined]);
   });
 
   it('reports no file for a project without an agent file', async () => {

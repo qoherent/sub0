@@ -45,7 +45,7 @@ Print the full list as compact text, grouped by endpoint (the part of the name b
 
 Ask about `medium` first, because it is required. Then ask about `small` and `large`.
 
-- **Defaults under the general scope.** **show** takes no scope and returns the merged state, so a tier or limit marked `source: project` is this project's own override, not a value of the general file. When the scope is general, the defaults are only the tiers and limits marked `source: general`. Ask a tier marked `source: project` as if it were not set for the general file: suggest a model as for an unset tier, and do not offer the project's override as the default. Offer "remove" only for tiers marked `source: general`. Steps 5 and 6 follow the same rule.
+- **Defaults under the general scope.** **show** takes no scope and returns the merged state, so a tier or limit marked `source: project` is this project's own override. When this project overrides a tier or limit that the general file also holds, **show** gives the general file's own value as `general` on that tier (`host`, `model`, `thinking`) or limit (`parallel`). When the scope is general, the defaults are the tiers and limits marked `source: general` and the `general` value of each one marked `source: project` that has one. Never offer the project's own value as the default. A tier marked `source: project` with no `general` value is not set in the general file: suggest a model as for an unset tier. Offer "remove" for a tier marked `source: general` or one with a `general` value. Steps 5 and 6 follow the same rule.
 - **Defaults.** A tier that is already set defaults to its current model. Suggest a different model only for a tier that is not set yet. Give each suggestion one line of reason:
   - `small` is the cheapest capable model;
   - `medium` is a mid-tier model;
@@ -63,13 +63,13 @@ Ask about `medium` first, because it is required. Then ask about `small` and `la
 
 ### 5. Choose a thinking level for each new or changed tier
 
-Offer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level. Under the general scope, a tier marked `source: project` counts as not set, so ask its level like a new tier.
+Offer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level. Under the general scope, a kept model keeps the level of its `general` value; a tier marked `source: project` with no `general` value counts as not set, so ask its level like a new tier.
 
 ### 6. Ask a parallel limit for each endpoint in use
 
 For each endpoint the chosen tiers use, ask one question that names the tiers and models on it: "How many children may run at once on `local`, used by small (local/qwen3-4b) and medium (local/qwen3-coder-30b)?"
 
-- Answers are a whole number of 1 or more, or "no limit". The current limit is the default. Under the general scope, a limit marked `source: project` counts as not set, so do not offer it as the default.
+- Answers are a whole number of 1 or more, or "no limit". The current limit is the default. Under the general scope, the default of a limit marked `source: project` is its `general` parallel; with no `general` value it counts as not set, so do not offer the project's value.
 - A single-GPU local server usually wants 1.
 - Skip endpoints that only an agent's tier override uses. Their limits stay as they are.
 - Two pi providers that point at the same server still count as two endpoints.

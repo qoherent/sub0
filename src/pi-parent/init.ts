@@ -155,7 +155,7 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
 
   pi.registerTool({
     ...tool, name: 'subzero_init_show', label: 'subzero init: show',
-    description: "Guided subzero init: the merged current state (general file plus this project's file): each tier and limit marked by `source` (general or project), the `overridden` list of what this project keeps its own, the status and the large-tier warning. It takes no scope.",
+    description: "Guided subzero init: the merged current state (general file plus this project's file): each tier and limit marked by `source` (general or project), with the general file's own value as `general` on a tier or limit this project overrides, the `overridden` list of what this project keeps its own, the status and the large-tier warning. It takes no scope.",
     parameters: Type.Object({}),
     execute: () => run(async () => ({ ok: true, ...(await service().show()) })),
   });
