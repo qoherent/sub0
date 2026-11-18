@@ -858,6 +858,10 @@ function deleteEntries(s: Splicer, mapKeys: string[], keys: string[]): Edit[] {
 
   if (map.flow !== true) return [...removed].map(([at, key]) => deleteBlockEntry(text, keyStart(items[at]!), key));
 
+  // A flow map that loses every entry becomes `{}` in one edit: nothing inside it (newlines, comments, a trailing comma) can leave stray punctuation, and the bytes around it stay.
+  const mapRange = rangeOf(map);
+  if (removed.size === items.length && mapRange !== undefined) return [{ start: mapRange[0], end: mapRange[1], text: '{}' }];
+
   const edits: Edit[] = [];
   for (let first = 0; first < items.length; first++) {
     if (!removed.has(first)) continue;

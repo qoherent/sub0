@@ -1093,6 +1093,41 @@ describe('AgentSetup scopes', () => {
     }
   });
 
+  it('empties a retained flow map whatever its whitespace, newlines, comments and trailing commas hold', () => {
+    const unsetSmall: Change[] = [{ op: 'unsetTier', tier: 'small' }];
+    const clearLocal: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const tinySmall = '{ host: pi, model: a/b, thinking: low }';
+    const cases: { text: string; changes: Change[]; general: string; tiers: string[]; limits: number }[] = [
+      // the file of the review: a trailing comma on its own line, inheriting nothing to remove
+      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      // the same with an inherited entry, so a removal entry is written back inside the retained map
+      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, general: GENERAL_FULL, tiers: ['medium', 'small', 'large'], limits: 0 },
+      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, general: GENERAL_FULL, tiers: ['medium', 'large'], limits: 1 },
+      // a comment between entries and after the last one
+      { text: `{ models: { tiers: { # note\n  small: ${tinySmall}, # more\n  } } }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: `models:\n  tiers: { # note\n    small: ${tinySmall}\n    , }\nrouting: { hook: true }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+    ];
+    for (const { text, changes, general, tiers, limits } of cases) {
+      useGeneralConfig(general);
+      const root = makeProject(text);
+      const preview = previewChanges(root, changes, STARTER);
+      expect(preview.invalid, text).toBeUndefined();
+      expect(preview.refusals, text).toEqual([]);
+      applyChanges(root, changes, preview.fingerprint, STARTER);
+      const catalog = loadAgentFile(root);
+      expect([...catalog.tiers.keys()].sort(), text).toEqual([...tiers].sort());
+      expect(catalog.limits.size, text).toBe(limits);
+    }
+
+    // Bytes outside the emptied container stay as they were.
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject(`# top\nroot: 1\nmodels: { tiers: {\n  small: ${tinySmall}\n  , } }   # keep\nrouting: { hook: true }\n`);
+    expect(previewChanges(root, unsetSmall, STARTER).text).toBe('# top\nroot: 1\nrouting: { hook: true }\n');
+    const kept = makeProject(`# top\nroot: 1\nmodels:\n  tiers: { # c\n    small: ${tinySmall}\n    , }   # keep\n`);
+    expect(previewChanges(kept, unsetSmall, STARTER).text).toBe('# top\nroot: 1\n');
+  });
+
   it('removes the whole general tiers section when the last general tier goes and the project has its own medium', () => {
     const general = useGeneralConfig('models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n');
     const root = makeProject('models:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: low }\n');
