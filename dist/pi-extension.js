@@ -53,9 +53,9 @@ var require_identity = __commonJS({
     var NODE_TYPE = /* @__PURE__ */ Symbol.for("yaml.node.type");
     var isAlias = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === ALIAS;
     var isDocument = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === DOC;
-    var isMap2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === MAP;
+    var isMap3 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === MAP;
     var isPair = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === PAIR;
-    var isScalar = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
+    var isScalar2 = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SCALAR;
     var isSeq = (node2) => !!node2 && typeof node2 === "object" && node2[NODE_TYPE] === SEQ;
     function isCollection(node2) {
       if (node2 && typeof node2 === "object")
@@ -77,7 +77,7 @@ var require_identity = __commonJS({
         }
       return false;
     }
-    var hasAnchor = (node2) => (isScalar(node2) || isCollection(node2)) && !!node2.anchor;
+    var hasAnchor = (node2) => (isScalar2(node2) || isCollection(node2)) && !!node2.anchor;
     exports.ALIAS = ALIAS;
     exports.DOC = DOC;
     exports.MAP = MAP;
@@ -89,10 +89,10 @@ var require_identity = __commonJS({
     exports.isAlias = isAlias;
     exports.isCollection = isCollection;
     exports.isDocument = isDocument;
-    exports.isMap = isMap2;
+    exports.isMap = isMap3;
     exports.isNode = isNode;
     exports.isPair = isPair;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.isSeq = isSeq;
   }
 });
@@ -117,17 +117,17 @@ var require_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    function visit_(key, node2, visitor, path6) {
-      const ctrl = callVisitor(key, node2, visitor, path6);
+    function visit_(key, node2, visitor, path7) {
+      const ctrl = callVisitor(key, node2, visitor, path7);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visit_(key, ctrl, visitor, path6);
+        replaceNode(key, path7, ctrl);
+        return visit_(key, ctrl, visitor, path7);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
+          path7 = Object.freeze(path7.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = visit_(i, node2.items[i], visitor, path6);
+            const ci = visit_(i, node2.items[i], visitor, path7);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -138,13 +138,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
-          const ck = visit_("key", node2.key, visitor, path6);
+          path7 = Object.freeze(path7.concat(node2));
+          const ck = visit_("key", node2.key, visitor, path7);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = visit_("value", node2.value, visitor, path6);
+          const cv = visit_("value", node2.value, visitor, path7);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -165,17 +165,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node2, visitor, path6) {
-      const ctrl = await callVisitor(key, node2, visitor, path6);
+    async function visitAsync_(key, node2, visitor, path7) {
+      const ctrl = await callVisitor(key, node2, visitor, path7);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path6, ctrl);
-        return visitAsync_(key, ctrl, visitor, path6);
+        replaceNode(key, path7, ctrl);
+        return visitAsync_(key, ctrl, visitor, path7);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
+          path7 = Object.freeze(path7.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = await visitAsync_(i, node2.items[i], visitor, path6);
+            const ci = await visitAsync_(i, node2.items[i], visitor, path7);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -186,13 +186,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path6 = Object.freeze(path6.concat(node2));
-          const ck = await visitAsync_("key", node2.key, visitor, path6);
+          path7 = Object.freeze(path7.concat(node2));
+          const ck = await visitAsync_("key", node2.key, visitor, path7);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = await visitAsync_("value", node2.value, visitor, path6);
+          const cv = await visitAsync_("value", node2.value, visitor, path7);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -219,23 +219,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node2, visitor, path6) {
+    function callVisitor(key, node2, visitor, path7) {
       if (typeof visitor === "function")
-        return visitor(key, node2, path6);
+        return visitor(key, node2, path7);
       if (identity.isMap(node2))
-        return visitor.Map?.(key, node2, path6);
+        return visitor.Map?.(key, node2, path7);
       if (identity.isSeq(node2))
-        return visitor.Seq?.(key, node2, path6);
+        return visitor.Seq?.(key, node2, path7);
       if (identity.isPair(node2))
-        return visitor.Pair?.(key, node2, path6);
+        return visitor.Pair?.(key, node2, path7);
       if (identity.isScalar(node2))
-        return visitor.Scalar?.(key, node2, path6);
+        return visitor.Scalar?.(key, node2, path7);
       if (identity.isAlias(node2))
-        return visitor.Alias?.(key, node2, path6);
+        return visitor.Alias?.(key, node2, path7);
       return void 0;
     }
-    function replaceNode(key, path6, node2) {
-      const parent = path6[path6.length - 1];
+    function replaceNode(key, path7, node2) {
+      const parent = path7[path7.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node2;
       } else if (identity.isPair(parent)) {
@@ -847,10 +847,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path6, value) {
+    function collectionFromPath(schema, path7, value) {
       let v = value;
-      for (let i = path6.length - 1; i >= 0; --i) {
-        const k = path6[i];
+      for (let i = path7.length - 1; i >= 0; --i) {
+        const k = path7[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -869,7 +869,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path6) => path6 == null || typeof path6 === "object" && !!path6[Symbol.iterator]().next().done;
+    var isEmptyPath = (path7) => path7 == null || typeof path7 === "object" && !!path7[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -899,11 +899,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path6, value) {
-        if (isEmptyPath(path6))
+      addIn(path7, value) {
+        if (isEmptyPath(path7))
           this.add(value);
         else {
-          const [key, ...rest] = path6;
+          const [key, ...rest] = path7;
           const node2 = this.get(key, true);
           if (identity.isCollection(node2))
             node2.addIn(rest, value);
@@ -917,8 +917,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        const [key, ...rest] = path6;
+      deleteIn(path7) {
+        const [key, ...rest] = path7;
         if (rest.length === 0)
           return this.delete(key);
         const node2 = this.get(key, true);
@@ -932,8 +932,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        const [key, ...rest] = path6;
+      getIn(path7, keepScalar) {
+        const [key, ...rest] = path7;
         const node2 = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node2) ? node2.value : node2;
@@ -951,8 +951,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path6) {
-        const [key, ...rest] = path6;
+      hasIn(path7) {
+        const [key, ...rest] = path7;
         if (rest.length === 0)
           return this.has(key);
         const node2 = this.get(key, true);
@@ -962,8 +962,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        const [key, ...rest] = path6;
+      setIn(path7, value) {
+        const [key, ...rest] = path7;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -2126,8 +2126,8 @@ var require_YAMLMap = __commonJS({
        * @param {Class} Type - If set, forces the returned collection type
        * @returns Instance of Type, Map, or Object
        */
-      toJSON(_, ctx, Type2) {
-        const map2 = Type2 ? new Type2() : ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
+      toJSON(_, ctx, Type3) {
+        const map2 = Type3 ? new Type3() : ctx?.mapAsMap ? /* @__PURE__ */ new Map() : {};
         if (ctx?.onCreate)
           ctx.onCreate(map2);
         for (const item of this.items)
@@ -3478,9 +3478,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path6, value) {
+      addIn(path7, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path6, value);
+          this.contents.addIn(path7, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3555,14 +3555,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path6) {
-        if (Collection.isEmptyPath(path6)) {
+      deleteIn(path7) {
+        if (Collection.isEmptyPath(path7)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path6) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path7) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3577,10 +3577,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path6, keepScalar) {
-        if (Collection.isEmptyPath(path6))
+      getIn(path7, keepScalar) {
+        if (Collection.isEmptyPath(path7))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path6, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path7, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3591,10 +3591,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path6) {
-        if (Collection.isEmptyPath(path6))
+      hasIn(path7) {
+        if (Collection.isEmptyPath(path7))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path6) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path7) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3611,13 +3611,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path6, value) {
-        if (Collection.isEmptyPath(path6)) {
+      setIn(path7, value) {
+        if (Collection.isEmptyPath(path7)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path6), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path7), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path6, value);
+          this.contents.setIn(path7, value);
         }
       }
       /**
@@ -4201,9 +4201,9 @@ var require_resolve_flow_collection = __commonJS({
     var blockMsg = "Block collections are not allowed within flow collections";
     var isBlock = (token) => token && (token.type === "block-map" || token.type === "block-seq");
     function resolveFlowCollection({ composeNode, composeEmptyNode }, ctx, fc, onError, tag) {
-      const isMap2 = fc.start.source === "{";
-      const fcName = isMap2 ? "flow map" : "flow sequence";
-      const NodeClass = tag?.nodeClass ?? (isMap2 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
+      const isMap3 = fc.start.source === "{";
+      const fcName = isMap3 ? "flow map" : "flow sequence";
+      const NodeClass = tag?.nodeClass ?? (isMap3 ? YAMLMap.YAMLMap : YAMLSeq.YAMLSeq);
       const coll = new NodeClass(ctx.schema);
       coll.flow = true;
       const atRoot = ctx.atRoot;
@@ -4239,7 +4239,7 @@ var require_resolve_flow_collection = __commonJS({
             offset = props.end;
             continue;
           }
-          if (!isMap2 && ctx.options.strict && utilContainsNewline.containsNewline(key))
+          if (!isMap3 && ctx.options.strict && utilContainsNewline.containsNewline(key))
             onError(
               key,
               // checked by containsNewline()
@@ -4279,7 +4279,7 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap2 && !sep && !props.found) {
+        if (!isMap3 && !sep && !props.found) {
           const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
@@ -4302,7 +4302,7 @@ var require_resolve_flow_collection = __commonJS({
             startOnNewline: false
           });
           if (valueProps.found) {
-            if (!isMap2 && !props.found && ctx.options.strict) {
+            if (!isMap3 && !props.found && ctx.options.strict) {
               if (sep)
                 for (const st of sep) {
                   if (st === valueProps.found)
@@ -4334,7 +4334,7 @@ var require_resolve_flow_collection = __commonJS({
           const pair = new Pair.Pair(keyNode, valueNode);
           if (ctx.options.keepSourceTokens)
             pair.srcToken = collItem;
-          if (isMap2) {
+          if (isMap3) {
             const map2 = coll;
             if (utilMapIncludes.mapIncludes(ctx, map2.items, keyNode))
               onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
@@ -4350,7 +4350,7 @@ var require_resolve_flow_collection = __commonJS({
           offset = valueNode ? valueNode.range[2] : valueProps.end;
         }
       }
-      const expectedEnd = isMap2 ? "}" : "]";
+      const expectedEnd = isMap3 ? "}" : "]";
       const [ce, ...ee] = fc.end;
       let cePos = offset;
       if (ce?.source === expectedEnd)
@@ -4456,7 +4456,7 @@ var require_resolve_block_scalar = __commonJS({
       if (!header)
         return { value: "", type: null, comment: "", range: [start, start, start] };
       const type = header.mode === ">" ? Scalar.Scalar.BLOCK_FOLDED : Scalar.Scalar.BLOCK_LITERAL;
-      const lines = scalar.source ? splitLines(scalar.source) : [];
+      const lines = scalar.source ? splitLines2(scalar.source) : [];
       let chompStart = lines.length;
       for (let i = lines.length - 1; i >= 0; --i) {
         const content = lines[i][1];
@@ -4614,7 +4614,7 @@ var require_resolve_block_scalar = __commonJS({
       }
       return { mode, indent, chomp, comment, length };
     }
-    function splitLines(source) {
+    function splitLines2(source) {
       const split = source.split(/\n( *)/);
       const first = split[0];
       const m = first.match(/^( *)/);
@@ -5578,9 +5578,9 @@ var require_cst_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path6) => {
+    visit2.itemAtPath = (cst, path7) => {
       let item = cst;
-      for (const [field, index] of path6) {
+      for (const [field, index] of path7) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5589,23 +5589,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit2.parentCollection = (cst, path6) => {
-      const parent = visit2.itemAtPath(cst, path6.slice(0, -1));
-      const field = path6[path6.length - 1][0];
+    visit2.parentCollection = (cst, path7) => {
+      const parent = visit2.itemAtPath(cst, path7.slice(0, -1));
+      const field = path7[path7.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path6, item, visitor) {
-      let ctrl = visitor(item, path6);
+    function _visit(path7, item, visitor) {
+      let ctrl = visitor(item, path7);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path6.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path7.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5616,10 +5616,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path6);
+            ctrl = ctrl(item, path7);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path6) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path7) : ctrl;
     }
     exports.visit = visit2;
   }
@@ -5637,7 +5637,7 @@ var require_cst = __commonJS({
     var FLOW_END = "";
     var SCALAR = "";
     var isCollection = (token) => !!token && "items" in token;
-    var isScalar = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
+    var isScalar2 = (token) => !!token && (token.type === "scalar" || token.type === "single-quoted-scalar" || token.type === "double-quoted-scalar" || token.type === "block-scalar");
     function prettyToken(token) {
       switch (token) {
         case BOM:
@@ -5721,7 +5721,7 @@ var require_cst = __commonJS({
     exports.FLOW_END = FLOW_END;
     exports.SCALAR = SCALAR;
     exports.isCollection = isCollection;
-    exports.isScalar = isScalar;
+    exports.isScalar = isScalar2;
     exports.prettyToken = prettyToken;
     exports.tokenType = tokenType;
   }
@@ -7424,6 +7424,14 @@ var Kernel = class {
   prerequisites(host) {
     return this.driver(host).prerequisites;
   }
+  /** Undefined when the driver of the host cannot list its models. */
+  listModels(host) {
+    return this.driver(host).listModels;
+  }
+  /** Undefined when the driver of the host cannot check a model. */
+  checkModel(host) {
+    return this.driver(host).checkModel;
+  }
   driver(host) {
     const driver = this.drivers.get(host);
     if (driver === void 0) throw new UnsupportedHostError(host, this.supportedHosts());
@@ -7432,827 +7440,16 @@ var Kernel = class {
 };
 
 // src/pi/driver.ts
-var import_yaml = __toESM(require_dist(), 1);
+var import_yaml2 = __toESM(require_dist(), 1);
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync as existsSync2, readFileSync } from "node:fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
 import { homedir } from "node:os";
-import path2 from "node:path";
-
-// src/core/types.ts
-var ENDED_STATES = /* @__PURE__ */ new Set(["Settled", "Failed", "Cancelled"]);
-function isUnavailable(value) {
-  return typeof value === "object" && value !== null && "unavailable" in value;
-}
-function unavailableUsage(reason) {
-  const u = { unavailable: reason };
-  return {
-    inputTokens: u,
-    outputTokens: u,
-    cacheReadTokens: u,
-    cacheWriteTokens: u,
-    totalTokens: u,
-    cost: u,
-    contextTokens: u,
-    contextWindow: u,
-    contextPercent: u
-  };
-}
-
-// src/pi/launch.ts
-var CHILD_ENV = { PI_OFFLINE: "1", PI_TELEMETRY: "0" };
-function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
-  return [
-    "--mode",
-    "rpc",
-    "--offline",
-    "-na",
-    "-ne",
-    "-nc",
-    "-np",
-    "--no-themes",
-    "-ns",
-    ...overlaySkills.flatMap((folder) => ["--skill", folder]),
-    "--model",
-    agent.model,
-    "--thinking",
-    agent.thinking,
-    "--tools",
-    agent.tools.join(","),
-    "--session-dir",
-    sessionsFolder,
-    "--session-id",
-    taskId,
-    "--name",
-    `subzero:${agent.name}:${taskId}`
-  ];
-}
-function attachCommand(spec) {
-  const out = [];
-  const command = spec.command;
-  for (let i = 0; i < command.length; i++) {
-    const arg = command[i];
-    if (arg === "--mode" && command[i + 1] === "rpc") {
-      i++;
-      continue;
-    }
-    if (arg === "--mode=rpc") continue;
-    if (arg === "--session") {
-      i++;
-      continue;
-    }
-    if (arg.startsWith("--session=")) continue;
-    out.push(arg);
-  }
-  return out;
-}
-
-// src/pi/overlay.ts
-import { cpSync, existsSync, statSync } from "node:fs";
-import path from "node:path";
-function overlayFolder(driverFilesFolder) {
-  return path.join(driverFilesFolder, "skills");
-}
-function missingSkills(skills) {
-  return skills.filter((skill) => {
-    try {
-      return !statSync(skill.folder).isDirectory();
-    } catch {
-      return true;
-    }
-  });
-}
-function prepareOverlay(driverFilesFolder, skills) {
-  const root = overlayFolder(driverFilesFolder);
-  return skills.map((skill) => {
-    const target = path.join(root, skill.name);
-    if (!existsSync(target)) cpSync(skill.folder, target, { recursive: true, dereference: true });
-    return target;
-  });
-}
-
-// src/pi/jsonl.ts
-var LF = 10;
-var CR = 13;
-var JsonlSplitter = class {
-  pending = Buffer.alloc(0);
-  decoder = new TextDecoder("utf-8");
-  push(chunk) {
-    this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
-    const records = [];
-    let start = 0;
-    for (let i = this.pending.indexOf(LF, start); i !== -1; i = this.pending.indexOf(LF, start)) {
-      records.push(this.decode(this.pending.subarray(start, i)));
-      start = i + 1;
-    }
-    this.pending = this.pending.subarray(start);
-    return records;
-  }
-  /** Flush a final record that had no trailing LF. */
-  end() {
-    if (this.pending.length === 0) return [];
-    const last = this.decode(this.pending);
-    this.pending = Buffer.alloc(0);
-    return [last];
-  }
-  decode(bytes) {
-    const end = bytes.length > 0 && bytes[bytes.length - 1] === CR ? bytes.length - 1 : bytes.length;
-    return this.decoder.decode(bytes.subarray(0, end));
-  }
-};
-
-// src/pi/rpc-client.ts
-var RpcClosedError = class extends Error {
-  constructor() {
-    super("pi RPC stream closed");
-    this.name = "RpcClosedError";
-  }
-};
-var PiRpcClient = class {
-  constructor(stdin, stdout, options) {
-    this.stdin = stdin;
-    this.options = options;
-    const splitter = new JsonlSplitter();
-    stdout.on("data", (chunk) => {
-      for (const record2 of splitter.push(chunk)) this.dispatch(record2);
-    });
-    stdout.on("end", () => {
-      for (const record2 of splitter.end()) this.dispatch(record2);
-      this.failAll();
-    });
-    stdout.on("error", () => this.failAll());
-    stdin.on("error", () => this.failAll());
-  }
-  stdin;
-  options;
-  nextId = 1;
-  waiting = /* @__PURE__ */ new Map();
-  closed = false;
-  markLost;
-  /** Resolves when the pipe to pi is lost, whether or not a command is waiting. */
-  lost = new Promise((resolve) => this.markLost = resolve);
-  dispatch(record2) {
-    if (record2.trim() === "") return;
-    let message;
-    try {
-      message = JSON.parse(record2);
-    } catch {
-      this.options.onBadRecord?.(record2);
-      return;
-    }
-    if (message?.type === "response" && typeof message.id === "string" && this.waiting.has(message.id)) {
-      const entry = this.waiting.get(message.id);
-      this.waiting.delete(message.id);
-      entry.resolve(message);
-      return;
-    }
-    this.options.onEvent(message);
-  }
-  send(command) {
-    if (this.closed) return Promise.reject(new RpcClosedError());
-    const id = `sz-${this.nextId++}`;
-    return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
-      try {
-        this.stdin.write(JSON.stringify({ ...command, id }) + "\n");
-      } catch {
-        this.waiting.delete(id);
-        reject(new RpcClosedError());
-      }
-    });
-  }
-  /** Close stdin; pi exits on EOF. */
-  close() {
-    if (this.stdin.writableEnded) return;
-    try {
-      this.stdin.end();
-    } catch {
-    }
-  }
-  failAll() {
-    this.closed = true;
-    this.markLost();
-    for (const entry of this.waiting.values()) entry.reject(new RpcClosedError());
-    this.waiting.clear();
-  }
-};
-
-// src/pi/driver.ts
-var PI_HOST = "pi";
-var MESSAGE_LIMIT = 300;
-var STDERR_TAIL_LIMIT = 4e3;
-var QUIET_EVENTS = /* @__PURE__ */ new Set([
-  "agent_start",
-  "agent_end",
-  "turn_start",
-  "message_start",
-  "tool_execution_update",
-  "queue_update",
-  "compaction_start",
-  "compaction_end",
-  "auto_retry_end",
-  "summarization_retry_scheduled",
-  "summarization_retry_attempt_start",
-  "summarization_retry_finished",
-  "bash_execution_update",
-  // Emitted by pi 0.87 for each session entry, though rpc.md does not list it.
-  "entry_appended"
-]);
-var DIALOG_METHODS = /* @__PURE__ */ new Set(["select", "confirm", "input", "editor"]);
-var PiDriver = class {
-  constructor(options = {}) {
-    this.options = options;
-  }
-  options;
-  version;
-  live = /* @__PURE__ */ new Set();
-  /** The child port of this driver, which Kernel hands to a caller. */
-  port = { start: (request, onEvent) => this.start(request, onEvent) };
-  /** Reopens the child session in the pi terminal interface. */
-  attachCommand = (spec) => attachCommand(spec);
-  /** The child session as HTML, written by pi --export. Rejects with the reason. */
-  sessionExport = (sessionFile, outputFile) => {
-    const [program, ...lead] = this.piCommand;
-    return new Promise((resolve, reject) => {
-      const child = spawn(program, [...lead, "--export", sessionFile, outputFile], {
-        stdio: ["ignore", "inherit", "inherit"],
-        env: this.options.env ?? process.env
-      });
-      child.once("error", (err) => reject(new Error(`could not start ${program}: ${err.message}`)));
-      child.once(
-        "exit",
-        (code) => code === 0 ? resolve() : reject(new Error(`${program} --export exited with code ${code ?? "unknown"}`))
-      );
-    });
-  };
-  starterTools = () => ({
-    general: ["read", "bash", "edit", "write", "grep", "find", "ls"],
-    fallback: ["read", "grep", "find", "ls"]
-  });
-  /**
-   * Runs the configured pi command with --version. Undefined when it answers; a
-   * message otherwise that names pi, says whether it was not found or did not run,
-   * and says to install it and run subzero init again.
-   */
-  prerequisites = () => {
-    const [program, ...rest] = this.piCommand;
-    const result2 = spawnSync(program, [...rest, "--version"], {
-      timeout: 1e4,
-      env: { ...this.options.env ?? process.env, ...CHILD_ENV },
-      stdio: "ignore"
-    });
-    const next = "To continue, install pi and run `subzero init` again.";
-    if (result2.error !== void 0) {
-      const notFound = result2.error.code === "ENOENT";
-      return notFound ? `pi was not found (${program}). ${next}` : `pi did not run (${program}: ${result2.error.message}). ${next}`;
-    }
-    if (result2.status !== 0) {
-      return `pi did not run (${[program, ...rest, "--version"].join(" ")} ${result2.status === null ? `ended by ${result2.signal}` : `exited with code ${result2.status}`}). ${next}`;
-    }
-    return void 0;
-  };
-  get piCommand() {
-    return this.options.piCommand ?? ["pi"];
-  }
-  piVersion() {
-    if (this.version === void 0) {
-      const [program, ...rest] = this.piCommand;
-      try {
-        this.version = execFileSync(program, [...rest, "--version"], {
-          encoding: "utf8",
-          timeout: 1e4,
-          env: { ...this.options.env ?? process.env, ...CHILD_ENV },
-          stdio: ["ignore", "pipe", "ignore"]
-        }).trim();
-      } catch (err) {
-        this.version = { unavailable: `pi --version failed: ${err.message}` };
-      }
-    }
-    return this.version;
-  }
-  start(request, onEvent) {
-    const run = new PiChildRun(this, this.options, request, onEvent);
-    this.live.add(run);
-    const outcome = run.execute().finally(() => this.live.delete(run));
-    return { outcome, cancel: () => run.requestStop({ status: "cancelled" }) };
-  }
-  /** Last resort when this process must exit now: SIGKILL every live child run. */
-  killAll() {
-    for (const run of this.live) run.forceKill();
-  }
-};
-var PiChildRun = class {
-  constructor(driver, options, request, emit) {
-    this.driver = driver;
-    this.options = options;
-    this.request = request;
-    this.emit = emit;
-    this.log = options.log ?? ((m) => process.stderr.write(`subzero: ${m}
-`));
-  }
-  driver;
-  options;
-  request;
-  emit;
-  stop = null;
-  settledSeen = false;
-  finished = false;
-  triggerStop;
-  stopped = new Promise((resolve) => this.triggerStop = resolve);
-  triggerSettled;
-  settled = new Promise((resolve) => this.triggerSettled = resolve);
-  child = null;
-  client = null;
-  exit = null;
-  exited = false;
-  exitReported = false;
-  spawnError = null;
-  stderrTail = "";
-  textBuffer = "";
-  toolPaths = /* @__PURE__ */ new Map();
-  lastAssistant = null;
-  ready = false;
-  pipeLost = false;
-  unknownModel = false;
-  sessionFile;
-  timer = null;
-  log;
-  /** The first termination wins; a stop after agent_settled changes nothing. */
-  requestStop(stop) {
-    if (this.stop !== null || this.settledSeen || this.finished) return;
-    this.stop = stop;
-    this.triggerStop();
-  }
-  async execute() {
-    try {
-      return await this.main();
-    } finally {
-      this.finished = true;
-      if (this.timer !== null) clearTimeout(this.timer);
-      this.signalGroup("SIGKILL");
-    }
-  }
-  forceKill() {
-    this.signalTree("SIGKILL");
-  }
-  async main() {
-    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
-    const missing = missingSkills(agent.skills);
-    if (missing.length > 0) {
-      return failed("skill_mismatch", `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(", ")}`);
-    }
-    if (this.stop !== null) return this.stoppedBeforeSpawn();
-    const overlay = prepareOverlay(driverFilesFolder, agent.skills);
-    const env = this.options.env ?? process.env;
-    const agentDir = this.options.piAgentDir ?? env.PI_CODING_AGENT_DIR ?? path2.join(homedir(), ".pi", "agent");
-    if (existsSync2(path2.join(agentDir, "SYSTEM.md"))) {
-      this.emit({
-        kind: "warning",
-        message: `${path2.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
-      });
-    }
-    const command = [
-      ...this.driver.piCommand,
-      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder })
-    ];
-    const launchSpec = {
-      command,
-      cwd: projectRoot,
-      envNames: Object.keys(CHILD_ENV),
-      version: this.driver.piVersion(),
-      skillFolders: overlay,
-      thinkingLevel: agent.thinking
-    };
-    this.emit({ kind: "run_started", launchSpec });
-    if (this.stop !== null) return this.stoppedBeforeSpawn();
-    this.spawnChild(command);
-    this.timer = setTimeout(
-      () => this.requestStop({ status: "failed", failureKind: "timeout", message: `timed out after ${agent.timeout}s` }),
-      agent.timeout * 1e3
-    );
-    const state = await this.race(this.client.send({ type: "get_state" }));
-    if (state.kind !== "value") return this.interrupted(state.kind);
-    this.ready = true;
-    if (typeof state.value.data?.sessionFile === "string") this.sessionFile = state.value.data.sessionFile;
-    const commands = await this.race(this.client.send({ type: "get_commands" }));
-    if (commands.kind !== "value") return this.interrupted(commands.kind);
-    const mismatch = verifySkills(overlay.map(expectedSkillName), commands.value);
-    if (mismatch !== null) {
-      await this.killNow();
-      await this.emitRunExited();
-      return failed("skill_mismatch", mismatch);
-    }
-    this.emit({ kind: "skills_verified", skills: agent.skills.map((s) => s.name) });
-    const prompt = await this.race(this.client.send({ type: "prompt", message: brief }));
-    if (prompt.kind !== "value") return this.interrupted(prompt.kind);
-    if (!prompt.value.success) {
-      await this.killNow();
-      await this.emitRunExited();
-      return failed("error", bounded(this.withModelHint(`pi refused the prompt: ${prompt.value.error ?? "no reason given"}`)));
-    }
-    const done = await this.race(this.settled);
-    if (done.kind !== "value") return this.interrupted(done.kind);
-    const text = await this.ask("get_last_assistant_text");
-    const stats = await this.ask("get_session_stats");
-    this.client.close();
-    await this.waitExitOrKill();
-    await this.emitRunExited();
-    return this.settledOutcome(text?.text ?? null, stats);
-  }
-  spawnChild(command) {
-    const [program, ...args] = command;
-    const child = spawn(program, args, {
-      cwd: this.request.projectRoot,
-      env: { ...this.options.env ?? process.env, ...CHILD_ENV },
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true
-    });
-    this.child = child;
-    this.exit = new Promise((resolve) => {
-      child.once("exit", (code, signal) => {
-        this.exited = true;
-        resolve({ code, signal });
-      });
-      child.once("error", (err) => {
-        this.spawnError = err;
-        this.exited = true;
-        resolve({ code: null, signal: null });
-      });
-    });
-    child.stderr.on("data", (chunk) => {
-      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
-      if (/model\b.*\bnot found/i.test(this.stderrTail)) this.unknownModel = true;
-    });
-    this.client = new PiRpcClient(child.stdin, child.stdout, {
-      onEvent: (event) => this.onPiEvent(event),
-      onBadRecord: (record2) => this.log(`${this.request.taskId}: ignoring a non-JSON line from pi: ${record2.slice(0, 120)}`)
-    });
-  }
-  race(promise2) {
-    return Promise.race([
-      promise2.then(
-        (value) => ({ kind: "value", value }),
-        () => ({ kind: "exit" })
-      ),
-      this.stopped.then(() => ({ kind: "stop" })),
-      this.exit.then(() => ({ kind: "exit" })),
-      this.client.lost.then(() => ({ kind: "exit" }))
-    ]);
-  }
-  interrupted(kind) {
-    return kind === "stop" ? this.terminate() : this.crashed();
-  }
-  /** Send one command after settlement; any failure leaves its data unavailable. */
-  async ask(type) {
-    if (this.exited) return null;
-    try {
-      const response = await withTimeout(this.client.send({ type }), 1e4);
-      return response?.success ? response.data : null;
-    } catch {
-      return null;
-    }
-  }
-  // ---- pi events → domain events -----------------------------------------
-  onPiEvent(event) {
-    switch (event.type) {
-      case "tool_execution_start": {
-        const target = targetPath(event.args);
-        if (target !== void 0 && typeof event.toolCallId === "string") this.toolPaths.set(event.toolCallId, target);
-        this.emit({ kind: "tool_activity", phase: "start", tool: String(event.toolName), ...target ? { path: target } : {} });
-        return;
-      }
-      case "tool_execution_end": {
-        const target = targetPath(event.args) ?? this.toolPaths.get(String(event.toolCallId));
-        this.toolPaths.delete(String(event.toolCallId));
-        this.emit({
-          kind: "tool_activity",
-          phase: "end",
-          tool: String(event.toolName),
-          ...target ? { path: target } : {},
-          isError: event.isError === true
-        });
-        return;
-      }
-      case "message_update": {
-        const delta = event.assistantMessageEvent;
-        if (delta?.type === "text_delta" && typeof delta.delta === "string") this.textBuffer += delta.delta;
-        return;
-      }
-      case "message_end": {
-        const message = event.message;
-        if (message?.role === "assistant") {
-          this.lastAssistant = message;
-          const text = this.textBuffer || assistantText(message);
-          if (text) this.emit({ kind: "agent_message", text });
-        }
-        this.textBuffer = "";
-        return;
-      }
-      case "turn_end":
-        this.emit({ kind: "turn_settled" });
-        return;
-      case "auto_retry_start":
-        this.emit({ kind: "retrying", ...typeof event.attempt === "number" ? { attempt: event.attempt } : {} });
-        return;
-      case "agent_settled":
-        if (this.stop === null) {
-          this.settledSeen = true;
-          this.triggerSettled();
-        }
-        return;
-      case "extension_ui_request":
-        if (DIALOG_METHODS.has(event.method) && typeof event.id === "string" && this.child?.stdin?.writable) {
-          this.child.stdin.write(JSON.stringify({ type: "extension_ui_response", id: event.id, cancelled: true }) + "\n");
-        }
-        return;
-      case "extension_error":
-        this.log(`${this.request.taskId}: pi extension error: ${String(event.error).slice(0, 200)}`);
-        return;
-      case "response":
-        return;
-      default:
-        if (!QUIET_EVENTS.has(event.type)) {
-          this.log(`${this.request.taskId}: ignoring unrecognized pi event type ${JSON.stringify(event.type)}`);
-        }
-    }
-  }
-  // ---- endings --------------------------------------------------------------
-  settledOutcome(text, stats) {
-    const usage = usageFromStats(stats);
-    const base = { usage, ...this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {} };
-    const message = this.lastAssistant;
-    if (message === null) {
-      return { ...base, lastAssistantText: text, status: "failed", failureKind: "error", message: "no assistant message" };
-    }
-    const summary = text ?? assistantText(message);
-    switch (message.stopReason) {
-      case "length":
-        return { ...base, lastAssistantText: summary, status: "truncated" };
-      case "error":
-        return {
-          ...base,
-          lastAssistantText: summary,
-          status: "failed",
-          failureKind: "error",
-          message: bounded(this.withModelHint(String(message.errorMessage ?? "pi reported an error")))
-        };
-      case "aborted":
-        return { ...base, lastAssistantText: summary, status: "cancelled" };
-      default:
-        return { ...base, lastAssistantText: summary, status: "completed" };
-    }
-  }
-  /** pi starts with an unknown model id on a known provider and only warns on stderr. */
-  withModelHint(message) {
-    return this.unknownModel ? `unknown model: ${this.request.agent.model}: ${message}` : message;
-  }
-  stoppedBeforeSpawn() {
-    const stop = this.stop;
-    return {
-      lastAssistantText: null,
-      usage: unavailableUsage("the child run ended before pi started"),
-      ...stop.status === "failed" ? { status: "failed", failureKind: stop.failureKind, message: stop.message } : { status: "cancelled" }
-    };
-  }
-  /**
-   * Cancel or timeout: clear_queue, abort (up to abortWaitMs), close stdin, then
-   * SIGTERM and SIGKILL to the process group. The status comes from the stop.
-   */
-  async terminate() {
-    const stop = this.stop;
-    const client = this.client;
-    let text = null;
-    let stats = null;
-    if (!this.exited) {
-      await withTimeout(client.send({ type: "clear_queue" }), 1e3).catch(() => void 0);
-      const aborted2 = await withTimeout(client.send({ type: "abort" }), this.options.abortWaitMs ?? 5e3).catch(() => null);
-      if (aborted2?.success && !this.exited) {
-        text = (await withTimeout(client.send({ type: "get_last_assistant_text" }), 1e3).catch(() => null))?.data?.text ?? null;
-        stats = (await withTimeout(client.send({ type: "get_session_stats" }), 1e3).catch(() => null))?.data ?? null;
-      }
-      this.signalDescendants("SIGKILL");
-      client.close();
-      await this.waitExitOrKill();
-    }
-    await this.emitRunExited();
-    return {
-      lastAssistantText: text,
-      usage: stats ? usageFromStats(stats) : unavailableUsage("pi did not report usage before it was stopped"),
-      ...this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {},
-      ...stop.status === "failed" ? { status: "failed", failureKind: stop.failureKind, message: stop.message } : { status: "cancelled" }
-    };
-  }
-  /** pi exited, or its pipe was lost, before the run settled. */
-  async crashed() {
-    if (!this.exited && !await this.exitedWithin(300)) {
-      this.pipeLost = true;
-      this.signalDescendants("SIGKILL");
-      this.client?.close();
-      await this.waitExitOrKill();
-    }
-    const exit = await this.exit;
-    const tail = this.stderrTail.trim();
-    if (tail !== "") this.emit({ kind: "stderr_tail", text: tail });
-    await this.emitRunExited();
-    const usage = unavailableUsage("pi exited before it reported usage");
-    const session = this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {};
-    if (this.spawnError !== null) {
-      return { lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: bounded(`could not start pi: ${this.spawnError.message}`) };
-    }
-    if (this.pipeLost) {
-      return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: "lost the pipe to pi" };
-    }
-    if (this.unknownModel) {
-      return { lastAssistantText: null, usage, status: "failed", failureKind: "error", message: bounded(`unknown model: ${this.request.agent.model}`) };
-    }
-    if (exit.code === 0 && this.lastAssistant === null) {
-      return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "error", message: "no assistant message" };
-    }
-    const how = exit.signal !== null ? `signal ${exit.signal}` : `code ${exit.code}`;
-    return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: bounded(`pi exited mid-turn with ${how}`) };
-  }
-  /** Every path that ends a spawned child reports its exit, once. */
-  async emitRunExited() {
-    const exit = await this.exit;
-    if (this.exitReported) return;
-    this.exitReported = true;
-    this.emit({ kind: "run_exited", code: exit.code, signal: exit.signal });
-  }
-  async killNow() {
-    this.client?.close();
-    this.signalTree("SIGKILL");
-    await this.exit;
-  }
-  async waitExitOrKill() {
-    const wait = this.options.killWaitMs ?? 2e3;
-    if (await this.exitedWithin(wait)) return;
-    this.signalTree("SIGTERM");
-    if (await this.exitedWithin(wait)) return;
-    this.signalTree("SIGKILL");
-    await this.exit;
-  }
-  async exitedWithin(ms) {
-    if (this.exited) return true;
-    let timer;
-    const timedOut = new Promise((resolve) => timer = setTimeout(() => resolve(false), ms));
-    const result2 = await Promise.race([this.exit.then(() => true), timedOut]);
-    clearTimeout(timer);
-    return result2;
-  }
-  /**
-   * Signal pi's group and the group of every descendant of pi. pi's bash tool
-   * spawns detached shells, which a signal to pi's own group does not reach.
-   */
-  signalTree(signal) {
-    const pid = this.child?.pid;
-    if (pid === void 0 || this.exited) return this.signalGroup(signal);
-    const targets = [pid, ...descendants(pid)];
-    for (const target of targets) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-        }
-      }
-    }
-  }
-  /** Signal the groups of pi's descendants, not pi itself, while pi is alive. */
-  signalDescendants(signal) {
-    const pid = this.child?.pid;
-    if (pid === void 0 || this.exited) return;
-    for (const target of descendants(pid)) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-        }
-      }
-    }
-  }
-  /**
-   * Signal pi's own process group. After pi is reaped its id is safe to use only
-   * while a member of the group is still alive.
-   */
-  signalGroup(signal) {
-    const pid = this.child?.pid;
-    if (pid === void 0) return;
-    if (this.exited && !groupHasMembers(pid)) return;
-    try {
-      process.kill(-pid, signal);
-    } catch {
-    }
-  }
-};
-function failed(failureKind, message) {
-  return { lastAssistantText: null, usage: unavailableUsage("pi did not run a turn"), status: "failed", failureKind, message };
-}
-function expectedSkillName(folder) {
-  try {
-    const text = readFileSync(path2.join(folder, "SKILL.md"), "utf8");
-    const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-    const name = match ? (0, import_yaml.parse)(match[1])?.name : void 0;
-    if (typeof name === "string" && name !== "") return name;
-  } catch {
-  }
-  return path2.basename(folder);
-}
-function verifySkills(expected, response) {
-  if (!response.success) return bounded(`get_commands failed: ${response.error ?? "no reason given"}`);
-  const commands = Array.isArray(response.data?.commands) ? response.data.commands : [];
-  const loaded = commands.filter((c) => c?.source === "skill").map((c) => String(c.name ?? "").replace(/^skill:/, ""));
-  const extra = loaded.filter((name) => !expected.includes(name));
-  const missing = expected.filter((name) => !loaded.includes(name));
-  const counted = loaded.length === expected.length;
-  if (extra.length === 0 && missing.length === 0 && counted) return null;
-  const parts = [];
-  if (!counted && extra.length === 0 && missing.length === 0) {
-    parts.push(`pi loaded ${loaded.length} skills for ${expected.length} declared folders; two declare the same name`);
-  }
-  if (extra.length > 0) parts.push(`extra skill ${extra.join(", ")}`);
-  if (missing.length > 0) parts.push(`missing skill ${missing.join(", ")}`);
-  return `skill verification failed: ${parts.join("; ")}`;
-}
-function groupHasMembers(pgid) {
-  try {
-    const listing = execFileSync("ps", ["-A", "-o", "pgid="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return listing.split("\n").some((line) => Number(line.trim()) === pgid);
-  } catch {
-    return false;
-  }
-}
-function descendants(root) {
-  let listing;
-  try {
-    listing = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-    return [];
-  }
-  const children = /* @__PURE__ */ new Map();
-  for (const line of listing.split("\n")) {
-    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
-    if (!pid || ppid === void 0 || Number.isNaN(ppid)) continue;
-    children.set(ppid, [...children.get(ppid) ?? [], pid]);
-  }
-  const found = [];
-  const queue = [root];
-  while (queue.length > 0) {
-    for (const child of children.get(queue.shift()) ?? []) {
-      found.push(child);
-      queue.push(child);
-    }
-  }
-  return found;
-}
-function targetPath(args) {
-  if (typeof args !== "object" || args === null) return void 0;
-  const a = args;
-  for (const key of ["path", "file_path", "filePath", "file", "directory", "dir"]) {
-    if (typeof a[key] === "string" && a[key] !== "") return a[key];
-  }
-  return void 0;
-}
-function assistantText(message) {
-  if (!Array.isArray(message?.content)) return typeof message?.content === "string" ? message.content : "";
-  return message.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
-}
-function measure(value, reason) {
-  return typeof value === "number" && Number.isFinite(value) ? value : { unavailable: reason };
-}
-function usageFromStats(stats) {
-  if (stats === null || typeof stats !== "object") return unavailableUsage("pi did not report session stats");
-  const tokens = stats.tokens ?? {};
-  const context = stats.contextUsage ?? {};
-  return {
-    inputTokens: measure(tokens.input, "pi did not report input tokens"),
-    outputTokens: measure(tokens.output, "pi did not report output tokens"),
-    cacheReadTokens: measure(tokens.cacheRead, "pi did not report cache reads"),
-    cacheWriteTokens: measure(tokens.cacheWrite, "pi did not report cache writes"),
-    totalTokens: measure(tokens.total, "pi did not report total tokens"),
-    cost: measure(stats.cost, "pi did not report cost"),
-    contextTokens: measure(context.tokens, "pi did not report context use"),
-    contextWindow: measure(context.contextWindow, "pi did not report the context window"),
-    contextPercent: measure(context.percent, "pi did not report context use")
-  };
-}
-function bounded(text) {
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > MESSAGE_LIMIT ? `${oneLine.slice(0, MESSAGE_LIMIT - 1)}\u2026` : oneLine;
-}
-function withTimeout(promise2, ms) {
-  let timer;
-  return Promise.race([
-    promise2.finally(() => clearTimeout(timer)),
-    new Promise((_, reject) => timer = setTimeout(() => reject(new Error("timed out")), ms))
-  ]);
-}
+import path3 from "node:path";
 
 // src/config/agent-config.ts
-var import_yaml2 = __toESM(require_dist(), 1);
-import { mkdirSync, readFileSync as readFileSync2, realpathSync, statSync as statSync2, writeFileSync } from "node:fs";
-import path3 from "node:path";
+var import_yaml = __toESM(require_dist(), 1);
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v4/classic/external.js
@@ -9072,10 +8269,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path6) {
-  if (!path6)
+function getElementAtPath(obj, path7) {
+  if (!path7)
     return obj;
-  return path6.reduce((acc, key) => acc?.[key], obj);
+  return path7.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -9415,11 +8612,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path6, issues) {
+function prefixIssues(path7, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path6);
+    iss.path.unshift(path7);
     return iss;
   });
 }
@@ -9881,16 +9078,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9929,17 +9126,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path6 = []) => {
+  const processError = (error63, path7 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path6, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path6, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
       } else {
-        const fullpath = [...path6, ...issue2.path];
+        const fullpath = [...path7, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -9978,8 +9175,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path6 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path6) {
+  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path7) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -27117,13 +26314,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path6 = ref.slice(1).split("/").filter(Boolean);
-  if (path6.length === 0) {
+  const path7 = ref.slice(1).split("/").filter(Boolean);
+  if (path7.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path6[0] === defsKey) {
-    const key = path6[1] === void 0 ? void 0 : decodeJSONPointerSegment(path6[1]);
+  if (path7[0] === defsKey) {
+    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -27973,11 +27170,15 @@ function date4(params) {
 }
 
 // src/config/agent-config.ts
-var AGENT_FILE = path3.join(".agents", "subzero.yaml");
+var AGENT_FILE = path.join(".agents", "subzero.yaml");
 var THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+function isThinkingLevel(value) {
+  return THINKING_LEVELS.includes(value);
+}
 var DEFAULT_TIER = "medium";
 var GENERAL_AGENT = "general";
 var FALLBACK_AGENT = "fallback";
+var RUN_INIT = "; run /subzero:init in Claude Code or /subzero init in pi";
 var LoadError = class extends Error {
   code = "load_error";
   constructor(message) {
@@ -27987,13 +27188,13 @@ var LoadError = class extends Error {
 };
 var MissingAgentFileError = class extends LoadError {
   constructor(agentFile) {
-    super(`agent file is missing: ${agentFile}; run subzero init`);
+    super(`agent file is missing: ${agentFile}${RUN_INIT}`);
     this.name = "MissingAgentFileError";
   }
 };
 var MissingDefaultTierError = class extends LoadError {
   constructor() {
-    super("the medium tier is required in models.tiers; run subzero init");
+    super(`the medium tier is required in models.tiers${RUN_INIT}`);
     this.name = "MissingDefaultTierError";
   }
 };
@@ -28029,6 +27230,19 @@ var TierError = class extends Error {
   supportedHosts;
   code = "unknown_tier";
 };
+var StarterHostConflictError = class extends Error {
+  constructor(existingHost, givenHost) {
+    super(
+      `the medium tier of the agent file is on the host "${existingHost}", not "${givenHost}"; nothing was written. Edit the medium tier, or run init with that host.`
+    );
+    this.existingHost = existingHost;
+    this.givenHost = givenHost;
+    this.name = "StarterHostConflictError";
+  }
+  existingHost;
+  givenHost;
+  code = "starter_host_conflict";
+};
 var UnresolvedRootError = class extends Error {
   code = "unresolved_root";
   constructor(detail) {
@@ -28061,23 +27275,32 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function loadAgentFile(projectRoot) {
-  const agentFile = path3.join(projectRoot, AGENT_FILE);
+  const agentFile = path.join(projectRoot, AGENT_FILE);
   return parseCatalog(readAgentText(agentFile), agentFile);
 }
 function readAgentText(agentFile) {
   try {
-    return readFileSync2(agentFile, "utf8");
+    return readFileSync(agentFile, "utf8");
   } catch (err) {
     const code = err.code;
     if (code === "ENOENT") throw new MissingAgentFileError(agentFile);
     throw new LoadError(`agent file is unreadable: ${agentFile} (${code ?? String(err)})`);
   }
 }
-function parseCatalog(text, agentFile, allowMissingStarter = false) {
+function readTextOrNull(agentFile) {
+  try {
+    return readAgentText(agentFile);
+  } catch (err) {
+    if (err instanceof MissingAgentFileError) return null;
+    throw err;
+  }
+}
+function parseCatalog(text, agentFile, options = {}) {
+  const allowMissingStarter = options.allowMissingStarter === true;
   const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
   let parsed;
   try {
-    parsed = (0, import_yaml2.parse)(text);
+    parsed = (0, import_yaml.parse)(text);
   } catch (err) {
     throw malformed(err.message);
   }
@@ -28092,13 +27315,13 @@ function parseCatalog(text, agentFile, allowMissingStarter = false) {
   if (doc.models !== void 0 && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
   const modelsMap = doc.models ?? {};
   if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
-  const baseDir = path3.dirname(agentFile);
+  const baseDir = path.dirname(agentFile);
   const skillFolders = /* @__PURE__ */ new Map();
   for (const [name, value] of Object.entries(skillsMap)) {
     if (typeof value !== "string" || value.length === 0) {
       throw new LoadError(`skill "${name}" must map to a folder path`);
     }
-    skillFolders.set(name, path3.resolve(baseDir, value));
+    skillFolders.set(name, path.resolve(baseDir, value));
   }
   const limits = /* @__PURE__ */ new Map();
   for (const [endpoint, entry] of Object.entries(endpointsMap)) {
@@ -28125,14 +27348,14 @@ function parseCatalog(text, agentFile, allowMissingStarter = false) {
     }
   }
   for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint)) {
+    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
       throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
     }
   }
   if (!allowMissingStarter) {
     if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
-    if (!entries.has(GENERAL_AGENT)) throw new LoadError("the general agent is required; run subzero init");
-    if (!entries.has(FALLBACK_AGENT)) throw new LoadError("the fallback agent is required; run subzero init");
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
   }
   return { agentFile, entries, tiers, routing, limits };
 }
@@ -28271,6 +27494,141 @@ function resolveAgent(catalog, name, options = {}) {
 function configuredTierNames(projectRoot) {
   return [...loadAgentFile(projectRoot).tiers.keys()];
 }
+function addStarterEntries(projectRoot, spec) {
+  const agentFile = path.join(projectRoot, AGENT_FILE);
+  const text = readTextOrNull(agentFile);
+  if (text !== null) {
+    parseCatalog(text, agentFile, { allowMissingStarter: true });
+  }
+  const original = text ?? "";
+  const doc = (0, import_yaml.parseDocument)(original);
+  const existingHost = doc.getIn(["models", "tiers", DEFAULT_TIER, "host"]);
+  if (typeof existingHost === "string" && existingHost !== spec.host) {
+    throw new StarterHostConflictError(existingHost, spec.host);
+  }
+  const result2 = { added: [], present: [] };
+  const note = (entry, has) => (has ? result2.present : result2.added).push(entry);
+  const hasDefault = doc.hasIn(["models", "tiers", DEFAULT_TIER]);
+  const hasGeneral = doc.hasIn(["agents", GENERAL_AGENT]);
+  const hasFallback = doc.hasIn(["agents", FALLBACK_AGENT]);
+  note("medium", hasDefault);
+  note("general", hasGeneral);
+  note("fallback", hasFallback);
+  if (result2.added.length === 0) return result2;
+  const splicer = createSplicer(original);
+  if (!hasDefault) spliceTiers(splicer, { [DEFAULT_TIER]: { host: spec.host, model: spec.model, thinking: spec.thinking } });
+  if (!hasGeneral || !hasFallback) {
+    const agents = {};
+    if (!hasGeneral) agents[GENERAL_AGENT] = { tools: spec.generalTools, timeout: spec.timeout };
+    if (!hasFallback) agents[FALLBACK_AGENT] = { tools: spec.fallbackTools, timeout: spec.timeout };
+    spliceAgents(splicer, agents);
+  }
+  const next = splicer.result();
+  parseCatalog(next, agentFile);
+  mkdirSync(path.dirname(agentFile), { recursive: true });
+  writeFileSync(agentFile, next);
+  return result2;
+}
+function flowYaml(value) {
+  return (0, import_yaml.stringify)(value, { collectionStyle: "flow", lineWidth: 0 }).trimEnd();
+}
+function createSplicer(original) {
+  const doc = (0, import_yaml.parseDocument)(original);
+  const inserts = [];
+  let appended = "";
+  return {
+    original,
+    doc,
+    mapAt(keys) {
+      const node2 = doc.getIn(keys, true);
+      if (node2 === void 0 || node2 === null) return void 0;
+      if (!(0, import_yaml.isMap)(node2) || node2.flow === true || node2.items.length === 0 || node2.range === null || node2.range === void 0) {
+        throw new LoadError(`agent file: ${keys.join(".")} must be a block-style map for init to add entries to it`);
+      }
+      const first = node2.items[0].key.range[0];
+      return { end: node2.range[1], indent: " ".repeat(first - (original.lastIndexOf("\n", first - 1) + 1)) };
+    },
+    insert(at, body) {
+      inserts.push({ at, text: (at > 0 && original[at - 1] !== "\n" ? "\n" : "") + body });
+    },
+    insertInline(keys, entries) {
+      const node2 = doc.getIn(keys, true);
+      if (node2 === void 0 || node2 === null) return false;
+      const range = node2.range;
+      if (range === void 0 || range === null) return false;
+      const rendered = flowYaml(entries);
+      if ((0, import_yaml.isMap)(node2) && node2.flow === true) {
+        const contents = rendered.slice(1, -1).trim();
+        const source = original.slice(range[0], range[1]);
+        if (source.includes("\n")) {
+          const last = node2.items.at(-1)?.value;
+          if (last?.range !== void 0) {
+            const afterLast = original.slice(last.range[1], range[1] - 1).split("#", 1)[0];
+            if (!afterLast.includes(",")) inserts.push({ at: last.range[1], text: "," });
+          }
+          const close = range[1] - 1;
+          const lineStart = original.lastIndexOf("\n", close - 1) + 1;
+          const indent = original.slice(lineStart, close).match(/^\s*/)?.[0] ?? "";
+          inserts.push({ at: close, text: `  ${contents}
+${indent}` });
+          return true;
+        }
+        const trailingComma = original.slice(range[0], range[1] - 1).trimEnd().endsWith(",");
+        inserts.push({ at: range[1] - 1, text: `${node2.items.length && !trailingComma ? ", " : " "}${contents} ` });
+        return true;
+      }
+      if (typeof node2 === "object" && "value" in node2 && node2.value === null) {
+        inserts.push({ at: range[0], text: ` ${rendered}` });
+        return true;
+      }
+      return false;
+    },
+    append(body) {
+      appended += body;
+    },
+    result() {
+      let next = original;
+      for (const { at, text: body } of [...inserts].sort((x, y) => y.at - x.at)) next = next.slice(0, at) + body + next.slice(at);
+      if (appended !== "") {
+        if (next !== "" && !next.endsWith("\n")) next += "\n";
+        next += (next === "" ? "" : "\n") + appended;
+      }
+      return next;
+    }
+  };
+}
+function yamlKey(key) {
+  return flowYaml([key]).slice(2, -2);
+}
+function spliceTiers(s, tiers) {
+  if (Object.keys(tiers).length === 0) return;
+  const lines = (indent) => Object.entries(tiers).map(([name, tier]) => `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}
+`).join("");
+  if (s.insertInline(["models", "tiers"], tiers)) return;
+  if (!s.doc.hasIn(["models", "tiers"]) && s.insertInline(["models"], { tiers })) return;
+  const tiersAt = s.mapAt(["models", "tiers"]);
+  const models = tiersAt === void 0 ? s.mapAt(["models"]) : void 0;
+  if (tiersAt !== void 0) s.insert(tiersAt.end, lines(tiersAt.indent));
+  else if (models !== void 0) s.insert(models.end, `${models.indent}tiers:
+${lines(`${models.indent}  `)}`);
+  else s.append(`models:
+  tiers:
+${lines("    ")}`);
+}
+function spliceAgents(s, agents) {
+  if (Object.keys(agents).length === 0) return;
+  if (s.insertInline(["agents"], agents)) return;
+  const agentsAt = s.mapAt(["agents"]);
+  const indent = agentsAt?.indent ?? "  ";
+  const body = Object.entries(agents).map(([name, a]) => `${indent}${yamlKey(name)}:
+${indent}  tools: ${flowYaml(a.tools)}
+${indent}  timeout: ${a.timeout}
+`).join("");
+  if (agentsAt !== void 0) s.insert(agentsAt.end, body);
+  else if (s.doc.has("agents")) throw new LoadError("agent file: agents must be a map for init to add entries to it");
+  else s.append(`agents:
+${body}`);
+}
 async function resolveProjectRoot(sources) {
   const fromEnv = sources.env?.SUBZERO_PROJECT_DIR;
   if (fromEnv !== void 0 && fromEnv !== "") {
@@ -28293,14 +27651,1068 @@ async function resolveProjectRoot(sources) {
   return new UnresolvedRootError("SUBZERO_PROJECT_DIR is unset and the parent reported no root");
 }
 function canonicalDir(dir, source) {
-  if (!path3.isAbsolute(dir)) return new UnresolvedRootError(`${source} is not absolute: ${dir}`);
+  if (!path.isAbsolute(dir)) return new UnresolvedRootError(`${source} is not absolute: ${dir}`);
   try {
     const real = realpathSync(dir);
-    if (!statSync2(real).isDirectory()) return new UnresolvedRootError(`${source} is not a directory: ${dir}`);
+    if (!statSync(real).isDirectory()) return new UnresolvedRootError(`${source} is not a directory: ${dir}`);
     return real;
   } catch {
     return new UnresolvedRootError(`${source} does not exist: ${dir}`);
   }
+}
+
+// src/core/types.ts
+var ENDED_STATES = /* @__PURE__ */ new Set(["Settled", "Failed", "Cancelled"]);
+function isUnavailable(value) {
+  return typeof value === "object" && value !== null && "unavailable" in value;
+}
+function unavailableUsage(reason) {
+  const u = { unavailable: reason };
+  return {
+    inputTokens: u,
+    outputTokens: u,
+    cacheReadTokens: u,
+    cacheWriteTokens: u,
+    totalTokens: u,
+    cost: u,
+    contextTokens: u,
+    contextWindow: u,
+    contextPercent: u
+  };
+}
+
+// src/pi/launch.ts
+var CHILD_ENV = { PI_OFFLINE: "1", PI_TELEMETRY: "0" };
+function childRpcArgs() {
+  return [
+    "--mode",
+    "rpc",
+    "--offline",
+    "-na",
+    "-ne",
+    "-nc",
+    "-np",
+    "--no-themes",
+    "-ns"
+  ];
+}
+function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
+  return [
+    ...childRpcArgs(),
+    ...overlaySkills.flatMap((folder) => ["--skill", folder]),
+    "--model",
+    agent.model,
+    "--thinking",
+    agent.thinking,
+    "--tools",
+    agent.tools.join(","),
+    "--session-dir",
+    sessionsFolder,
+    "--session-id",
+    taskId,
+    "--name",
+    `subzero:${agent.name}:${taskId}`
+  ];
+}
+function attachCommand(spec) {
+  const out = [];
+  const command = spec.command;
+  for (let i = 0; i < command.length; i++) {
+    const arg = command[i];
+    if (arg === "--mode" && command[i + 1] === "rpc") {
+      i++;
+      continue;
+    }
+    if (arg === "--mode=rpc") continue;
+    if (arg === "--session") {
+      i++;
+      continue;
+    }
+    if (arg.startsWith("--session=")) continue;
+    out.push(arg);
+  }
+  return out;
+}
+
+// src/pi/overlay.ts
+import { cpSync, existsSync, statSync as statSync2 } from "node:fs";
+import path2 from "node:path";
+function overlayFolder(driverFilesFolder) {
+  return path2.join(driverFilesFolder, "skills");
+}
+function missingSkills(skills) {
+  return skills.filter((skill) => {
+    try {
+      return !statSync2(skill.folder).isDirectory();
+    } catch {
+      return true;
+    }
+  });
+}
+function prepareOverlay(driverFilesFolder, skills) {
+  const root = overlayFolder(driverFilesFolder);
+  return skills.map((skill) => {
+    const target = path2.join(root, skill.name);
+    if (!existsSync(target)) cpSync(skill.folder, target, { recursive: true, dereference: true });
+    return target;
+  });
+}
+
+// src/pi/jsonl.ts
+var LF = 10;
+var CR = 13;
+var JsonlSplitter = class {
+  pending = Buffer.alloc(0);
+  decoder = new TextDecoder("utf-8");
+  push(chunk) {
+    this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
+    const records = [];
+    let start = 0;
+    for (let i = this.pending.indexOf(LF, start); i !== -1; i = this.pending.indexOf(LF, start)) {
+      records.push(this.decode(this.pending.subarray(start, i)));
+      start = i + 1;
+    }
+    this.pending = this.pending.subarray(start);
+    return records;
+  }
+  /** Flush a final record that had no trailing LF. */
+  end() {
+    if (this.pending.length === 0) return [];
+    const last = this.decode(this.pending);
+    this.pending = Buffer.alloc(0);
+    return [last];
+  }
+  decode(bytes) {
+    const end = bytes.length > 0 && bytes[bytes.length - 1] === CR ? bytes.length - 1 : bytes.length;
+    return this.decoder.decode(bytes.subarray(0, end));
+  }
+};
+
+// src/pi/rpc-client.ts
+var RpcClosedError = class extends Error {
+  constructor() {
+    super("pi RPC stream closed");
+    this.name = "RpcClosedError";
+  }
+};
+var PiRpcClient = class {
+  constructor(stdin, stdout, options) {
+    this.stdin = stdin;
+    this.options = options;
+    const splitter = new JsonlSplitter();
+    stdout.on("data", (chunk) => {
+      for (const record2 of splitter.push(chunk)) this.dispatch(record2);
+    });
+    stdout.on("end", () => {
+      for (const record2 of splitter.end()) this.dispatch(record2);
+      this.failAll();
+    });
+    stdout.on("error", () => this.failAll());
+    stdin.on("error", () => this.failAll());
+  }
+  stdin;
+  options;
+  nextId = 1;
+  waiting = /* @__PURE__ */ new Map();
+  closed = false;
+  markLost;
+  /** Resolves when the pipe to pi is lost, whether or not a command is waiting. */
+  lost = new Promise((resolve) => this.markLost = resolve);
+  dispatch(record2) {
+    if (record2.trim() === "") return;
+    let message;
+    try {
+      message = JSON.parse(record2);
+    } catch {
+      this.options.onBadRecord?.(record2);
+      return;
+    }
+    if (message?.type === "response" && typeof message.id === "string" && this.waiting.has(message.id)) {
+      const entry = this.waiting.get(message.id);
+      this.waiting.delete(message.id);
+      entry.resolve(message);
+      return;
+    }
+    this.options.onEvent(message);
+  }
+  send(command) {
+    if (this.closed) return Promise.reject(new RpcClosedError());
+    const id = `sz-${this.nextId++}`;
+    return new Promise((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject });
+      try {
+        this.stdin.write(JSON.stringify({ ...command, id }) + "\n");
+      } catch {
+        this.waiting.delete(id);
+        reject(new RpcClosedError());
+      }
+    });
+  }
+  /** Close stdin; pi exits on EOF. */
+  close() {
+    if (this.stdin.writableEnded) return;
+    try {
+      this.stdin.end();
+    } catch {
+    }
+  }
+  failAll() {
+    this.closed = true;
+    this.markLost();
+    for (const entry of this.waiting.values()) entry.reject(new RpcClosedError());
+    this.waiting.clear();
+  }
+};
+
+// src/pi/driver.ts
+var PI_HOST = "pi";
+var MESSAGE_LIMIT = 300;
+var STDERR_TAIL_LIMIT = 4e3;
+var LIST_TIMEOUT_MS = 3e4;
+var CHECK_TIMEOUT_MS = 12e4;
+var CHECK_PROMPT = "Reply with the single word: ok";
+var UNKNOWN_MODEL = /model\b.*\bnot found/i;
+var NO_MODELS = "pi offers no models that subzero children can use. Set up a pi provider (log in, set its API key, or add it to pi's models.json; a provider that only a pi extension adds does not reach children), then try again.";
+var QUIET_EVENTS = /* @__PURE__ */ new Set([
+  "agent_start",
+  "agent_end",
+  "turn_start",
+  "message_start",
+  "tool_execution_update",
+  "queue_update",
+  "compaction_start",
+  "compaction_end",
+  "auto_retry_end",
+  "summarization_retry_scheduled",
+  "summarization_retry_attempt_start",
+  "summarization_retry_finished",
+  "bash_execution_update",
+  // Emitted by pi 0.87 for each session entry, though rpc.md does not list it.
+  "entry_appended"
+]);
+var DIALOG_METHODS = /* @__PURE__ */ new Set(["select", "confirm", "input", "editor"]);
+var PiDriver = class {
+  constructor(options = {}) {
+    this.options = options;
+  }
+  options;
+  version;
+  live = /* @__PURE__ */ new Set();
+  probes = /* @__PURE__ */ new Set();
+  /** The child port of this driver, which Kernel hands to a caller. */
+  port = { start: (request, onEvent) => this.start(request, onEvent) };
+  /** Reopens the child session in the pi terminal interface. */
+  attachCommand = (spec) => attachCommand(spec);
+  /** The child session as HTML, written by pi --export. Rejects with the reason. */
+  sessionExport = (sessionFile, outputFile) => {
+    const [program, ...lead] = this.piCommand;
+    return new Promise((resolve, reject) => {
+      const child = spawn(program, [...lead, "--export", sessionFile, outputFile], {
+        stdio: ["ignore", "inherit", "inherit"],
+        env: this.options.env ?? process.env
+      });
+      child.once("error", (err) => reject(new Error(`could not start ${program}: ${err.message}`)));
+      child.once(
+        "exit",
+        (code) => code === 0 ? resolve() : reject(new Error(`${program} --export exited with code ${code ?? "unknown"}`))
+      );
+    });
+  };
+  starterTools = () => ({
+    general: ["read", "bash", "edit", "write", "grep", "find", "ls"],
+    fallback: ["read", "grep", "find", "ls"]
+  });
+  /**
+   * Runs the configured pi command with --version. Undefined when it answers; a
+   * message otherwise that names pi, says whether it was not found or did not run,
+   * and says to install it and run subzero init again.
+   */
+  prerequisites = () => {
+    const [program, ...rest] = this.piCommand;
+    const result2 = spawnSync(program, [...rest, "--version"], {
+      timeout: 1e4,
+      env: { ...this.options.env ?? process.env, ...CHILD_ENV },
+      stdio: "ignore"
+    });
+    const next = "To continue, install pi and run `subzero init` again.";
+    if (result2.error !== void 0) {
+      const notFound = result2.error.code === "ENOENT";
+      return notFound ? `pi was not found (${program}). ${next}` : `pi did not run (${program}: ${result2.error.message}). ${next}`;
+    }
+    if (result2.status !== 0) {
+      return `pi did not run (${[program, ...rest, "--version"].join(" ")} ${result2.status === null ? `ended by ${result2.signal}` : `exited with code ${result2.status}`}). ${next}`;
+    }
+    return void 0;
+  };
+  /**
+   * The models a child can use: pi's get_available_models, asked with the
+   * children's environment, isolation flags and pi command, so that a provider
+   * children cannot reach is not listed. Rejects with a one-line reason; zero
+   * models is an error that points to pi provider setup.
+   */
+  listModels = async (options = {}) => {
+    const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
+    const probe = this.probe([...childRpcArgs(), "--no-session"], options.projectRoot, { strict: true });
+    const timer = deadline(timeoutMs);
+    try {
+      const answer = await Promise.race([
+        probe.client.send({ type: "get_available_models" }).then(
+          (response) => response,
+          () => "gone"
+        ),
+        probe.gone.then(() => "gone"),
+        timer.promise
+      ]);
+      if (answer === "timeout") {
+        probe.mustKill = true;
+        throw new Error(`pi did not list its models within ${seconds(timeoutMs)}`);
+      }
+      if (answer === "gone") throw new Error(await probe.whyGone("it listed its models"));
+      if (!answer.success) throw new Error(bounded(`pi refused to list its models: ${answer.error ?? "no reason given"}`));
+      return hostModels(answer.data);
+    } finally {
+      timer.clear();
+      await this.endProbe(probe);
+    }
+  };
+  /**
+   * Sends one fixed prompt to a model in a one-turn pi run with the children's
+   * flags, the model and thinking level, no tools and no saved session. Answered,
+   * or failed with a kind and a one-line reason; aborting kills pi.
+   */
+  checkModel = async (request) => {
+    const { model, thinking, projectRoot, signal } = request;
+    if (signal?.aborted) return checkFailed("cancelled", "the check was cancelled");
+    const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
+    let lastAssistant = null;
+    let markSettled;
+    const settled = new Promise((resolve) => markSettled = () => resolve("settled"));
+    const probe = this.probe(
+      [...childRpcArgs(), "--model", model, "--thinking", thinking, "--no-tools", "--no-session"],
+      projectRoot,
+      {
+        strict: false,
+        onEvent: (event) => {
+          if (event.type === "message_end" && event.message?.role === "assistant") lastAssistant = event.message;
+          if (event.type === "agent_settled") markSettled();
+        }
+      }
+    );
+    const timer = deadline(timeoutMs);
+    let onAbort = () => {
+    };
+    const aborted2 = new Promise((resolve) => {
+      onAbort = () => resolve("cancelled");
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    const ended = Promise.race([timer.promise, aborted2, probe.gone.then(() => "gone")]);
+    const unknown2 = (message) => probe.unknownModel ? checkFailed("unknown_model", `unknown model: ${model}: ${message}`) : checkFailed("failed", message);
+    try {
+      const prompt = await Promise.race([
+        probe.client.send({ type: "prompt", message: CHECK_PROMPT }).then(
+          (response) => response,
+          () => "gone"
+        ),
+        ended
+      ]);
+      const done = typeof prompt === "string" ? prompt : prompt.success ? await Promise.race([settled, ended]) : prompt;
+      if (done === "timeout" || done === "cancelled") {
+        probe.mustKill = true;
+        return done === "timeout" ? checkFailed("timeout", `no answer within ${seconds(timeoutMs)}`) : checkFailed("cancelled", "the check was cancelled");
+      }
+      if (done === "gone") {
+        const reason = await probe.whyGone("the model answered");
+        return probe.unknownModel ? checkFailed("unknown_model", `unknown model: ${model}`) : checkFailed("failed", reason);
+      }
+      if (done !== "settled") return unknown2(`pi refused the prompt: ${done.error ?? "no reason given"}`);
+      if (lastAssistant === null) return checkFailed("failed", "no assistant message");
+      if (lastAssistant.stopReason === "error") return unknown2(String(lastAssistant.errorMessage ?? "pi reported an error"));
+      if (lastAssistant.stopReason === "aborted") return checkFailed("failed", "pi aborted the turn");
+      return { ok: true };
+    } finally {
+      timer.clear();
+      signal?.removeEventListener("abort", onAbort);
+      await this.endProbe(probe);
+    }
+  };
+  probe(args, cwd, options) {
+    const probe = new PiProbe([...this.piCommand, ...args], cwd, this.options.env ?? process.env, options);
+    this.probes.add(probe);
+    return probe;
+  }
+  async endProbe(probe) {
+    try {
+      await probe.end(this.options.killWaitMs ?? 2e3);
+    } finally {
+      this.probes.delete(probe);
+    }
+  }
+  get piCommand() {
+    return this.options.piCommand ?? ["pi"];
+  }
+  piVersion() {
+    if (this.version === void 0) {
+      const [program, ...rest] = this.piCommand;
+      try {
+        this.version = execFileSync(program, [...rest, "--version"], {
+          encoding: "utf8",
+          timeout: 1e4,
+          env: { ...this.options.env ?? process.env, ...CHILD_ENV },
+          stdio: ["ignore", "pipe", "ignore"]
+        }).trim();
+      } catch (err) {
+        this.version = { unavailable: `pi --version failed: ${err.message}` };
+      }
+    }
+    return this.version;
+  }
+  start(request, onEvent) {
+    const run = new PiChildRun(this, this.options, request, onEvent);
+    this.live.add(run);
+    const outcome = run.execute().finally(() => this.live.delete(run));
+    return { outcome, cancel: () => run.requestStop({ status: "cancelled" }) };
+  }
+  /** Last resort when this process must exit now: SIGKILL every live child run. */
+  killAll() {
+    for (const run of this.live) run.forceKill();
+    for (const probe of this.probes) probe.kill();
+  }
+};
+var PiProbe = class {
+  constructor(command, cwd, env, options) {
+    this.command = command;
+    const [program, ...args] = command;
+    const child = spawn(program, args, {
+      ...cwd !== void 0 ? { cwd } : {},
+      env: { ...env, ...CHILD_ENV },
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true
+    });
+    this.child = child;
+    this.exit = new Promise((resolve) => {
+      const done = (code, signal) => {
+        this.exited = true;
+        resolve({ code, signal });
+      };
+      child.once("close", (code, signal) => done(code, signal));
+      child.once("exit", (code, signal) => setTimeout(() => done(code, signal), 200).unref());
+      child.once("error", (err) => {
+        this.spawnError = err;
+        done(null, null);
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
+    });
+    let markBad;
+    const bad = new Promise((resolve) => markBad = resolve);
+    this.client = new PiRpcClient(child.stdin, child.stdout, {
+      onEvent: options.onEvent ?? (() => {
+      }),
+      onBadRecord: (record2) => {
+        if (!options.strict || this.badRecord !== null) return;
+        this.badRecord = record2;
+        markBad();
+      }
+    });
+    this.gone = Promise.race([this.exit.then(() => void 0), this.client.lost, bad]);
+  }
+  command;
+  client;
+  /** Resolves when pi can no longer answer: it exited, its pipe was lost, or it printed a line that is not JSON. */
+  gone;
+  unknownModel = false;
+  /** Set when the run timed out or was cancelled: end() kills pi rather than closing stdin. */
+  mustKill = false;
+  child;
+  exit;
+  exited = false;
+  spawnError = null;
+  badRecord = null;
+  stderrTail = "";
+  /** One line saying why pi stopped answering before `what`. */
+  async whyGone(what) {
+    await this.exitedWithin(300);
+    if (this.spawnError !== null) return bounded(`could not start pi (${this.command[0]}): ${this.spawnError.message}`);
+    if (this.badRecord !== null) return bounded(`pi printed a line that is not JSON before ${what}: ${this.badRecord.slice(0, 120)}`);
+    const tail = this.stderrTail.trim();
+    if (!this.exited) return bounded(`lost the pipe to pi before ${what}${tail ? `: ${tail}` : ""}`);
+    const exit = await this.exit;
+    const how = exit.signal !== null ? `on signal ${exit.signal}` : `with code ${exit.code}`;
+    return bounded(`pi exited ${how} before ${what}${tail ? `: ${tail}` : ""}`);
+  }
+  /** Close stdin and wait; then SIGTERM and SIGKILL the group. A killed probe is killed at once. */
+  async end(waitMs) {
+    this.client.close();
+    if (!this.mustKill && !await this.exitedWithin(waitMs)) {
+      this.signal("SIGTERM");
+      await this.exitedWithin(waitMs);
+    }
+    this.kill();
+    await this.exit;
+  }
+  kill() {
+    this.signal("SIGKILL");
+  }
+  signal(signal) {
+    signalProcessTree(this.child.pid, this.exited, signal);
+  }
+  exitedWithin(ms) {
+    return waitForExit(this.exit, this.exited, ms);
+  }
+};
+function checkFailed(kind, message) {
+  return { ok: false, kind, message: bounded(message) };
+}
+function hostModels(data) {
+  const list = data?.models;
+  if (!Array.isArray(list)) throw new Error("pi returned a malformed model list: it has no models array");
+  if (list.length === 0) throw new Error(NO_MODELS);
+  return list.map((model, i) => hostModel(model, i));
+}
+function hostModel(model, index) {
+  const named = (value) => typeof value === "string" && value !== "";
+  if (typeof model !== "object" || model === null || !named(model.provider) || !named(model.id)) {
+    throw new Error(`pi returned a malformed model list: entry ${index + 1} has no provider or id`);
+  }
+  const name = `${model.provider}/${model.id}`;
+  const reasoning = model.reasoning === true;
+  const cost = model.cost;
+  const number4 = (value) => typeof value === "number" && Number.isFinite(value);
+  return {
+    name,
+    endpoint: modelEndpoint(name),
+    reasoning,
+    thinkingLevels: supportedThinkingLevels(reasoning, model.thinkingLevelMap),
+    ...number4(model.contextWindow) ? { contextWindow: model.contextWindow } : {},
+    ...number4(model.maxTokens) ? { maxTokens: model.maxTokens } : {},
+    input: Array.isArray(model.input) ? model.input.filter((kind) => typeof kind === "string") : [],
+    ...typeof cost === "object" && cost !== null && [cost.input, cost.output, cost.cacheRead, cost.cacheWrite].every(number4) ? { cost: { input: cost.input, output: cost.output, cacheRead: cost.cacheRead, cacheWrite: cost.cacheWrite } } : {}
+  };
+}
+function supportedThinkingLevels(reasoning, thinkingLevelMap) {
+  if (!reasoning) return ["off"];
+  const map2 = typeof thinkingLevelMap === "object" && thinkingLevelMap !== null ? thinkingLevelMap : {};
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = map2[level];
+    if (mapped === null) return false;
+    if (level === "xhigh" || level === "max") return mapped !== void 0;
+    return true;
+  });
+}
+function seconds(ms) {
+  return `${ms / 1e3}s`;
+}
+function deadline(ms) {
+  let timer;
+  const promise2 = new Promise((resolve) => timer = setTimeout(() => resolve("timeout"), ms));
+  return { promise: promise2, clear: () => clearTimeout(timer) };
+}
+var PiChildRun = class {
+  constructor(driver, options, request, emit) {
+    this.driver = driver;
+    this.options = options;
+    this.request = request;
+    this.emit = emit;
+    this.log = options.log ?? ((m) => process.stderr.write(`subzero: ${m}
+`));
+  }
+  driver;
+  options;
+  request;
+  emit;
+  stop = null;
+  settledSeen = false;
+  finished = false;
+  triggerStop;
+  stopped = new Promise((resolve) => this.triggerStop = resolve);
+  triggerSettled;
+  settled = new Promise((resolve) => this.triggerSettled = resolve);
+  child = null;
+  client = null;
+  exit = null;
+  exited = false;
+  exitReported = false;
+  spawnError = null;
+  stderrTail = "";
+  textBuffer = "";
+  toolPaths = /* @__PURE__ */ new Map();
+  lastAssistant = null;
+  ready = false;
+  pipeLost = false;
+  unknownModel = false;
+  sessionFile;
+  timer = null;
+  log;
+  /** The first termination wins; a stop after agent_settled changes nothing. */
+  requestStop(stop) {
+    if (this.stop !== null || this.settledSeen || this.finished) return;
+    this.stop = stop;
+    this.triggerStop();
+  }
+  async execute() {
+    try {
+      return await this.main();
+    } finally {
+      this.finished = true;
+      if (this.timer !== null) clearTimeout(this.timer);
+      this.signalGroup("SIGKILL");
+    }
+  }
+  forceKill() {
+    this.signalTree("SIGKILL");
+  }
+  async main() {
+    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
+    const missing = missingSkills(agent.skills);
+    if (missing.length > 0) {
+      return failed("skill_mismatch", `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(", ")}`);
+    }
+    if (this.stop !== null) return this.stoppedBeforeSpawn();
+    const overlay = prepareOverlay(driverFilesFolder, agent.skills);
+    const env = this.options.env ?? process.env;
+    const agentDir = this.options.piAgentDir ?? env.PI_CODING_AGENT_DIR ?? path3.join(homedir(), ".pi", "agent");
+    if (existsSync2(path3.join(agentDir, "SYSTEM.md"))) {
+      this.emit({
+        kind: "warning",
+        message: `${path3.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
+      });
+    }
+    const command = [
+      ...this.driver.piCommand,
+      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder })
+    ];
+    const launchSpec = {
+      command,
+      cwd: projectRoot,
+      envNames: Object.keys(CHILD_ENV),
+      version: this.driver.piVersion(),
+      skillFolders: overlay,
+      thinkingLevel: agent.thinking
+    };
+    this.emit({ kind: "run_started", launchSpec });
+    if (this.stop !== null) return this.stoppedBeforeSpawn();
+    this.spawnChild(command);
+    this.timer = setTimeout(
+      () => this.requestStop({ status: "failed", failureKind: "timeout", message: `timed out after ${agent.timeout}s` }),
+      agent.timeout * 1e3
+    );
+    const state = await this.race(this.client.send({ type: "get_state" }));
+    if (state.kind !== "value") return this.interrupted(state.kind);
+    this.ready = true;
+    if (typeof state.value.data?.sessionFile === "string") this.sessionFile = state.value.data.sessionFile;
+    const commands = await this.race(this.client.send({ type: "get_commands" }));
+    if (commands.kind !== "value") return this.interrupted(commands.kind);
+    const mismatch = verifySkills(overlay.map(expectedSkillName), commands.value);
+    if (mismatch !== null) {
+      await this.killNow();
+      await this.emitRunExited();
+      return failed("skill_mismatch", mismatch);
+    }
+    this.emit({ kind: "skills_verified", skills: agent.skills.map((s) => s.name) });
+    const prompt = await this.race(this.client.send({ type: "prompt", message: brief }));
+    if (prompt.kind !== "value") return this.interrupted(prompt.kind);
+    if (!prompt.value.success) {
+      await this.killNow();
+      await this.emitRunExited();
+      return failed("error", bounded(this.withModelHint(`pi refused the prompt: ${prompt.value.error ?? "no reason given"}`)));
+    }
+    const done = await this.race(this.settled);
+    if (done.kind !== "value") return this.interrupted(done.kind);
+    const text = await this.ask("get_last_assistant_text");
+    const stats = await this.ask("get_session_stats");
+    this.client.close();
+    await this.waitExitOrKill();
+    await this.emitRunExited();
+    return this.settledOutcome(text?.text ?? null, stats);
+  }
+  spawnChild(command) {
+    const [program, ...args] = command;
+    const child = spawn(program, args, {
+      cwd: this.request.projectRoot,
+      env: { ...this.options.env ?? process.env, ...CHILD_ENV },
+      stdio: ["pipe", "pipe", "pipe"],
+      detached: true
+    });
+    this.child = child;
+    this.exit = new Promise((resolve) => {
+      child.once("exit", (code, signal) => {
+        this.exited = true;
+        resolve({ code, signal });
+      });
+      child.once("error", (err) => {
+        this.spawnError = err;
+        this.exited = true;
+        resolve({ code: null, signal: null });
+      });
+    });
+    child.stderr.on("data", (chunk) => {
+      this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_LIMIT);
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
+    });
+    this.client = new PiRpcClient(child.stdin, child.stdout, {
+      onEvent: (event) => this.onPiEvent(event),
+      onBadRecord: (record2) => this.log(`${this.request.taskId}: ignoring a non-JSON line from pi: ${record2.slice(0, 120)}`)
+    });
+  }
+  race(promise2) {
+    return Promise.race([
+      promise2.then(
+        (value) => ({ kind: "value", value }),
+        () => ({ kind: "exit" })
+      ),
+      this.stopped.then(() => ({ kind: "stop" })),
+      this.exit.then(() => ({ kind: "exit" })),
+      this.client.lost.then(() => ({ kind: "exit" }))
+    ]);
+  }
+  interrupted(kind) {
+    return kind === "stop" ? this.terminate() : this.crashed();
+  }
+  /** Send one command after settlement; any failure leaves its data unavailable. */
+  async ask(type) {
+    if (this.exited) return null;
+    try {
+      const response = await withTimeout(this.client.send({ type }), 1e4);
+      return response?.success ? response.data : null;
+    } catch {
+      return null;
+    }
+  }
+  // ---- pi events → domain events -----------------------------------------
+  onPiEvent(event) {
+    switch (event.type) {
+      case "tool_execution_start": {
+        const target = targetPath(event.args);
+        if (target !== void 0 && typeof event.toolCallId === "string") this.toolPaths.set(event.toolCallId, target);
+        this.emit({ kind: "tool_activity", phase: "start", tool: String(event.toolName), ...target ? { path: target } : {} });
+        return;
+      }
+      case "tool_execution_end": {
+        const target = targetPath(event.args) ?? this.toolPaths.get(String(event.toolCallId));
+        this.toolPaths.delete(String(event.toolCallId));
+        this.emit({
+          kind: "tool_activity",
+          phase: "end",
+          tool: String(event.toolName),
+          ...target ? { path: target } : {},
+          isError: event.isError === true
+        });
+        return;
+      }
+      case "message_update": {
+        const delta = event.assistantMessageEvent;
+        if (delta?.type === "text_delta" && typeof delta.delta === "string") this.textBuffer += delta.delta;
+        return;
+      }
+      case "message_end": {
+        const message = event.message;
+        if (message?.role === "assistant") {
+          this.lastAssistant = message;
+          const text = this.textBuffer || assistantText(message);
+          if (text) this.emit({ kind: "agent_message", text });
+        }
+        this.textBuffer = "";
+        return;
+      }
+      case "turn_end":
+        this.emit({ kind: "turn_settled" });
+        return;
+      case "auto_retry_start":
+        this.emit({ kind: "retrying", ...typeof event.attempt === "number" ? { attempt: event.attempt } : {} });
+        return;
+      case "agent_settled":
+        if (this.stop === null) {
+          this.settledSeen = true;
+          this.triggerSettled();
+        }
+        return;
+      case "extension_ui_request":
+        if (DIALOG_METHODS.has(event.method) && typeof event.id === "string" && this.child?.stdin?.writable) {
+          this.child.stdin.write(JSON.stringify({ type: "extension_ui_response", id: event.id, cancelled: true }) + "\n");
+        }
+        return;
+      case "extension_error":
+        this.log(`${this.request.taskId}: pi extension error: ${String(event.error).slice(0, 200)}`);
+        return;
+      case "response":
+        return;
+      default:
+        if (!QUIET_EVENTS.has(event.type)) {
+          this.log(`${this.request.taskId}: ignoring unrecognized pi event type ${JSON.stringify(event.type)}`);
+        }
+    }
+  }
+  // ---- endings --------------------------------------------------------------
+  settledOutcome(text, stats) {
+    const usage = usageFromStats(stats);
+    const base = { usage, ...this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {} };
+    const message = this.lastAssistant;
+    if (message === null) {
+      return { ...base, lastAssistantText: text, status: "failed", failureKind: "error", message: "no assistant message" };
+    }
+    const summary = text ?? assistantText(message);
+    switch (message.stopReason) {
+      case "length":
+        return { ...base, lastAssistantText: summary, status: "truncated" };
+      case "error":
+        return {
+          ...base,
+          lastAssistantText: summary,
+          status: "failed",
+          failureKind: "error",
+          message: bounded(this.withModelHint(String(message.errorMessage ?? "pi reported an error")))
+        };
+      case "aborted":
+        return { ...base, lastAssistantText: summary, status: "cancelled" };
+      default:
+        return { ...base, lastAssistantText: summary, status: "completed" };
+    }
+  }
+  /** pi starts with an unknown model id on a known provider and only warns on stderr. */
+  withModelHint(message) {
+    return this.unknownModel ? `unknown model: ${this.request.agent.model}: ${message}` : message;
+  }
+  stoppedBeforeSpawn() {
+    const stop = this.stop;
+    return {
+      lastAssistantText: null,
+      usage: unavailableUsage("the child run ended before pi started"),
+      ...stop.status === "failed" ? { status: "failed", failureKind: stop.failureKind, message: stop.message } : { status: "cancelled" }
+    };
+  }
+  /**
+   * Cancel or timeout: clear_queue, abort (up to abortWaitMs), close stdin, then
+   * SIGTERM and SIGKILL to the process group. The status comes from the stop.
+   */
+  async terminate() {
+    const stop = this.stop;
+    const client = this.client;
+    let text = null;
+    let stats = null;
+    if (!this.exited) {
+      await withTimeout(client.send({ type: "clear_queue" }), 1e3).catch(() => void 0);
+      const aborted2 = await withTimeout(client.send({ type: "abort" }), this.options.abortWaitMs ?? 5e3).catch(() => null);
+      if (aborted2?.success && !this.exited) {
+        text = (await withTimeout(client.send({ type: "get_last_assistant_text" }), 1e3).catch(() => null))?.data?.text ?? null;
+        stats = (await withTimeout(client.send({ type: "get_session_stats" }), 1e3).catch(() => null))?.data ?? null;
+      }
+      this.signalDescendants("SIGKILL");
+      client.close();
+      await this.waitExitOrKill();
+    }
+    await this.emitRunExited();
+    return {
+      lastAssistantText: text,
+      usage: stats ? usageFromStats(stats) : unavailableUsage("pi did not report usage before it was stopped"),
+      ...this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {},
+      ...stop.status === "failed" ? { status: "failed", failureKind: stop.failureKind, message: stop.message } : { status: "cancelled" }
+    };
+  }
+  /** pi exited, or its pipe was lost, before the run settled. */
+  async crashed() {
+    if (!this.exited && !await this.exitedWithin(300)) {
+      this.pipeLost = true;
+      this.signalDescendants("SIGKILL");
+      this.client?.close();
+      await this.waitExitOrKill();
+    }
+    const exit = await this.exit;
+    const tail = this.stderrTail.trim();
+    if (tail !== "") this.emit({ kind: "stderr_tail", text: tail });
+    await this.emitRunExited();
+    const usage = unavailableUsage("pi exited before it reported usage");
+    const session = this.sessionFile !== void 0 ? { sessionFile: this.sessionFile } : {};
+    if (this.spawnError !== null) {
+      return { lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: bounded(`could not start pi: ${this.spawnError.message}`) };
+    }
+    if (this.pipeLost) {
+      return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: "lost the pipe to pi" };
+    }
+    if (this.unknownModel) {
+      return { lastAssistantText: null, usage, status: "failed", failureKind: "error", message: bounded(`unknown model: ${this.request.agent.model}`) };
+    }
+    if (exit.code === 0 && this.lastAssistant === null) {
+      return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "error", message: "no assistant message" };
+    }
+    const how = exit.signal !== null ? `signal ${exit.signal}` : `code ${exit.code}`;
+    return { ...session, lastAssistantText: null, usage, status: "failed", failureKind: "crashed", message: bounded(`pi exited mid-turn with ${how}`) };
+  }
+  /** Every path that ends a spawned child reports its exit, once. */
+  async emitRunExited() {
+    const exit = await this.exit;
+    if (this.exitReported) return;
+    this.exitReported = true;
+    this.emit({ kind: "run_exited", code: exit.code, signal: exit.signal });
+  }
+  async killNow() {
+    this.client?.close();
+    this.signalTree("SIGKILL");
+    await this.exit;
+  }
+  async waitExitOrKill() {
+    const wait = this.options.killWaitMs ?? 2e3;
+    if (await this.exitedWithin(wait)) return;
+    this.signalTree("SIGTERM");
+    if (await this.exitedWithin(wait)) return;
+    this.signalTree("SIGKILL");
+    await this.exit;
+  }
+  exitedWithin(ms) {
+    return waitForExit(this.exit, this.exited, ms);
+  }
+  /**
+   * Signal pi's group and the group of every descendant of pi. pi's bash tool
+   * spawns detached shells, which a signal to pi's own group does not reach.
+   */
+  signalTree(signal) {
+    signalProcessTree(this.child?.pid, this.exited, signal);
+  }
+  /** Signal the groups of pi's descendants, not pi itself, while pi is alive. */
+  signalDescendants(signal) {
+    const pid = this.child?.pid;
+    if (pid === void 0 || this.exited) return;
+    signalTargets(descendants(pid), signal);
+  }
+  /** Signal pi's own process group. */
+  signalGroup(signal) {
+    signalOwnGroup(this.child?.pid, this.exited, signal);
+  }
+};
+async function waitForExit(exit, exited, ms) {
+  if (exited) return true;
+  let timer;
+  const timedOut = new Promise((resolve) => timer = setTimeout(() => resolve(false), ms));
+  const result2 = await Promise.race([exit.then(() => true), timedOut]);
+  clearTimeout(timer);
+  return result2;
+}
+function signalTargets(targets, signal) {
+  for (const target of targets) {
+    try {
+      process.kill(-target, signal);
+    } catch {
+      try {
+        process.kill(target, signal);
+      } catch {
+      }
+    }
+  }
+}
+function signalOwnGroup(pid, exited, signal) {
+  if (pid === void 0) return;
+  if (exited && !groupHasMembers(pid)) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+  }
+}
+function signalProcessTree(pid, exited, signal) {
+  if (pid === void 0 || exited) return signalOwnGroup(pid, exited, signal);
+  signalTargets([pid, ...descendants(pid)], signal);
+}
+function failed(failureKind, message) {
+  return { lastAssistantText: null, usage: unavailableUsage("pi did not run a turn"), status: "failed", failureKind, message };
+}
+function expectedSkillName(folder) {
+  try {
+    const text = readFileSync2(path3.join(folder, "SKILL.md"), "utf8");
+    const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+    const name = match ? (0, import_yaml2.parse)(match[1])?.name : void 0;
+    if (typeof name === "string" && name !== "") return name;
+  } catch {
+  }
+  return path3.basename(folder);
+}
+function verifySkills(expected, response) {
+  if (!response.success) return bounded(`get_commands failed: ${response.error ?? "no reason given"}`);
+  const commands = Array.isArray(response.data?.commands) ? response.data.commands : [];
+  const loaded = commands.filter((c) => c?.source === "skill").map((c) => String(c.name ?? "").replace(/^skill:/, ""));
+  const extra = loaded.filter((name) => !expected.includes(name));
+  const missing = expected.filter((name) => !loaded.includes(name));
+  const counted = loaded.length === expected.length;
+  if (extra.length === 0 && missing.length === 0 && counted) return null;
+  const parts = [];
+  if (!counted && extra.length === 0 && missing.length === 0) {
+    parts.push(`pi loaded ${loaded.length} skills for ${expected.length} declared folders; two declare the same name`);
+  }
+  if (extra.length > 0) parts.push(`extra skill ${extra.join(", ")}`);
+  if (missing.length > 0) parts.push(`missing skill ${missing.join(", ")}`);
+  return `skill verification failed: ${parts.join("; ")}`;
+}
+function groupHasMembers(pgid) {
+  try {
+    const listing = execFileSync("ps", ["-A", "-o", "pgid="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return listing.split("\n").some((line) => Number(line.trim()) === pgid);
+  } catch {
+    return false;
+  }
+}
+function descendants(root) {
+  let listing;
+  try {
+    listing = execFileSync("ps", ["-A", "-o", "pid=,ppid="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return [];
+  }
+  const children = /* @__PURE__ */ new Map();
+  for (const line of listing.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || ppid === void 0 || Number.isNaN(ppid)) continue;
+    children.set(ppid, [...children.get(ppid) ?? [], pid]);
+  }
+  const found = [];
+  const queue = [root];
+  while (queue.length > 0) {
+    for (const child of children.get(queue.shift()) ?? []) {
+      found.push(child);
+      queue.push(child);
+    }
+  }
+  return found;
+}
+function targetPath(args) {
+  if (typeof args !== "object" || args === null) return void 0;
+  const a = args;
+  for (const key of ["path", "file_path", "filePath", "file", "directory", "dir"]) {
+    if (typeof a[key] === "string" && a[key] !== "") return a[key];
+  }
+  return void 0;
+}
+function assistantText(message) {
+  if (!Array.isArray(message?.content)) return typeof message?.content === "string" ? message.content : "";
+  return message.content.filter((part) => part?.type === "text" && typeof part.text === "string").map((part) => part.text).join("");
+}
+function measure(value, reason) {
+  return typeof value === "number" && Number.isFinite(value) ? value : { unavailable: reason };
+}
+function usageFromStats(stats) {
+  if (stats === null || typeof stats !== "object") return unavailableUsage("pi did not report session stats");
+  const tokens = stats.tokens ?? {};
+  const context = stats.contextUsage ?? {};
+  return {
+    inputTokens: measure(tokens.input, "pi did not report input tokens"),
+    outputTokens: measure(tokens.output, "pi did not report output tokens"),
+    cacheReadTokens: measure(tokens.cacheRead, "pi did not report cache reads"),
+    cacheWriteTokens: measure(tokens.cacheWrite, "pi did not report cache writes"),
+    totalTokens: measure(tokens.total, "pi did not report total tokens"),
+    cost: measure(stats.cost, "pi did not report cost"),
+    contextTokens: measure(context.tokens, "pi did not report context use"),
+    contextWindow: measure(context.contextWindow, "pi did not report the context window"),
+    contextPercent: measure(context.percent, "pi did not report context use")
+  };
+}
+function bounded(text) {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > MESSAGE_LIMIT ? `${oneLine.slice(0, MESSAGE_LIMIT - 1)}\u2026` : oneLine;
+}
+function withTimeout(promise2, ms) {
+  let timer;
+  return Promise.race([
+    promise2.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => timer = setTimeout(() => reject(new Error("timed out")), ms))
+  ]);
 }
 
 // src/core/ids.ts
@@ -28764,22 +29176,22 @@ function writeAtomic(file2, value) {
 }
 
 // src/service/status-text.ts
-function describeTaskReply(reply, view, tools, now = Date.now()) {
-  if (reply.kind === "result") return formatResult(reply.result);
-  const id = `task: ${reply.taskId}`;
+function describeTaskReply(reply2, view, tools, now = Date.now()) {
+  if (reply2.kind === "result") return formatResult(reply2.result);
+  const id = `task: ${reply2.taskId}`;
   const lead = view !== void 0 ? `${id} \xB7 ${view.agent}` : id;
-  if (reply.kind === "abandoned") return `${lead} \xB7 abandoned: its owner process died, so it has no result`;
-  if (reply.kind === "not_found") return `${id} \xB7 no such task`;
-  const line = reply.kind === "started" || reply.kind === "running" ? formatStatusLine({ state: "running", startedAt: reply.startedAt }, now) : reply.kind === "queued" ? formatStatusLine({ state: "queued", endpoint: reply.endpoint, ...reply.place !== void 0 ? { place: reply.place } : {}, enqueuedAt: reply.enqueuedAt }, now) : formatStatusLine(statusFacts({ ...reply.startedAt !== void 0 ? { startedAt: reply.startedAt } : {}, ...reply.endpoint !== void 0 ? { endpoint: reply.endpoint } : {}, createdAt: reply.enqueuedAt }), now);
-  if (reply.kind === "started" || reply.kind === "queued") return `${lead} \xB7 ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
-  if (reply.kind === "other_process") return `${lead} \xB7 ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
+  if (reply2.kind === "abandoned") return `${lead} \xB7 abandoned: its owner process died, so it has no result`;
+  if (reply2.kind === "not_found") return `${id} \xB7 no such task`;
+  const line = reply2.kind === "started" || reply2.kind === "running" ? formatStatusLine({ state: "running", startedAt: reply2.startedAt }, now) : reply2.kind === "queued" ? formatStatusLine({ state: "queued", endpoint: reply2.endpoint, ...reply2.place !== void 0 ? { place: reply2.place } : {}, enqueuedAt: reply2.enqueuedAt }, now) : formatStatusLine(statusFacts({ ...reply2.startedAt !== void 0 ? { startedAt: reply2.startedAt } : {}, ...reply2.endpoint !== void 0 ? { endpoint: reply2.endpoint } : {}, createdAt: reply2.enqueuedAt }), now);
+  if (reply2.kind === "started" || reply2.kind === "queued") return `${lead} \xB7 ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
+  if (reply2.kind === "other_process") return `${lead} \xB7 ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
   return `${lead} \xB7 ${line}`;
 }
 function formatElapsed(ms) {
   const total = Math.max(0, Math.floor(ms / 1e3));
   const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+  const seconds2 = total % 60;
+  return minutes > 0 ? `${minutes}m${String(seconds2).padStart(2, "0")}s` : `${seconds2}s`;
 }
 function show(value, digits = 0) {
   if (isUnavailable(value)) return "unavailable";
@@ -28844,6 +29256,15 @@ function completionNotice(taskId, status, live, collectTool, now = Date.now()) {
 }
 function stopNotice(taskId) {
   return `task ${taskId} was stopped; no action is needed.`;
+}
+function formatStarterResult(result2) {
+  if (result2.added.length === 0) {
+    return ["all three entries (the medium tier, the general agent and the fallback agent) are already there; nothing changed"];
+  }
+  const name = (entry) => entry === "medium" ? "the medium tier" : `the ${entry} agent`;
+  const lines = [`added ${result2.added.map(name).join(", ")}`];
+  if (result2.present.length > 0) lines.push(`already there: ${result2.present.map(name).join(", ")}`);
+  return lines;
 }
 
 // src/service/delegation-service.ts
@@ -29017,7 +29438,7 @@ var DelegationService = class {
     this.limiter.admit(task, agent.endpoint, agent.parallel);
     options.onTask?.(task.taskId);
     if (task.state === "Pending") options.onState?.("Pending");
-    const withNotice2 = (reply) => notice !== void 0 ? { ...reply, notice } : reply;
+    const withNotice2 = (reply2) => notice !== void 0 ? { ...reply2, notice } : reply2;
     if (!options.wait) return withNotice2(this.liveReply(task));
     return withNotice2({ kind: "result", result: await task.result });
   }
@@ -29058,8 +29479,8 @@ var DelegationService = class {
     if (live !== void 0) {
       const result2 = live.settledResult;
       if (result2 !== void 0) return { kind: "result", result: result2 };
-      const reply = this.liveReply(live);
-      return reply.kind === "started" ? { kind: "running", taskId, startedAt: reply.startedAt } : reply;
+      const reply2 = this.liveReply(live);
+      return reply2.kind === "started" ? { kind: "running", taskId, startedAt: reply2.startedAt } : reply2;
     }
     return this.fromRecord(store, taskId);
   }
@@ -29169,7 +29590,7 @@ var DelegationService = class {
 
 // src/pi-parent/extension.ts
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-import { Type } from "typebox";
+import { Type as Type2 } from "typebox";
 
 // src/config/tier-words.ts
 var TIER_WORDS = [
@@ -29187,6 +29608,985 @@ function mapRequest(agent, tierText, configuredTiers) {
   const explicit = value.startsWith("tier:") ? value.slice(5) : value;
   const name = value.startsWith("tier:") ? explicit : configuredTiers.includes(value) ? value : tierForPhrase(value);
   return { agent: mappedAgent, tier: name ? { kind: "tier", name } : { kind: "unmatched", value } };
+}
+var LARGE_TIER_WARNING = "Setting large sends compound-engineering's session-model reviewers and plain subagent requests to the child model instead of Claude.";
+
+// src/pi-parent/init.ts
+import { parseArgs } from "node:util";
+import { Type } from "typebox";
+
+// src/config/agent-setup.ts
+var import_yaml3 = __toESM(require_dist(), 1);
+import { createHash, randomBytes as randomBytes3 } from "node:crypto";
+import { closeSync, fchmodSync, mkdirSync as mkdirSync3, openSync, renameSync as renameSync2, statSync as statSync3, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
+import path5 from "node:path";
+var DEFAULT_SETUP_TIMEOUT = 1200;
+var ChangeSetError = class extends Error {
+  code = "invalid_change_set";
+  constructor(message) {
+    super(message);
+    this.name = "ChangeSetError";
+  }
+};
+var SetupConflictError = class extends Error {
+  code = "stale_preview";
+  constructor() {
+    super("the agent file or the change set changed since the preview; nothing was written. Preview again.");
+    this.name = "SetupConflictError";
+  }
+};
+var SetupRefusedError = class extends Error {
+  constructor(refusals) {
+    super(`nothing was written: ${refusals.map((r) => r.message).join("; ")}`);
+    this.refusals = refusals;
+    this.name = "SetupRefusedError";
+  }
+  refusals;
+  code = "refused_change";
+};
+var SetupWriteError = class extends Error {
+  constructor(file2, cause) {
+    super(`could not write ${file2}: ${cause.code} (${errnoReason(cause)})`);
+    this.cause = cause;
+    this.name = "SetupWriteError";
+  }
+  cause;
+  code = "write_failed";
+};
+function isErrnoException(err) {
+  return err instanceof Error && typeof err.code === "string" && typeof err.syscall === "string";
+}
+function errnoReason(err) {
+  const match = /^[A-Z0-9_]+: ([^,]+)/.exec(err.message);
+  return match ? match[1].trim() : `${err.syscall} failed`;
+}
+function agentFileOf(projectRoot) {
+  return path5.join(projectRoot, AGENT_FILE);
+}
+function sha256(text) {
+  return createHash("sha256").update(text).digest("hex");
+}
+function classify(agentFile, text) {
+  if (text === null) return { status: "no-file", catalog: null };
+  try {
+    return { status: "ok", catalog: parseCatalog(text, agentFile) };
+  } catch (strict) {
+    if (!(strict instanceof LoadError)) throw strict;
+    try {
+      const catalog = parseCatalog(text, agentFile, { allowMissingStarter: true, allowUnusedLimits: true });
+      return { status: "repairable", catalog, problem: strict.message };
+    } catch (lenient) {
+      if (!(lenient instanceof LoadError)) throw lenient;
+      return { status: "refused", error: lenient };
+    }
+  }
+}
+function emptyCatalog(agentFile) {
+  return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map() };
+}
+function dependentsOf(catalog, tier) {
+  return [...catalog.entries.values()].filter((e) => e.tier === tier || e.overrides.has(tier)).map((e) => e.name);
+}
+function overrideEndpoints(catalog) {
+  const out = /* @__PURE__ */ new Set();
+  for (const entry of catalog.entries.values()) {
+    for (const override of entry.overrides.values()) if (override.model !== void 0) out.add(modelEndpoint(override.model));
+  }
+  return out;
+}
+function missingStarterOf(catalog) {
+  const out = [];
+  if (!catalog.tiers.has(DEFAULT_TIER)) out.push("medium");
+  if (!catalog.entries.has(GENERAL_AGENT)) out.push("general");
+  if (!catalog.entries.has(FALLBACK_AGENT)) out.push("fallback");
+  return out;
+}
+function readSetupState(projectRoot, options = {}) {
+  const agentFile = agentFileOf(projectRoot);
+  let text;
+  try {
+    text = readTextOrNull(agentFile);
+  } catch (err) {
+    if (err instanceof LoadError) return { status: "refused", agentFile, error: err.message };
+    throw err;
+  }
+  const loaded = classify(agentFile, text);
+  if (loaded.status === "refused") return { status: "refused", agentFile, error: loaded.error.message };
+  const catalog = loaded.catalog ?? emptyCatalog(agentFile);
+  const listed = options.listedModels === void 0 ? null : new Set(options.listedModels);
+  const tiers = [...catalog.tiers].map(([tier, t]) => ({
+    tier,
+    host: t.host,
+    model: t.model,
+    thinking: t.thinking,
+    endpoint: modelEndpoint(t.model),
+    dependents: dependentsOf(catalog, tier),
+    otherHost: options.host !== void 0 && t.host !== options.host,
+    listed: listed === null ? null : listed.has(t.model)
+  }));
+  const byOverride = overrideEndpoints(catalog);
+  const tierEndpoints = new Set(tiers.map((t) => t.endpoint));
+  const limits = [...catalog.limits].map(([endpoint, parallel]) => {
+    const using = tiers.filter((t) => t.endpoint === endpoint).map((t) => t.tier);
+    const overrideOnly = using.length === 0 && byOverride.has(endpoint);
+    return { endpoint, parallel, tiers: using, overrideOnly, unused: using.length === 0 && !overrideOnly };
+  });
+  const snapshot = {
+    agentFile,
+    fileFingerprint: text === null ? null : sha256(text),
+    tiers,
+    limits,
+    overrideOnlyEndpoints: [...byOverride].filter((e) => !tierEndpoints.has(e)),
+    missingStarter: missingStarterOf(catalog)
+  };
+  if (loaded.status === "repairable") return { status: "repairable", problem: loaded.problem, ...snapshot };
+  return { status: loaded.status, ...snapshot };
+}
+function nonEmpty(value, what) {
+  if (typeof value !== "string" || value.trim() === "" || /[\r\n]/.test(value)) {
+    throw new ChangeSetError(`${what} must be a non-empty one-line string`);
+  }
+  return value;
+}
+function tierRank(tier) {
+  const at = TIER_WORDS.findIndex((w) => w.tier === tier);
+  return at === -1 ? TIER_WORDS.length : at;
+}
+function normalizeChangeSet(changes) {
+  if (!Array.isArray(changes)) throw new ChangeSetError("a change set must be a list of changes");
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  const once = (key2, label) => {
+    if (seen.has(key2)) throw new ChangeSetError(`${label} is changed twice in one change set`);
+    seen.add(key2);
+  };
+  for (const raw of changes) {
+    if (!isRecord(raw)) throw new ChangeSetError("each change must be an object");
+    switch (raw.op) {
+      case "setTier": {
+        const tier = nonEmpty(raw.tier, "a tier name");
+        const model = nonEmpty(raw.model, `the model of tier "${tier}"`);
+        if (!isThinkingLevel(raw.thinking)) {
+          throw new ChangeSetError(`tier "${tier}": thinking must be one of ${THINKING_LEVELS.join(", ")}`);
+        }
+        once(`tier:${tier}`, `tier "${tier}"`);
+        out.push({ op: "setTier", tier, model, thinking: raw.thinking });
+        break;
+      }
+      case "unsetTier": {
+        const tier = nonEmpty(raw.tier, "a tier name");
+        once(`tier:${tier}`, `tier "${tier}"`);
+        out.push({ op: "unsetTier", tier });
+        break;
+      }
+      case "setLimit": {
+        const endpoint = nonEmpty(raw.endpoint, "an endpoint name");
+        const parallel = raw.parallel;
+        if (typeof parallel !== "number" || !Number.isSafeInteger(parallel) || parallel < 1) {
+          throw new ChangeSetError(`endpoint "${endpoint}": parallel must be a positive whole number`);
+        }
+        once(`endpoint:${endpoint}`, `endpoint "${endpoint}"`);
+        out.push({ op: "setLimit", endpoint, parallel });
+        break;
+      }
+      case "clearLimit": {
+        const endpoint = nonEmpty(raw.endpoint, "an endpoint name");
+        once(`endpoint:${endpoint}`, `endpoint "${endpoint}"`);
+        out.push({ op: "clearLimit", endpoint });
+        break;
+      }
+      default:
+        throw new ChangeSetError(`unknown change "${String(raw.op)}"; expected setTier, unsetTier, setLimit or clearLimit`);
+    }
+  }
+  const key = (c) => "tier" in c ? [0, tierRank(c.tier), c.tier] : [1, 0, c.endpoint];
+  return out.sort((x, y) => {
+    const [a, b] = [key(x), key(y)];
+    return a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0);
+  });
+}
+function previewChanges(projectRoot, changes, starter) {
+  const agentFile = agentFileOf(projectRoot);
+  const normalized = normalizeChangeSet(changes);
+  return plan(agentFile, readTextOrNull(agentFile), normalized, starter);
+}
+function applyChanges(projectRoot, changes, fingerprint, starter) {
+  const agentFile = agentFileOf(projectRoot);
+  const normalized = normalizeChangeSet(changes);
+  const preview = plan(agentFile, readTextOrNull(agentFile), normalized, starter);
+  if (preview.fingerprint !== fingerprint) throw new SetupConflictError();
+  if (preview.refusals.length > 0) throw new SetupRefusedError(preview.refusals);
+  if (preview.invalid !== void 0) throw new LoadError(preview.invalid);
+  if (preview.nothingToChange) return { ...preview, written: false };
+  try {
+    writeAtomic2(agentFile, preview.text);
+  } catch (err) {
+    if (isErrnoException(err)) throw new SetupWriteError(path5.relative(projectRoot, agentFile), err);
+    throw err;
+  }
+  return { ...preview, written: true };
+}
+function describeTier(t) {
+  return `${t.host} ${t.model} (thinking ${t.thinking})`;
+}
+function sameTier(a, b) {
+  return a.host === b.host && a.model === b.model && a.thinking === b.thinking;
+}
+function plan(agentFile, text, changes, starter) {
+  const loaded = classify(agentFile, text);
+  if (loaded.status === "refused") throw loaded.error;
+  const catalog = loaded.catalog ?? emptyCatalog(agentFile);
+  const timeout = starter.timeout ?? DEFAULT_SETUP_TIMEOUT;
+  const refusals = [];
+  const summary = [];
+  const finalTiers = new Map(catalog.tiers);
+  const setTiers = /* @__PURE__ */ new Map();
+  const unsetTiers = [];
+  for (const change of changes) {
+    if (change.op === "setTier") {
+      const tier = { host: starter.host, model: change.model, thinking: change.thinking };
+      const before = catalog.tiers.get(change.tier);
+      if (before !== void 0 && sameTier(before, tier)) continue;
+      summary.push(
+        before === void 0 ? `add tier ${change.tier}: ${describeTier(tier)}` : `tier ${change.tier}: ${describeTier(before)} -> ${describeTier(tier)}`
+      );
+      setTiers.set(change.tier, tier);
+      finalTiers.set(change.tier, tier);
+    } else if (change.op === "unsetTier") {
+      const agents = dependentsOf(catalog, change.tier);
+      if (change.tier === DEFAULT_TIER) {
+        refusals.push({ change, message: "the medium tier cannot be removed: every agent without its own tier runs on it" });
+      } else if (!catalog.tiers.has(change.tier)) {
+        refusals.push({ change, message: `tier "${change.tier}" is not configured, so it cannot be removed` });
+      } else if (agents.length > 0) {
+        refusals.push({
+          change,
+          agents,
+          message: `tier "${change.tier}" cannot be removed: ${agents.join(", ")} ${agents.length === 1 ? "uses" : "use"} it through tier: or tiers.${change.tier}`
+        });
+      } else {
+        summary.push(`remove tier ${change.tier}`);
+        unsetTiers.push(change.tier);
+        finalTiers.delete(change.tier);
+      }
+    }
+  }
+  const noMediumTier = !finalTiers.has(DEFAULT_TIER);
+  if (noMediumTier) refusals.push({ change: null, message: "the medium tier is required: choose a model for it" });
+  const used = overrideEndpoints(catalog);
+  for (const t of finalTiers.values()) used.add(modelEndpoint(t.model));
+  const finalLimits = new Map(catalog.limits);
+  const setLimits = /* @__PURE__ */ new Map();
+  const removedLimits = [];
+  for (const change of changes) {
+    if (change.op === "setLimit") {
+      if (!used.has(change.endpoint)) {
+        refusals.push({
+          change,
+          message: `endpoint "${change.endpoint}": no model of a tier or of a tier override belongs to it, so it cannot have a limit`
+        });
+        continue;
+      }
+      const before = catalog.limits.get(change.endpoint);
+      if (before === change.parallel) continue;
+      summary.push(
+        before === void 0 ? `endpoint ${change.endpoint}: parallel limit ${change.parallel}` : `endpoint ${change.endpoint}: parallel limit ${before} -> ${change.parallel}`
+      );
+      setLimits.set(change.endpoint, change.parallel);
+      finalLimits.set(change.endpoint, change.parallel);
+    } else if (change.op === "clearLimit" && catalog.limits.has(change.endpoint)) {
+      summary.push(`endpoint ${change.endpoint}: remove the parallel limit`);
+      removedLimits.push(change.endpoint);
+      finalLimits.delete(change.endpoint);
+    }
+  }
+  const droppedLimits = [];
+  for (const endpoint of catalog.limits.keys()) {
+    if (finalLimits.has(endpoint) && !used.has(endpoint)) {
+      summary.push(`endpoint ${endpoint}: remove the parallel limit, no model uses it any more`);
+      droppedLimits.push(endpoint);
+      removedLimits.push(endpoint);
+      finalLimits.delete(endpoint);
+    }
+  }
+  const addedStarter = [];
+  if (!catalog.tiers.has(DEFAULT_TIER) && finalTiers.has(DEFAULT_TIER)) addedStarter.push("medium");
+  const starterAgents = {};
+  if (!catalog.entries.has(GENERAL_AGENT)) {
+    addedStarter.push("general");
+    starterAgents[GENERAL_AGENT] = { tools: starter.generalTools, timeout };
+    summary.push(`add the general agent (${timeout} seconds)`);
+  }
+  if (!catalog.entries.has(FALLBACK_AGENT)) {
+    addedStarter.push("fallback");
+    starterAgents[FALLBACK_AGENT] = { tools: starter.fallbackTools, timeout };
+    summary.push(`add the fallback agent (${timeout} seconds)`);
+  }
+  const original = text ?? "";
+  const first = createSplicer(original);
+  const edits = [];
+  for (const [name, tier] of setTiers) if (catalog.tiers.has(name)) edits.push(...replaceTier(first.doc, name, tier));
+  edits.push(...deleteEntries(first, ["models", "tiers"], unsetTiers));
+  const keptLimits = [...catalog.limits.keys()].filter((e) => !removedLimits.includes(e));
+  if (removedLimits.length > 0) {
+    edits.push(...keptLimits.length === 0 ? deleteEntries(first, [], ["endpoints"]) : deleteEntries(first, ["endpoints"], removedLimits));
+  }
+  for (const [endpoint, parallel] of setLimits) {
+    if (keptLimits.includes(endpoint)) edits.push(replaceScalar(first.doc, ["endpoints", endpoint, "parallel"], parallel));
+  }
+  const second = edits.length === 0 ? first : createSplicer(applyEdits(original, edits));
+  spliceTiers(second, Object.fromEntries([...setTiers].filter(([name]) => !catalog.tiers.has(name))));
+  spliceAgents(second, starterAgents);
+  spliceLimits(second, Object.fromEntries([...setLimits].filter(([e]) => !keptLimits.includes(e))));
+  const next = second.result();
+  let invalid;
+  if (!noMediumTier) {
+    try {
+      const result2 = parseCatalog(next, agentFile);
+      const tiersMatch = result2.tiers.size === finalTiers.size && [...finalTiers].every(([n, t]) => {
+        const got = result2.tiers.get(n);
+        return got !== void 0 && sameTier(got, t);
+      });
+      const limitsMatch = result2.limits.size === finalLimits.size && [...finalLimits].every(([e, n]) => result2.limits.get(e) === n);
+      if (!tiersMatch || !limitsMatch) invalid = "the edited agent file does not hold the previewed tiers and limits; edit it by hand";
+    } catch (err) {
+      if (!(err instanceof LoadError)) throw err;
+      invalid = err.message;
+    }
+  }
+  const fingerprint = sha256(
+    JSON.stringify({
+      file: text,
+      changes,
+      starter: { host: starter.host, timeout, generalTools: starter.generalTools, fallbackTools: starter.fallbackTools }
+    })
+  );
+  return {
+    agentFile,
+    fileExists: text !== null,
+    changes,
+    refusals,
+    droppedLimits,
+    addedStarter,
+    text: next,
+    diff: unifiedDiff(text, next),
+    summary,
+    nothingToChange: text !== null && next === text,
+    ...invalid !== void 0 ? { invalid } : {},
+    fingerprint
+  };
+}
+function rangeOf(node2) {
+  const range = node2?.range;
+  return range ?? void 0;
+}
+function applyEdits(text, edits) {
+  const sorted = [...edits].sort((a, b) => b.start - a.start);
+  let next = text;
+  let limit = Infinity;
+  for (const edit of sorted) {
+    if (edit.end > limit) throw new Error("internal: overlapping edits to the agent file");
+    next = next.slice(0, edit.start) + edit.text + next.slice(edit.end);
+    limit = edit.start;
+  }
+  return next;
+}
+function replaceScalar(doc, keys, value) {
+  const node2 = doc.getIn(keys, true);
+  const range = rangeOf(node2);
+  if (!(0, import_yaml3.isScalar)(node2) || range === void 0) throw new LoadError(`agent file: ${keys.join(".")} is not a plain value setup can edit`);
+  return { start: range[0], end: range[1], text: yamlKey(value) };
+}
+function replaceTier(doc, name, tier) {
+  const node2 = doc.getIn(["models", "tiers", name], true);
+  if ((0, import_yaml3.isMap)(node2)) {
+    const edits = [];
+    let whole = false;
+    for (const field of ["host", "model", "thinking"]) {
+      const pair = node2.items.find((p) => (0, import_yaml3.isScalar)(p.key) && p.key.value === field);
+      if (pair === void 0 || !(0, import_yaml3.isScalar)(pair.value) || rangeOf(pair.value) === void 0) {
+        whole = true;
+        break;
+      }
+      if (pair.value.value !== tier[field]) edits.push(replaceScalar(doc, ["models", "tiers", name, field], tier[field]));
+    }
+    if (!whole) return edits;
+  }
+  const range = rangeOf(node2);
+  if (range === void 0) throw new LoadError(`agent file: tier "${name}" is not a value setup can edit`);
+  return [{ start: range[0], end: range[1], text: flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking }) }];
+}
+function lineEnd(text, from) {
+  const nl = text.indexOf("\n", from);
+  return nl === -1 ? text.length : nl + 1;
+}
+function indentOf(line) {
+  return line.length - line.trimStart().length;
+}
+function deleteEntries(s, mapKeys, keys) {
+  if (keys.length === 0) return [];
+  const text = s.original;
+  const map2 = mapKeys.length === 0 ? s.doc.contents : s.doc.getIn(mapKeys, true);
+  if (!(0, import_yaml3.isMap)(map2)) throw new LoadError(`agent file: ${mapKeys.join(".") || "the document"} must be a map for setup to remove "${keys[0]}"`);
+  const items = map2.items;
+  const removed = /* @__PURE__ */ new Map();
+  for (const key of keys) {
+    const at = items.findIndex((p) => (0, import_yaml3.isScalar)(p.key) && p.key.value === key);
+    if (at === -1 || rangeOf(items[at].key) === void 0) throw new LoadError(`agent file: "${key}" was not found where setup expected it`);
+    removed.set(at, key);
+  }
+  const keyStart = (pair) => rangeOf(pair.key)[0];
+  const valueEnd = (pair) => rangeOf(pair.value)?.[1] ?? rangeOf(pair.key)[1];
+  if (map2.flow !== true) return [...removed].map(([at, key]) => deleteBlockEntry(text, keyStart(items[at]), key));
+  const edits = [];
+  for (let first = 0; first < items.length; first++) {
+    if (!removed.has(first)) continue;
+    let last = first;
+    while (removed.has(last + 1)) last++;
+    const next = items[last + 1];
+    const prev = items[first - 1];
+    if (next !== void 0) edits.push({ start: keyStart(items[first]), end: keyStart(next), text: "" });
+    else if (prev !== void 0) edits.push({ start: valueEnd(prev), end: valueEnd(items[last]), text: "" });
+    else {
+      let end = valueEnd(items[last]);
+      while (end < text.length && (text[end] === " " || text[end] === "	")) end++;
+      if (text[end] === ",") end++;
+      edits.push({ start: keyStart(items[first]), end, text: "" });
+    }
+    first = last;
+  }
+  return edits;
+}
+function deleteBlockEntry(text, keyStart, key) {
+  const lineStart = text.lastIndexOf("\n", keyStart - 1) + 1;
+  if (text.slice(lineStart, keyStart).trim() !== "") {
+    throw new LoadError(`agent file: "${key}" does not start its own line, so setup cannot remove it`);
+  }
+  const indent = keyStart - lineStart;
+  let end = lineEnd(text, lineStart);
+  for (let cursor = end; cursor < text.length; ) {
+    const next = lineEnd(text, cursor);
+    const line = text.slice(cursor, next).replace(/\r?\n$/, "");
+    if (line.trim() !== "") {
+      if (indentOf(line) <= indent) break;
+      end = next;
+    }
+    cursor = next;
+  }
+  let start = lineStart;
+  while (start > 0) {
+    const prevStart = text.lastIndexOf("\n", start - 2) + 1;
+    const line = text.slice(prevStart, start - 1).replace(/\r$/, "");
+    if (!line.trimStart().startsWith("#") || indentOf(line) !== indent) break;
+    start = prevStart;
+  }
+  const blankBefore = start === 0 || text.slice(text.lastIndexOf("\n", start - 2) + 1, start).trim() === "";
+  const after = lineEnd(text, end);
+  if (blankBefore && end < text.length && text.slice(end, after).trim() === "") end = after;
+  return { start, end, text: "" };
+}
+function spliceLimits(s, limits) {
+  if (Object.keys(limits).length === 0) return;
+  const entries = Object.fromEntries(Object.entries(limits).map(([e, n]) => [e, { parallel: n }]));
+  if (s.insertInline(["endpoints"], entries)) return;
+  const at = s.mapAt(["endpoints"]);
+  const lines = (indent) => Object.entries(limits).map(([e, n]) => `${indent}${yamlKey(e)}:
+${indent}  parallel: ${n}
+`).join("");
+  if (at !== void 0) s.insert(at.end, lines(at.indent));
+  else if (s.doc.has("endpoints")) throw new LoadError("agent file: endpoints must be a map for setup to add a limit to it");
+  else s.append(`endpoints:
+${lines("  ")}`);
+}
+function splitLines(text) {
+  if (text === "") return [];
+  return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+}
+function unifiedDiff(before, after, context = 2) {
+  if (before === after) return "";
+  const a = splitLines(before ?? "");
+  const b = splitLines(after);
+  const n = a.length;
+  const m = b.length;
+  const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+  for (let i2 = n - 1; i2 >= 0; i2--) {
+    for (let j2 = m - 1; j2 >= 0; j2--) {
+      lcs[i2][j2] = a[i2] === b[j2] ? lcs[i2 + 1][j2 + 1] + 1 : Math.max(lcs[i2 + 1][j2], lcs[i2][j2 + 1]);
+    }
+  }
+  const ops = [];
+  let i = 0;
+  let j = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      ops.push({ op: " ", line: a[i++] });
+      j++;
+    } else if (j >= m || i < n && lcs[i + 1][j] >= lcs[i][j + 1]) ops.push({ op: "-", line: a[i++] });
+    else ops.push({ op: "+", line: b[j++] });
+  }
+  const hunks = [];
+  ops.forEach((o, k) => {
+    if (o.op === " ") return;
+    const from = Math.max(0, k - context);
+    const to = Math.min(ops.length, k + context + 1);
+    const last = hunks.at(-1);
+    if (last !== void 0 && from <= last[1]) last[1] = Math.max(last[1], to);
+    else hunks.push([from, to]);
+  });
+  const out = [`--- ${before === null ? "/dev/null" : AGENT_FILE}`, `+++ ${AGENT_FILE}`];
+  for (const [from, to] of hunks) {
+    const preceding = ops.slice(0, from);
+    const hunk = ops.slice(from, to);
+    const aStart = preceding.filter((o) => o.op !== "+").length;
+    const bStart = preceding.filter((o) => o.op !== "-").length;
+    const aLen = hunk.filter((o) => o.op !== "+").length;
+    const bLen = hunk.filter((o) => o.op !== "-").length;
+    out.push(`@@ -${aLen === 0 ? aStart : aStart + 1},${aLen} +${bLen === 0 ? bStart : bStart + 1},${bLen} @@`);
+    for (const o of hunk) out.push(`${o.op}${o.line}`);
+  }
+  return out.join("\n") + "\n";
+}
+function writeAtomic2(file2, text) {
+  const dir = path5.dirname(file2);
+  mkdirSync3(dir, { recursive: true });
+  const tmp = path5.join(dir, `.${path5.basename(file2)}.${process.pid}.${randomBytes3(12).toString("hex")}.tmp`);
+  let mode = 420;
+  try {
+    mode = statSync3(file2).mode & 511;
+  } catch {
+  }
+  let fd;
+  let created = false;
+  try {
+    fd = openSync(tmp, "wx", mode);
+    created = true;
+    fchmodSync(fd, mode);
+    writeFileSync3(fd, text);
+    closeSync(fd);
+    fd = void 0;
+    renameSync2(tmp, file2);
+  } catch (err) {
+    if (fd !== void 0) {
+      try {
+        closeSync(fd);
+      } catch {
+      }
+    }
+    if (created) {
+      try {
+        unlinkSync(tmp);
+      } catch {
+      }
+    }
+    throw err;
+  }
+}
+
+// src/service/setup-service.ts
+var SetupServiceError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+    this.name = "SetupServiceError";
+  }
+  code;
+};
+function isSetupError(err) {
+  return err instanceof SetupServiceError || err instanceof ChangeSetError || err instanceof SetupConflictError || err instanceof SetupRefusedError || err instanceof SetupWriteError;
+}
+function setupRefusalBody(err) {
+  const code = err.code;
+  return {
+    ok: false,
+    code: typeof code === "string" ? code : "error",
+    message: err.message,
+    ...err instanceof SetupRefusedError ? { refusals: err.refusals } : {}
+  };
+}
+function parseStarterOptions(options) {
+  const { thinking = "medium", timeout: timeoutOption } = options;
+  const timeout = timeoutOption === void 0 ? DEFAULT_SETUP_TIMEOUT : Number(timeoutOption);
+  if (timeoutOption !== void 0 && (timeoutOption.trim() === "" || !(timeout > 0))) {
+    return { error: `--timeout must be a positive number of seconds (got "${timeoutOption}")` };
+  }
+  if (!isThinkingLevel(thinking)) {
+    return { error: `--thinking must be one of ${THINKING_LEVELS.join(", ")} (got "${thinking}")` };
+  }
+  return { thinking, timeout };
+}
+var SetupService = class {
+  projectRoot;
+  kernel;
+  namedHost;
+  constructor(options) {
+    this.kernel = options.kernel;
+    this.projectRoot = options.projectRoot;
+    this.namedHost = options.host;
+  }
+  /** The host setup writes tiers for, chosen as `subzero init` chooses it. */
+  get host() {
+    const supported = this.kernel.supportedHosts();
+    if (supported.length === 0) {
+      throw new SetupServiceError("no_host", "no host is registered, so setup has no host to set tiers up for");
+    }
+    const host = this.namedHost ?? (supported.length === 1 ? supported[0] : void 0);
+    if (host === void 0) {
+      throw new SetupServiceError("host_needed", `a host must be named; setup has these supported hosts to choose from: ${supported.join(", ")}`);
+    }
+    if (!supported.includes(host)) {
+      throw new SetupServiceError("unsupported_host", `the host "${host}" is not supported; supported hosts: ${supported.join(", ")}`);
+    }
+    return host;
+  }
+  /** The models a child of the host can use. Runs the host's prerequisites check first. */
+  async models() {
+    const host = this.host;
+    return { host, models: await this.listModels(host) };
+  }
+  /** The agent file's state, with each tier marked listed or not when the host lists its models. */
+  async show() {
+    const host = this.host;
+    let listedModels;
+    let listingError;
+    try {
+      listedModels = (await this.listModels(host)).map((m) => m.name);
+    } catch (err) {
+      if (!(err instanceof SetupServiceError)) throw err;
+      listingError = err.message;
+    }
+    const state = readSetupState(this.projectRoot, { host, ...listedModels ? { listedModels } : {} });
+    return { host, state, largeWarning: LARGE_TIER_WARNING, ...listingError !== void 0 ? { listingError } : {} };
+  }
+  /**
+   * Sends each model the host's one-turn check, one after another so a single local
+   * server is not overloaded. Aborting the signal cancels the running check and
+   * reports the rest cancelled.
+   */
+  async check(models, signal) {
+    const host = this.host;
+    for (const [i, { model, thinking }] of models.entries()) {
+      if (typeof model !== "string" || model.trim() === "" || /[\r\n]/.test(model)) {
+        throw new SetupServiceError("invalid_check", `model ${i + 1} must be a non-empty one-line model name`);
+      }
+      if (!isThinkingLevel(thinking)) {
+        throw new SetupServiceError("invalid_check", `the thinking level of ${model} must be one of ${THINKING_LEVELS.join(", ")}`);
+      }
+    }
+    const checkModel = this.kernel.checkModel(host);
+    if (checkModel === void 0) {
+      throw new SetupServiceError("no_model_check", `the child driver of the host "${host}" cannot check a model`);
+    }
+    const results = [];
+    for (const { model, thinking } of models) {
+      const result2 = await checkModel({ model, thinking, projectRoot: this.projectRoot, ...signal ? { signal } : {} });
+      results.push({ model, thinking, ...result2 });
+    }
+    return { host, results };
+  }
+  /** What applying the change set would write; nothing is written. */
+  preview(changes) {
+    return previewChanges(this.projectRoot, changes, this.starter());
+  }
+  /** Writes a change set exactly as previewed; refuses when the file or the change set moved since. */
+  apply(changes, fingerprint) {
+    return applyChanges(this.projectRoot, changes, fingerprint, this.starter());
+  }
+  async listModels(host) {
+    const problem = this.kernel.prerequisites(host)?.();
+    if (problem !== void 0) throw new SetupServiceError("prerequisites_missing", problem);
+    const listModels = this.kernel.listModels(host);
+    if (listModels === void 0) {
+      throw new SetupServiceError("no_model_listing", `the child driver of the host "${host}" cannot list its models`);
+    }
+    try {
+      return await listModels({ projectRoot: this.projectRoot });
+    } catch (err) {
+      throw new SetupServiceError("listing_failed", err instanceof Error ? err.message : String(err));
+    }
+  }
+  starter() {
+    const host = this.host;
+    const tools = this.kernel.starterTools(host);
+    if (tools === void 0) {
+      throw new SetupServiceError(
+        "no_starter_tools",
+        `the child driver of the host "${host}" offers no starter tools, so setup cannot write the agent entries`
+      );
+    }
+    return { host, timeout: DEFAULT_SETUP_TIMEOUT, generalTools: tools.general, fallbackTools: tools.fallback };
+  }
+};
+
+// raw-text:/Users/farhoud/Workspace/subzero/spike-with-sigil/skills/init/guided-init.md
+var guided_init_default = '# Guided subzero init\n\nThis guide is shared by both parents. Claude Code and pi each map the steps below to their own commands or tools. The steps are: **show**, **models**, **ask**, **check**, **preview** and **apply**.\n\nYou help the user choose which models run subzero\'s children, and subzero writes `.agents/subzero.yaml`. The user decides every tier. You suggest.\n\n## Standing rules\n\nThese hold for the whole run.\n\n1. **Ask every question with the ask step, and never end your turn until the flow is finished or the user stops it.** A question asked as plain text ends the run, and the user would have to start init again. A dismissed question means the user stopped: say that nothing was written, and stop.\n2. **Never create, edit or delete `.agents/subzero.yaml` yourself.** Only the apply step writes it. Never work around a refusal.\n3. **Show subzero\'s preview diff and summary unchanged, and confirm once.** Then apply with the preview\'s fingerprint and exactly the same changes. If anything changes after the confirmation, preview again and confirm again.\n4. **What a refusal does to the run depends on what was refused.**\n   - A refused change does not end the run. Say why, naming the agents subzero names, leave it out of the change set, and offer to keep the current value.\n   - The stale preview error of an apply means the file or the changes differ from the preview. Preview again and confirm again.\n   - Any other refusal, the write error and the load error included, ends the run. Say what was refused, say that nothing was written, and stop.\n\n## Steps\n\n### 1. Show the current state\n\nRun **show**.\n\n- `refused`: show the error unchanged. Tell the user to fix the file by hand or move it aside, then stop.\n- `repairable`: say what will be repaired, for example a missing `fallback` agent. It is added when you apply.\n- `no-file`: this run creates the file.\n- `ok`: the current tiers and limits are the defaults for every question below.\n\n### 2. List the models\n\nRun **models**. If it fails, relay the message and stop. When no models are listed, the user needs to set up a provider in pi first, which is outside this flow.\n\nPrint the full list as compact text, grouped by endpoint (the part of the name before the first slash). For each model, give the name, context window, thinking levels and input/output cost. The question options can hold only a few models, so this list is how the user sees the rest.\n\n### 3. Choose a model for each tier\n\nAsk about `medium` first, because it is required. Then ask about `small` and `large`.\n\n- **Defaults.** A tier that is already set defaults to its current model. Suggest a different model only for a tier that is not set yet. Give each suggestion one line of reason:\n  - `small` is the cheapest capable model;\n  - `medium` is a mid-tier model;\n  - `large` is the strongest model you would trust with review work.\n- **Options.** Offer:\n  - your suggestion or the current model;\n  - "leave unset" for `small` and `large` when they are not set;\n  - "remove" when they are set.\n\n  The user can type any listed model name instead. If the name is not in the list, say so and ask again.\n- **Large warning.** Before `large` is added or its model changed, show the large warning from **show** and let the user leave it unset.\n- **Current model not listed.** If a current model is not in the list, say so ("not listed by pi"), make keeping it the default, and warn that children may fail on it.\n- **Removing a tier other agents use.** If the tier has dependents in **show**, refuse the removal at once, naming them, and keep the current model.\n- **Other tiers.** Leave tiers other than `small`, `medium` and `large` untouched. Mention them only so the user knows they stay.\n\n### 4. Choose a thinking level for each new or changed tier\n\nOffer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level.\n\n### 5. Ask a parallel limit for each endpoint in use\n\nFor each endpoint the chosen tiers use, ask one question that names the tiers and models on it: "How many children may run at once on `local`, used by small (local/qwen3-4b) and medium (local/qwen3-coder-30b)?"\n\n- Answers are a whole number of 1 or more, or "no limit". The current limit is the default.\n- A single-GPU local server usually wants 1.\n- Skip endpoints that only an agent\'s tier override uses. Their limits stay as they are.\n- Two pi providers that point at the same server still count as two endpoints.\n\n### 6. Offer the reachability check\n\nAsk: "Check that each chosen model answers? It sends one short prompt per model."\n\nIf the user says yes, run **check** for each new or changed tier\'s model and thinking level, one at a time. Report each tier as answered, or failed with its one-line reason. For a failed tier, ask whether to keep the model or choose another, and go back to step 3 for that tier.\n\n### 7. Preview and confirm\n\nRun **preview** with every change: tiers set or removed, and limits set or cleared.\n\n- If it lists refusals or reports the result as invalid, explain them and go back to the step that needs a different answer.\n- If there is nothing to change, say so and stop.\n\nOtherwise show the diff and the summary unchanged, then ask: "Write this to `.agents/subzero.yaml`?" Offer three options: write it, change something, or cancel.\n\n### 8. Apply and report\n\nRun **apply** with the preview\'s fingerprint and the same changes, then report the summary. If apply refuses, follow rule 4.\n\nWhen the file was created, or a tier was added or removed, tell the user what that means in this parent. The parent\'s mapping says what to say.\n';
+
+// src/pi-parent/init.ts
+var INIT_TOOL_NAMES = [
+  "subzero_init_show",
+  "subzero_init_models",
+  "subzero_init_ask",
+  "subzero_init_check",
+  "subzero_init_preview",
+  "subzero_init_apply"
+];
+var OTHER = "Other\u2026";
+var INIT_SYNTAX = "init [<model> [--thinking <level>] [--timeout <seconds>]]";
+var QUICK_USAGE = `Usage: /subzero ${INIT_SYNTAX}`;
+var PI_MAPPING = `## In pi
+
+The init tools are on only for this run, and they switch off when the run ends. Map the steps to these tools:
+
+- **show**: \`subzero_init_show\`.
+- **models**: \`subzero_init_models\`.
+- **ask**: \`subzero_init_ask\` with \`question\` and, for a choice, \`options\`. It shows a pick list with an "${OTHER}" entry for a typed answer, or a text box when there are no options, and returns the user's answer.
+- **check**: \`subzero_init_check\` with \`models\`, a list of \`{ model, thinking }\`.
+- **preview**: \`subzero_init_preview\` with \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", endpoint, parallel }\` and \`{ op: "clearLimit", endpoint }\`.
+- **apply**: \`subzero_init_apply\` with the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 7 show the preview, then call apply instead of asking "Write this?" with ask. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
+
+In step 8: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed.`;
+var INIT_KICKOFF = `Run subzero's guided init for this project, following this guide.
+
+${guided_init_default.trim()}
+
+${PI_MAPPING}
+`;
+var say = (ctx, text, type) => {
+  if (ctx.hasUI) ctx.ui.notify(text, type);
+  else process.stderr.write(`subzero: ${text}
+`);
+};
+var reply = (value, isError = false) => ({
+  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }],
+  details: {},
+  ...isError ? { isError: true } : {}
+});
+function refusal(err, note) {
+  const error62 = err instanceof Error ? err : new Error(String(err));
+  return reply({ ...setupRefusalBody(error62), ...note !== void 0 ? { note } : {} }, true);
+}
+var INIT_ENDED = "The init tools are now off and nothing was written. The guided init is over; tell the user what was refused. They can run /subzero init again.";
+var known = (err) => isSetupError(err) || err instanceof LoadError || err instanceof StarterHostConflictError;
+function starterHost(kernel) {
+  const supported = kernel.supportedHosts();
+  if (supported.length === 0) throw new SetupServiceError("no_host", "no host is registered, so init has no host to write the starter entries for");
+  if (supported.length === 1) return supported[0];
+  throw new SetupServiceError("host_needed", `init has these supported hosts to choose from: ${supported.join(", ")}`);
+}
+function registerPiInit(pi, options) {
+  let setup;
+  let kickoffPending = false;
+  const names2 = new Set(INIT_TOOL_NAMES);
+  const isOn = () => pi.getActiveTools().some((name) => names2.has(name));
+  const turnOn = () => pi.setActiveTools([.../* @__PURE__ */ new Set([...pi.getActiveTools(), ...INIT_TOOL_NAMES])]);
+  const turnOff = () => {
+    setup = void 0;
+    kickoffPending = false;
+    if (isOn()) pi.setActiveTools(pi.getActiveTools().filter((name) => !names2.has(name)));
+  };
+  const service = () => {
+    if (!setup) throw new SetupServiceError("no_host", "guided init is not running; the user starts it with /subzero init");
+    return setup;
+  };
+  const run = async (fn, endsInit) => {
+    try {
+      return reply(await fn());
+    } catch (err) {
+      const note = endsInit?.(err);
+      if (known(err)) return refusal(err, note);
+      const message = err.message ?? String(err);
+      return reply(note !== void 0 ? `${message}. ${note}` : message, true);
+    }
+  };
+  pi.on("session_start", () => turnOff());
+  pi.on("agent_settled", () => turnOff());
+  pi.on("session_shutdown", () => turnOff());
+  pi.on("before_agent_start", (event) => {
+    const isKickoff = kickoffPending && event.messageType === "user" && event.prompt.includes(INIT_KICKOFF);
+    kickoffPending = false;
+    if (!isKickoff) turnOff();
+  });
+  const changeSchema = Type.Object({
+    op: Type.String({ description: "setTier, unsetTier, setLimit or clearLimit" }),
+    tier: Type.Optional(Type.String()),
+    model: Type.Optional(Type.String()),
+    thinking: Type.Optional(Type.String()),
+    endpoint: Type.Optional(Type.String()),
+    parallel: Type.Optional(Type.Number())
+  });
+  const tool = { defaultActive: false };
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_show",
+    label: "subzero init: show",
+    description: "Guided subzero init: the agent file's current tiers, limits and status, and the large-tier warning.",
+    parameters: Type.Object({}),
+    execute: () => run(async () => ({ ok: true, ...await service().show() }))
+  });
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_models",
+    label: "subzero init: models",
+    description: "Guided subzero init: the models a subzero child can use, with endpoint, thinking levels, context window and cost.",
+    parameters: Type.Object({}),
+    execute: () => run(async () => ({ ok: true, ...await service().models() }))
+  });
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_ask",
+    label: "subzero init: ask",
+    description: `Guided subzero init: ask the user one question. With options it shows a pick list plus "${OTHER}" for a typed answer; without, a text box. Returns the answer.`,
+    parameters: Type.Object({ question: Type.String(), options: Type.Optional(Type.Array(Type.String())) }),
+    async execute(_id, args, _signal, _update, ctx) {
+      return run(async () => {
+        service();
+        if (!ctx.hasUI) throw new Error("asking needs pi's interactive UI");
+        let answer;
+        if (args.options?.length) {
+          answer = await ctx.ui.select(args.question, [...args.options, OTHER]);
+          if (answer === OTHER) answer = await ctx.ui.input(args.question);
+        } else {
+          answer = await ctx.ui.input(args.question);
+        }
+        return answer === void 0 ? "no answer: the user dismissed the question" : `answer: ${answer}`;
+      });
+    }
+  });
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_check",
+    label: "subzero init: check",
+    description: "Guided subzero init: send each model a one-turn prompt, one after another, and report whether it answered.",
+    parameters: Type.Object({ models: Type.Array(Type.Object({ model: Type.String(), thinking: Type.String() })) }),
+    async execute(_id, args, signal) {
+      return run(async () => ({
+        ok: true,
+        ...await service().check(args.models.map((m) => ({ model: m.model, thinking: m.thinking })), signal)
+      }));
+    }
+  });
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_preview",
+    label: "subzero init: preview",
+    description: "Guided subzero init: the diff and summary a change set would write, and the fingerprint apply needs. Writes nothing.",
+    parameters: Type.Object({ changes: Type.Array(changeSchema) }),
+    async execute(_id, args) {
+      return run(() => {
+        const { text: _text, ...preview } = service().preview(args.changes);
+        return { ok: true, ...preview };
+      });
+    }
+  });
+  pi.registerTool({
+    ...tool,
+    name: "subzero_init_apply",
+    label: "subzero init: apply",
+    description: "Guided subzero init: show the previewed diff to the user, and write it only when the user confirms. Pass the preview's fingerprint and the same changes.",
+    parameters: Type.Object({ changes: Type.Array(changeSchema), fingerprint: Type.String() }),
+    async execute(_id, args, _signal, _update, ctx) {
+      return run(async () => {
+        const svc = service();
+        if (!ctx.hasUI) throw new Error("apply needs pi's interactive UI to confirm the write; nothing was written");
+        const changes = args.changes;
+        const preview = svc.preview(changes);
+        if (preview.fingerprint !== args.fingerprint) throw new SetupConflictError();
+        if (preview.refusals.length) throw new SetupRefusedError(preview.refusals);
+        if (preview.invalid !== void 0) throw new Error(`nothing was written: the result would not load: ${preview.invalid}`);
+        if (preview.nothingToChange) return { ok: true, written: false, message: "nothing to change; nothing was written" };
+        const confirmed = await ctx.ui.confirm(
+          "Write .agents/subzero.yaml?",
+          [preview.diff.trimEnd(), "", ...preview.summary].join("\n")
+        );
+        if (!confirmed) {
+          turnOff();
+          return "the user declined; nothing was written. The init tools are now off; the user can run /subzero init again.";
+        }
+        const { text: _text, diff: _diff, ...applied } = svc.apply(changes, args.fingerprint);
+        options.refreshTierText();
+        turnOff();
+        return { ok: true, ...applied, note: "pi refreshed the subagent tier text; no new session is needed. The init tools are now off." };
+      }, (err) => {
+        if (setup === void 0 || err instanceof SetupConflictError) return void 0;
+        turnOff();
+        return INIT_ENDED;
+      });
+    }
+  });
+  const quick = async (args, ctx) => {
+    let parsed;
+    try {
+      parsed = parseArgs({ args, options: { thinking: { type: "string" }, timeout: { type: "string" } }, allowPositionals: true, strict: true });
+    } catch {
+      say(ctx, QUICK_USAGE);
+      return;
+    }
+    const [model, ...extra] = parsed.positionals;
+    if (model === void 0 || extra.length) {
+      say(ctx, QUICK_USAGE);
+      return;
+    }
+    const starter = parseStarterOptions(parsed.values);
+    if ("error" in starter) {
+      say(ctx, starter.error, "error");
+      return;
+    }
+    const { thinking, timeout } = starter;
+    try {
+      const host = starterHost(options.kernel);
+      const problem = options.kernel.prerequisites(host)?.();
+      if (problem !== void 0) {
+        say(ctx, problem, "error");
+        return;
+      }
+      const tools = options.kernel.starterTools(host);
+      if (tools === void 0) {
+        say(ctx, `the child driver of the host "${host}" offers no starter tools, so init cannot write the agent entries`, "error");
+        return;
+      }
+      const result2 = addStarterEntries(await options.projectRoot(), {
+        host,
+        model,
+        thinking,
+        timeout,
+        generalTools: tools.general,
+        fallbackTools: tools.fallback
+      });
+      if (result2.added.length > 0) options.refreshTierText();
+      say(ctx, formatStarterResult(result2).join("\n"));
+    } catch (err) {
+      say(ctx, err.message, "error");
+    }
+  };
+  const guided = async (ctx) => {
+    if (!ctx.hasUI) {
+      say(ctx, "guided init needs pi's interactive UI; run /subzero init <model> to write the starter entries instead");
+      return;
+    }
+    if (!ctx.isIdle()) {
+      say(ctx, "wait for the agent to finish, then run /subzero init again", "warning");
+      return;
+    }
+    try {
+      setup = new SetupService({ kernel: options.kernel, projectRoot: await options.projectRoot() });
+    } catch (err) {
+      say(ctx, err.message, "error");
+      return;
+    }
+    turnOn();
+    kickoffPending = true;
+    try {
+      pi.sendUserMessage(INIT_KICKOFF);
+    } catch (err) {
+      turnOff();
+      say(ctx, `guided init did not start: ${err.message}`, "error");
+    }
+  };
+  return {
+    async command(args, ctx) {
+      if (args.length === 0) await guided(ctx);
+      else await quick(args, ctx);
+    }
+  };
 }
 
 // src/pi-parent/request.ts
@@ -29218,7 +30618,7 @@ function sendStopped(pi, content) {
 }
 
 // src/pi-parent/ui.ts
-import path5 from "node:path";
+import path6 from "node:path";
 import { realpathSync as realpathSync2 } from "node:fs";
 function clashWarning(pi, ownFile) {
   const tools = pi.getAllTools();
@@ -29228,7 +30628,7 @@ function clashWarning(pi, ownFile) {
     try {
       return realpathSync2(file2);
     } catch {
-      return path5.resolve(file2);
+      return path6.resolve(file2);
     }
   };
   const foreignOwner = owner !== void 0 && canonical(owner.sourceInfo.path) !== canonical(ownFile);
@@ -29276,10 +30676,23 @@ var SessionWidget = class {
 // src/pi-parent/extension.ts
 var names = { collect: "subzero_await", cancel: "subzero_cancel" };
 var result = (text, isError = false) => ({ content: [{ type: "text", text }], details: {}, ...isError ? { isError: true } : {} });
-var describe3 = (reply) => withNotice(describeTaskReply(reply, void 0, names), "notice" in reply ? reply.notice : void 0);
+var describe3 = (reply2) => withNotice(describeTaskReply(reply2, void 0, names), "notice" in reply2 ? reply2.notice : void 0);
 var formatSessionListing = (tasks) => tasks.length ? tasks.map((task) => `${task.taskId} \xB7 ${task.agent} \xB7 ${listingStatus(task)}`).join("\n") : "no tasks";
+var USAGE = `Usage: /subzero [attach <id> | cancel [id] | ${INIT_SYNTAX}]`;
+var BASE_DESCRIPTION = "Delegate an isolated task. Await background tasks before using their results.";
+function tierDescription(root) {
+  try {
+    const tiers = configuredTierNames(root);
+    return [
+      "Delegate an isolated task. Await background tasks with subzero_await before using their results.",
+      ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier) ? `${phrase} (${tier}): pass model: "${tier}".` : `${phrase} (${tier}): not configured, omit model.`)
+    ].join("\n");
+  } catch {
+    return BASE_DESCRIPTION;
+  }
+}
 function registerPiExtension(pi, createService, killRemaining = () => {
-}, ownFile = fileURLToPath2(import.meta.url)) {
+}, ownFile = fileURLToPath2(import.meta.url), kernel) {
   let service;
   let sessionId = "";
   let projectRoot = "";
@@ -29287,7 +30700,7 @@ function registerPiExtension(pi, createService, killRemaining = () => {
   let stopping;
   let widget;
   let warning;
-  let description = "Delegate an isolated task. Await background tasks before using their results.";
+  let description = BASE_DESCRIPTION;
   const getService = () => {
     if (!service) throw new Error("subzero session has not started");
     return service;
@@ -29319,16 +30732,9 @@ function registerPiExtension(pi, createService, killRemaining = () => {
     projectRoot = ctx.cwd;
     session = { closed: false };
     widget = new SessionWidget(service, sessionId, ctx);
-    description = "Delegate an isolated task. Await background tasks before using their results.";
+    description = BASE_DESCRIPTION;
     await service.start();
-    try {
-      const tiers = configuredTierNames(ctx.cwd);
-      description = [
-        "Delegate an isolated task. Await background tasks with subzero_await before using their results.",
-        ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier) ? `${phrase} (${tier}): pass model: "${tier}".` : `${phrase} (${tier}): not configured, omit model.`)
-      ].join("\n");
-    } catch {
-    }
+    description = tierDescription(ctx.cwd);
     pi.setActiveTools(pi.getActiveTools());
     warning = clashWarning(pi, ownFile);
     if (warning) {
@@ -29358,18 +30764,18 @@ function registerPiExtension(pi, createService, killRemaining = () => {
     description,
     executionMode: "parallel",
     prepareLoadout: () => ({ descriptions: { subagent: description } }),
-    parameters: Type.Object({
-      task: Type.String(),
-      agent: Type.Optional(Type.String()),
-      model: Type.Optional(Type.String()),
-      async: Type.Optional(Type.Boolean()),
-      files: Type.Optional(Type.Array(Type.String())),
-      expected_output: Type.Optional(Type.String()),
-      worktree: Type.Optional(Type.Boolean()),
-      isolation: Type.Optional(Type.String()),
-      context: Type.Optional(Type.String()),
-      action: Type.Optional(Type.String()),
-      workflow: Type.Optional(Type.Unknown())
+    parameters: Type2.Object({
+      task: Type2.String(),
+      agent: Type2.Optional(Type2.String()),
+      model: Type2.Optional(Type2.String()),
+      async: Type2.Optional(Type2.Boolean()),
+      files: Type2.Optional(Type2.Array(Type2.String())),
+      expected_output: Type2.Optional(Type2.String()),
+      worktree: Type2.Optional(Type2.Boolean()),
+      isolation: Type2.Optional(Type2.String()),
+      context: Type2.Optional(Type2.String()),
+      action: Type2.Optional(Type2.String()),
+      workflow: Type2.Optional(Type2.Unknown())
     }),
     async execute(_id, args, signal, _update, ctx) {
       return respond(async () => {
@@ -29403,8 +30809,8 @@ function registerPiExtension(pi, createService, killRemaining = () => {
             }));
           }
         });
-        const reply = await response.finally(() => signal?.removeEventListener("abort", abort));
-        let text = describe3(reply);
+        const reply2 = await response.finally(() => signal?.removeEventListener("abort", abort));
+        let text = describe3(reply2);
         if (mapped.notice) text = withNotice(text, mapped.notice);
         if (forced && args.async === true) text += "\nnotice: this mode waits for the result.";
         return text;
@@ -29415,17 +30821,17 @@ function registerPiExtension(pi, createService, killRemaining = () => {
     name: "subzero_await",
     label: "Await subzero tasks",
     description: "Collect task results, waiting up to 600 seconds.",
-    parameters: Type.Object({ tasks: Type.Array(Type.String()), timeout_s: Type.Optional(Type.Number()) }),
+    parameters: Type2.Object({ tasks: Type2.Array(Type2.String()), timeout_s: Type2.Optional(Type2.Number()) }),
     async execute(_id, args, signal, _update, ctx) {
       return respond(async () => {
         if (args.tasks.length === 0) throw new Error("await needs at least one task id");
-        const seconds = args.timeout_s !== void 0 && args.timeout_s >= 0 ? Math.min(args.timeout_s, 600) : 30;
+        const seconds2 = args.timeout_s !== void 0 && args.timeout_s >= 0 ? Math.min(args.timeout_s, 600) : 30;
         const svc = getService();
         const abort = () => void stopSession(svc, ctx);
         if (signal?.aborted) abort();
         else signal?.addEventListener("abort", abort, { once: true });
         try {
-          return (await Promise.all(args.tasks.map((id) => svc.waitFor(id, seconds * 1e3)))).map(describe3).join("\n\n");
+          return (await Promise.all(args.tasks.map((id) => svc.waitFor(id, seconds2 * 1e3)))).map(describe3).join("\n\n");
         } finally {
           signal?.removeEventListener("abort", abort);
         }
@@ -29436,7 +30842,7 @@ function registerPiExtension(pi, createService, killRemaining = () => {
     name: "subzero_tasks",
     label: "Subzero tasks",
     description: "List session tasks or inspect a task.",
-    parameters: Type.Object({ task: Type.Optional(Type.String()) }),
+    parameters: Type2.Object({ task: Type2.Optional(Type2.String()) }),
     async execute(_id, args) {
       return respond(async () => {
         if (args.task) return describe3(await getService().collect(args.task));
@@ -29449,7 +30855,7 @@ function registerPiExtension(pi, createService, killRemaining = () => {
     name: "subzero_cancel",
     label: "Cancel subzero tasks",
     description: "Cancel one task or all tasks in this session.",
-    parameters: Type.Object({ task: Type.Optional(Type.String()) }),
+    parameters: Type2.Object({ task: Type2.Optional(Type2.String()) }),
     async execute(_id, args, _signal, _update, ctx) {
       return respond(async () => {
         const svc = getService();
@@ -29459,20 +30865,42 @@ function registerPiExtension(pi, createService, killRemaining = () => {
           return `${count} tasks cancelled`;
         }
         const wasLive = (await svc.listLiveSession(sessionId)).some((task) => task.taskId === args.task);
-        const reply = await svc.cancel(args.task);
-        if (wasLive && reply.kind === "result" && reply.result.status === "cancelled" && !session.closed) {
+        const reply2 = await svc.cancel(args.task);
+        if (wasLive && reply2.kind === "result" && reply2.result.status === "cancelled" && !session.closed) {
           sendStopped(pi, await svc.notice(args.task, "cancelled", sessionId, "subzero_await"));
         }
-        return describe3(reply);
+        return describe3(reply2);
       });
     }
   });
+  const init = kernel && registerPiInit(pi, {
+    kernel,
+    projectRoot: async () => {
+      const svc = getService();
+      await svc.start();
+      return svc.projectRoot ?? projectRoot;
+    },
+    refreshTierText: () => {
+      description = tierDescription(projectRoot);
+      pi.setActiveTools(pi.getActiveTools());
+    }
+  });
   pi.registerCommand("subzero", {
-    description: "List or cancel subzero tasks for this session.",
+    description: "List or cancel subzero tasks for this session, or set subzero up with init.",
     async handler(args, ctx) {
-      const [action, id, ...extra] = args.trim().split(/\s+/);
+      const words = args.trim().split(/\s+/);
+      const [first, ...rest] = words;
+      if (first === "init") {
+        if (!init) {
+          ctx.ui.notify("subzero init is not available in this session");
+          return;
+        }
+        await init.command(rest, ctx);
+        return;
+      }
+      const [action, id, ...extra] = words;
       if (extra.length) {
-        ctx.ui.notify("Usage: /subzero [attach <id> | cancel [id]]");
+        ctx.ui.notify(USAGE);
         return;
       }
       if (action === "attach") {
@@ -29492,11 +30920,11 @@ function registerPiExtension(pi, createService, killRemaining = () => {
           ctx.ui.notify(`task ${id} not found among this session's running tasks`);
           return;
         }
-        const reply = await svc.cancel(id);
-        if (reply.kind === "result" && reply.result.status === "cancelled") {
+        const reply2 = await svc.cancel(id);
+        if (reply2.kind === "result" && reply2.result.status === "cancelled") {
           sendStopped(pi, await svc.notice(id, "cancelled", sessionId, "subzero_await"));
           ctx.ui.notify("1 subzero task cancelled");
-        } else ctx.ui.notify(describe3(reply));
+        } else ctx.ui.notify(describe3(reply2));
         return;
       }
       if (action === "cancel") {
@@ -29509,7 +30937,7 @@ function registerPiExtension(pi, createService, killRemaining = () => {
         return;
       }
       if (action) {
-        ctx.ui.notify("Usage: /subzero [attach <id> | cancel [id]]");
+        ctx.ui.notify(USAGE);
         return;
       }
       const tasks = await getService().list(sessionId);
@@ -29536,7 +30964,7 @@ function subzero(pi) {
       else process.stderr.write(`subzero: ${message}
 `);
     }
-  }), () => driver.killAll(), fileURLToPath3(import.meta.url));
+  }), () => driver.killAll(), fileURLToPath3(import.meta.url), kernel);
 }
 export {
   subzero as default
