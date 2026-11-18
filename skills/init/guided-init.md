@@ -9,9 +9,12 @@ You help the user choose which models run subzero's children, and subzero writes
 These hold for the whole run.
 
 1. **Ask every question with the ask step, and never end your turn until the flow is finished or the user stops it.** A question asked as plain text ends the run, and the user would have to start init again. A dismissed question means the user stopped: say that nothing was written, and stop.
-2. **Never create, edit or delete `.agents/subzero.yaml` yourself.** Only the apply step writes it. If subzero refuses something, tell the user why and keep going; never work around a refusal.
+2. **Never create, edit or delete `.agents/subzero.yaml` yourself.** Only the apply step writes it. Never work around a refusal.
 3. **Show subzero's preview diff and summary unchanged, and confirm once.** Then apply with the preview's fingerprint and exactly the same changes. If anything changes after the confirmation, preview again and confirm again.
-4. **If apply refuses because the file or the changes differ from the preview, preview again.** If a change is refused, say why, naming the agents subzero names, and offer to keep the current value.
+4. **What a refusal does to the run depends on what was refused.**
+   - A refused change does not end the run. Say why, naming the agents subzero names, leave it out of the change set, and offer to keep the current value.
+   - The stale preview error of an apply means the file or the changes differ from the preview. Preview again and confirm again.
+   - Any other refusal, the write error and the load error included, ends the run. Say what was refused, say that nothing was written, and stop.
 
 ## Steps
 
@@ -79,6 +82,6 @@ Otherwise show the diff and the summary unchanged, then ask: "Write this to `.ag
 
 ### 8. Apply and report
 
-Run **apply** with the preview's fingerprint and the same changes, then report the summary.
+Run **apply** with the preview's fingerprint and the same changes, then report the summary. If apply refuses, follow rule 4.
 
 When the file was created, or a tier was added or removed, tell the user what that means in this parent. The parent's mapping says what to say.

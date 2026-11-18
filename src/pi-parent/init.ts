@@ -42,7 +42,7 @@ The init tools are on only for this run, and they switch off when the run ends. 
 - **ask**: \`subzero_init_ask\` with \`question\` and, for a choice, \`options\`. It shows a pick list with an "${OTHER}" entry for a typed answer, or a text box when there are no options, and returns the user's answer.
 - **check**: \`subzero_init_check\` with \`models\`, a list of \`{ model, thinking }\`.
 - **preview**: \`subzero_init_preview\` with \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", endpoint, parallel }\` and \`{ op: "clearLimit", endpoint }\`.
-- **apply**: \`subzero_init_apply\` with the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 7 show the preview, then call apply instead of asking "Write this?" with ask. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something.
+- **apply**: \`subzero_init_apply\` with the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 7 show the preview, then call apply instead of asking "Write this?" with ask. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
 
 In step 8: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed.`;
 
@@ -74,19 +74,24 @@ const reply = (value: unknown, isError = false) => ({
 });
 
 /** A refused setup call as the CLI's `config` commands print it: code, one-line reason and any refusals. */
-function refusal(err: unknown) {
+function refusal(err: unknown, note?: string) {
   const error = err instanceof Error ? err : new Error(String(err));
-  return reply(setupRefusalBody(error), true);
+  return reply({ ...setupRefusalBody(error), ...(note !== undefined ? { note } : {}) }, true);
 }
+
+/** Said in the reply of an apply that ends the init, so the agent knows its tools are gone. */
+const INIT_ENDED = 'The init tools are now off and nothing was written. The guided init is over; tell the user what was refused. They can run /subzero init again.';
 
 const known = (err: unknown) => isSetupError(err) || err instanceof LoadError || err instanceof StarterHostConflictError;
 
-/** The host the starter entries are written for, chosen as `subzero init` chooses it. */
+/**
+ * The host the starter entries are written for, chosen as `subzero init` chooses it: the one
+ * supported child host. With several there is no option to name one, so it refuses and lists them.
+ */
 function starterHost(kernel: Kernel): string {
   const supported = kernel.supportedHosts();
   if (supported.length === 0) throw new SetupServiceError('no_host', 'no host is registered, so init has no host to write the starter entries for');
   if (supported.length === 1) return supported[0]!;
-  if (supported.includes('pi')) return 'pi';
   throw new SetupServiceError('host_needed', `init has these supported hosts to choose from: ${supported.join(', ')}`);
 }
 
@@ -106,11 +111,17 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
     if (!setup) throw new SetupServiceError('no_host', 'guided init is not running; the user starts it with /subzero init');
     return setup;
   };
-  const run = async (fn: () => Promise<unknown> | unknown) => {
+  /**
+   * Runs a tool body and turns a failure into an error reply. `endsInit` may end the guided init
+   * for that failure and return the note that tells the agent so.
+   */
+  const run = async (fn: () => Promise<unknown> | unknown, endsInit?: (err: unknown) => string | undefined) => {
     try { return reply(await fn()); }
     catch (err) {
-      if (known(err)) return refusal(err);
-      return reply((err as Error).message ?? String(err), true);
+      const note = endsInit?.(err);
+      if (known(err)) return refusal(err, note);
+      const message = (err as Error).message ?? String(err);
+      return reply(note !== undefined ? `${message}. ${note}` : message, true);
     }
   };
 
@@ -217,6 +228,12 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
         options.refreshTierText();
         turnOff();
         return { ok: true, ...applied, note: 'pi refreshed the subagent tier text; no new session is needed. The init tools are now off.' };
+      }, (err) => {
+        // Only a stale preview lets the guided init preview again. Any other refusal, the write
+        // error and the load error included, ends it with the init tools off and nothing written.
+        if (setup === undefined || err instanceof SetupConflictError) return undefined;
+        turnOff();
+        return INIT_ENDED;
       });
     },
   });

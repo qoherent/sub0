@@ -48,6 +48,15 @@ describe('the shared guided-init guide', () => {
     expect(rules).toMatch(/Show subzero's preview diff and summary unchanged, and confirm once/);
   });
 
+  it('keeps going after a refused change or a stale preview, and ends on any other refusal of an apply', () => {
+    const rules = flat(GUIDE.split('## Steps')[0] ?? '');
+    expect(rules).toMatch(/A refused change does not end the run/);
+    expect(rules).toMatch(/stale preview error of an apply means[^.]*\. Preview again and confirm again/);
+    expect(rules).toMatch(/Any other refusal, the write error and the load error included, ends the run\. Say what was refused, say that nothing was written, and stop/);
+    expect(rules).not.toMatch(/keep going/i);
+    expect(flat(GUIDE)).toMatch(/If apply refuses, follow rule 4/);
+  });
+
   it('names every step the parents map', () => {
     for (const step of ['show', 'models', 'ask', 'check', 'preview', 'apply']) expect(GUIDE).toContain(`**${step}**`);
   });
