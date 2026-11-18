@@ -49,7 +49,7 @@ function runShim(shim: string, args: string[], env: Record<string, string | unde
   const result = spawnSync('sh', [shim, ...args], {
     cwd,
     encoding: 'utf8',
-    env: { HOME: process.env.HOME, ...env } as NodeJS.ProcessEnv,
+    env: { HOME: process.env.HOME, SUBZERO_GENERAL_CONFIG: process.env.SUBZERO_GENERAL_CONFIG, ...env } as NodeJS.ProcessEnv,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }

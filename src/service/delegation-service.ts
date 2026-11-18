@@ -289,7 +289,7 @@ export class DelegationService {
    * (with a notice that says so). `general` never falls back.
    */
   private chooseAgent(projectRoot: string, delegation: Delegation): { agent: AgentDefinition; tier: string; notice?: string } {
-    const catalog = loadAgentFile(projectRoot);
+    const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, '').trim();
     const options = { supportedHosts, ...(tier !== undefined && tier !== '' ? { tier } : {}) };

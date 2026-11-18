@@ -6,9 +6,9 @@
 // logic is importable.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { AGENT_FILE, getRouting, routableTiers, type RoutableTier } from '../config/agent-config.js';
+import { AGENT_FILE, generalFile, getRouting, MissingAgentFileError, routableTiers, type RoutableTier } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
 import { liveReadinessMarkers } from '../mcp/parent-session.js';
 import { withDenyLock } from './deny-lock.js';
@@ -84,25 +84,29 @@ export function buildRoutingText(tiers: RoutableTier[], taskMode: boolean | null
   return lines.join('\n');
 }
 
-/** One line telling Claude that routing is off because the agent file does not load. */
-export function buildWarning(detail: string): string {
+/** One line telling Claude that routing is off because a config file does not load; `file` is the one the error names. */
+export function buildWarning(detail: string, file: string = AGENT_FILE): string {
   const flat = detail.replace(/\s+/g, ' ').trim().slice(0, 300);
-  return `subzero routing is off: the agent file ${AGENT_FILE} does not load (${flat}). Every subagent runs on Claude until it is fixed.`;
+  return `subzero routing is off: the config file ${file} does not load (${flat}). Every subagent runs on Claude until it is fixed.`;
 }
 
 /**
  * What SessionStart adds to Claude's context for a project, or undefined for nothing.
- * A missing agent file, no project root, no routable tier word and any error other
- * than a load error of an existing file all add nothing (R13, R18).
+ * A project that is off (no medium tier in the merged config, or enabled: false), no
+ * project root, no routable tier word and any error other than a load error all add
+ * nothing (R13, R18).
  */
 export function routingContext(projectRoot: string | undefined, taskMode: boolean | null = false): string | undefined {
   if (projectRoot === undefined) return undefined;
   try {
-    if (!existsSync(path.join(projectRoot, AGENT_FILE))) return undefined;
     const tiers = wordTiers(routableTiers(projectRoot));
     return tiers.length === 0 ? undefined : buildRoutingText(tiers, taskMode);
   } catch (err) {
-    if ((err as { code?: unknown }).code === 'load_error') return buildWarning((err as Error).message);
+    if (err instanceof MissingAgentFileError) return undefined;
+    if ((err as { code?: unknown }).code === 'load_error') {
+      const message = (err as Error).message;
+      return buildWarning(message, message.includes(generalFile()) ? generalFile() : AGENT_FILE);
+    }
     return undefined;
   }
 }

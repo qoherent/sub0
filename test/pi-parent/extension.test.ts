@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { registerPiExtension } from '../../src/pi-parent/extension.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import { fakePi } from './fake-pi-api.js';
-import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, makeProject, manualPort, piKernel, tempDir, TIERED_YAML } from '../helpers.js';
+import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, GENERAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, TIERED_YAML, useGeneralConfig } from '../helpers.js';
 
 describe('pi extension', () => {
   it('registers subagent and starts a background child on the requested tier', async () => {
@@ -21,6 +21,38 @@ describe('pi extension', () => {
     expect(reply.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/task: sz-/) });
     expect(started).toHaveLength(1);
     started[0]!.settle();
+  });
+});
+
+describe('pi extension with a general file', () => {
+  const STARTER = () => ({ general: ['read'], fallback: ['read'] });
+
+  it('describes the tiers and runs subagent on the general medium for a project with no file', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const { port, started } = manualPort();
+    const fake = fakePi(root);
+    registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port, STARTER), warn: () => {} }));
+    await fake.emit('session_start');
+    const subagent = fake.tools.get('subagent')!;
+    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toMatch(/\(medium\): pass model: "medium"/);
+    const reply = await subagent.execute('call', { task: 'review', model: 'sonnet' }, undefined, undefined, fake.context as any);
+    expect(reply.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/task: sz-/) });
+    expect(started).toHaveLength(1);
+    started[0]!.settle();
+  });
+
+  it('keeps the base description and refuses naming enabled: false when the project is switched off', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject('enabled: false\n');
+    const { port, started } = manualPort();
+    const fake = fakePi(root);
+    registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port, STARTER), warn: () => {} }));
+    await fake.emit('session_start');
+    const subagent = fake.tools.get('subagent')!;
+    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toBe('Delegate an isolated task. Await background tasks before using their results.');
+    expect(await subagent.execute('call', { task: 'x' }, undefined, undefined, fake.context as any)).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/enabled: false/) }] });
+    expect(started).toHaveLength(0);
   });
 });
 

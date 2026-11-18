@@ -80,12 +80,13 @@ describe('Cli', () => {
     expect(frozen).toMatchObject({ name: 'general', host: 'pi', model: 'local/qwen', thinking: 'high' });
   });
 
-  it('with no --agent and no general entry prints the unknown agent error and runs nothing, never fallback', async () => {
+  it('with no --agent and no general entry runs the built-in general agent with the starter tools of pi', async () => {
     const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, ''));
-    const { run, err } = cli(root);
-    expect(await run('run', 'do it')).toBe(1);
-    expect(err.join('\n')).toMatch(/general.*required/);
-    expect(existsSync(path.join(root, '.agents', 'subzero'))).toBe(false);
+    const { run, out, fake } = cli(root);
+    expect(await run('run', 'do it')).toBe(0);
+    expect(out[0]).toMatch(/^task: sz-[a-z2-7]{6} · general · status: completed/);
+    const argv = fake.log()[0].argv as string[];
+    expect(argv[argv.indexOf('--tools') + 1]).toBe('read,bash,edit,write,grep,find,ls');
   });
 
   it('prints the usage when run has no brief or an unknown option', async () => {

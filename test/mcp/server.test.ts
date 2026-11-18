@@ -9,7 +9,7 @@ import { formatListing } from '../../src/mcp/format.js';
 import { createSubzeroServer } from '../../src/mcp/server.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import type { TaskView } from '../../src/store/task-store.js';
-import { FAKE_PI, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until } from '../helpers.js';
+import { FAKE_PI, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, GENERAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, until, useGeneralConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 
@@ -417,21 +417,48 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect((await service.list()).map((v) => v.agent)).toEqual(['fallback', 'fallback', 'fallback']);
   });
 
-  it('returns the unknown agent error with no task when there is no fallback entry, and for general with no general entry', async () => {
-    const noFallback = await connect({}, null, undefined, TIERED_YAML.replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
-    const unknown: any = await noFallback.call('delegate', { agent: 'reviewr', brief: 'go' });
-    expect(unknown.isError).toBe(true);
-    expect(noFallback.textOf(unknown)).toMatch(/fallback.*required/);
-    expect(await noFallback.service.list()).toEqual([]);
+  it('runs the built-in fallback and general when the file has neither, with the starter tools of the pi driver', async () => {
+    const bare = await connect({}, null, undefined, makeProjectYamlWithoutGeneral().replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
+    const unknown = bare.textOf(await bare.call('delegate', { agent: 'reviewr', brief: 'go' }));
+    expect(unknown.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · fallback · status: completed/);
+    expect(unknown).toMatch(/reviewr.*not configured/);
+    const general = bare.textOf(await bare.call('delegate', { brief: 'go' }));
+    expect(general.split('\n')[0]).toMatch(/· general · status: completed/);
+    const tools = bare.fake.log().filter((l) => l.argv).map((l) => l.argv[l.argv.indexOf('--tools') + 1]);
+    expect(tools).toEqual(['read,grep,find,ls', 'read,bash,edit,write,grep,find,ls']);
+  });
 
-    const noGeneral = await connect({}, null, undefined, makeProjectYamlWithoutGeneral());
-    for (const args of [{ agent: 'general', brief: 'go' }, { brief: 'go' }]) {
-      const result: any = await noGeneral.call('delegate', args);
+  it('covers AE2: runs delegate on the general medium with only a general file, and lists its tiers', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const { root, call, textOf, fake, client } = await connect();
+    rmSync(path.join(root, '.agents', 'subzero.yaml'));
+    const { tools } = await client.listTools();
+    expect(tools.find((t) => t.name === 'delegate')!.description).toContain('medium → local/general-medium (host pi)');
+    const reply = textOf(await call('delegate', { tier: 'medium', brief: 'go' }));
+    expect(reply.split('\n')[0]).toMatch(/· general:medium · status: completed/);
+    const argv = fake.log()[0].argv;
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/general-medium');
+  });
+
+  it('covers AE4: passes back a delegation when the project says enabled false, naming enabled: false', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const { root, call, textOf, service, fake } = await connect();
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
+    for (const args of [{ brief: 'go' }, { brief: 'go', tier: 'medium' }]) {
+      const result: any = await call('delegate', args);
       expect(result.isError).toBe(true);
-      expect(noGeneral.textOf(result)).toMatch(/general.*required/);
+      expect(textOf(result)).toMatch(/enabled: false.*Agent tool.*passback/s);
     }
-    expect(noGeneral.fake.log()).toEqual([]);
-    expect(await noGeneral.service.list()).toEqual([]);
+    expect(fake.log()).toEqual([]);
+    expect(await service.list()).toEqual([]);
+  });
+
+  it('passes back a delegation when there is no project file and no general medium', async () => {
+    const { root, call, textOf } = await connect();
+    rmSync(path.join(root, '.agents', 'subzero.yaml'));
+    const result: any = await call('delegate', { brief: 'go', tier: 'medium' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toMatch(/missing.*Agent tool.*passback/s);
   });
 
   it('keeps queued replies for tiered tasks: the second general:medium task is queued, never started', async () => {
@@ -464,19 +491,27 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(second).not.toContain('r9700/Qwen3.8');
   });
 
-  it('lists the tools with the static description when the config is broken, or has no general entry', async () => {
+  it('lists the tools with the static description when the config is broken or the project is off, and with the tiers when only general is missing', async () => {
     const { client, root } = await connect({}, null, undefined, TIERED_YAML);
-    const staticText = async () => {
+    const delegateText = async () => {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual(['await', 'cancel', 'delegate', 'tasks']);
       return tools.find((t) => t.name === 'delegate')!.description!;
     };
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'agents: [');
-    const broken = await staticText();
+    const broken = await delegateText();
     expect(broken).toMatch(/Delegate a task to a subzero agent/);
     expect(broken).not.toMatch(/→/);
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
+    expect(await delegateText()).toBe(broken);
+    useGeneralConfig('agents: [');
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), TIERED_YAML);
+    expect(await delegateText()).toBe(broken);
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
+    expect(await delegateText()).toBe(broken);
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), makeProjectYamlWithoutGeneral());
-    expect(await staticText()).toBe(broken);
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    expect(await delegateText()).toMatch(/medium → r9700\/Qwen3.8 \(host pi\)/);
   });
 
   it('returns a 20,000-character final message whole from delegate, tasks and await', async () => {

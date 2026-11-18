@@ -1,20 +1,23 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LoadError, TierError, UnknownAgentError, UnresolvedRootError } from '../../src/config/agent-config.js';
-import { unavailableUsage, type ChildPort } from '../../src/core/types.js';
+import { LoadError, MissingAgentFileError, ProjectDisabledError, TierError, UnknownAgentError, UnresolvedRootError } from '../../src/config/agent-config.js';
+import { unavailableUsage, type ChildPort, type StarterTools } from '../../src/core/types.js';
 import { DelegationService, EmptyBriefError, renderBrief } from '../../src/service/delegation-service.js';
 import { TaskStore } from '../../src/store/task-store.js';
 import { Kernel } from '../../src/kernel/kernel.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until, useGeneralConfig } from '../helpers.js';
 
-function service(root: string, port: ChildPort) {
+function service(root: string, port: ChildPort, starterTools?: () => StarterTools) {
   return new DelegationService({
     env: { SUBZERO_PROJECT_DIR: root },
     warn: () => {},
-    kernel: kernelWithPort(port),
+    kernel: kernelWithPort(port, starterTools),
   });
 }
+
+/** What a child driver offers for the built-in general and fallback agents. */
+const STARTER: StarterTools = { general: ['read', 'bash'], fallback: ['read'] };
 
 const indexLines = (root: string) => {
   const file = path.join(root, '.agents', 'subzero', 'index.jsonl');
@@ -269,7 +272,7 @@ describe('DelegationService', () => {
     expect(frozen[0]).toMatchObject({ name: 'other', host: 'pi', model: 'local/qwen-small', thinking: 'low', endpoint: 'local', parallel: 1 });
   });
 
-  it('runs general when no agent is named, and returns the unknown agent error without a general entry', async () => {
+  it('runs general when no agent is named, and names the host when its driver has no starter tools for a missing general entry', async () => {
     const withGeneral = makeProject(DEFAULT_YAML);
     const frozen: any[] = [];
     const { port } = manualPort();
@@ -277,8 +280,9 @@ describe('DelegationService', () => {
     await svc.delegate({ briefText: 'go' }, { wait: false });
     expect(frozen[0]).toMatchObject({ name: 'general', model: 'local/qwen', tools: ['read', 'bash', 'write', 'edit'], timeout: 9 });
 
-    const bare = service(makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '')), manualPort().port);
-    await expect(bare.delegate({ briefText: 'go' }, { wait: false })).rejects.toThrow(/general.*required/);
+    const noGeneral = DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '');
+    const bare = service(makeProject(noGeneral), manualPort().port);
+    await expect(bare.delegate({ briefText: 'go' }, { wait: false })).rejects.toThrow(/child driver of the host "pi" offers no starter tools/);
   });
 
   it('returns the tier error, naming the host and the supported hosts, when the tier host has no driver, and makes no task', async () => {
@@ -469,21 +473,72 @@ describe('DelegationService tiers, general and fallback', () => {
     expect(frozen[1]).toMatchObject({ name: 'fallback:medium', model: 'r9700/Qwen3.8' });
   });
 
-  it('returns the unknown agent error with no task for an unknown name and no fallback entry', async () => {
+  it('runs the built-in fallback with its notice for an unknown name when the file has no fallback entry', async () => {
+    const root = makeProject(TIERED_YAML.replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    const reply: any = await svc.delegate({ agent: 'reviewr', briefText: 'go' }, { wait: false });
+    expect(frozen[0]).toMatchObject({ name: 'fallback', tools: ['read'], timeout: 1200 });
+    expect(reply.notice).toMatch(/the agent "reviewr" is not configured, so the fallback agent ran instead/);
+  });
+
+  it('fails with the host-naming error and no task for a missing general or fallback when the driver has no starter tools', async () => {
     const root = makeProject(TIERED_YAML.replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
     const svc = service(root, manualPort().port);
     const err = await svc.delegate({ agent: 'reviewr', briefText: 'go' }, { wait: false }).catch((e) => e);
     expect(err).toBeInstanceOf(LoadError);
-    expect(err.message).toMatch(/fallback.*required/);
+    expect(err.message).toMatch(/host "pi" offers no starter tools.*fallback/);
     expect(indexLines(root)).toEqual([]);
   });
 
-  it('never falls back for general or no agent when there is no general entry', async () => {
-    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, ''));
-    const svc = service(root, manualPort().port);
-    await expect(svc.delegate({ agent: 'general', briefText: 'go' }, { wait: false })).rejects.toBeInstanceOf(LoadError);
-    await expect(svc.delegate({ briefText: 'go' }, { wait: false })).rejects.toBeInstanceOf(LoadError);
-    await expect(svc.delegate({ briefText: 'go', tier: 'small' }, { wait: false })).rejects.toBeInstanceOf(LoadError);
+  it('fills a missing general from the starter tools of the driver, for no agent, general and a tier alike', async () => {
+    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '').replace('endpoints:\n  local:\n    parallel: 1\n', ''));
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    for (const delegation of [{ briefText: 'go' }, { agent: 'general', briefText: 'go' }, { briefText: 'go', tier: 'small' }]) {
+      await svc.delegate(delegation, { wait: false });
+    }
+    expect(frozen.map((f) => [f.name, f.tools, f.timeout])).toEqual([
+      ['general', ['read', 'bash'], 1200],
+      ['general', ['read', 'bash'], 1200],
+      ['general:small', ['read', 'bash'], 1200],
+    ]);
+  });
+
+  it('covers AE2: with a general medium and no project file, general runs on the medium model with the starter tools of its host', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    await svc.delegate({ briefText: 'go' }, { wait: false });
+    expect(frozen[0]).toMatchObject({ name: 'general', host: 'pi', model: 'local/general-medium', thinking: 'low', tools: ['read', 'bash'], timeout: 1200 });
+  });
+
+  it('fails with the host-naming error for a general-only project whose child driver has no starter tools', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const err = await service(root, manualPort().port).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toMatch(/host "pi" offers no starter tools/);
+    expect(indexLines(root)).toEqual([]);
+  });
+
+  it('refuses with a missing-file error and no task when there is no project file and no general medium', async () => {
+    const root = tempDir('subzero-project-');
+    const err = await service(root, manualPort().port, () => STARTER).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(MissingAgentFileError);
+    expect(indexLines(root)).toEqual([]);
+  });
+
+  it('covers AE4: enabled false refuses with the disabled error and no task, even with a general medium', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject('enabled: false\n');
+    const err = await service(root, manualPort().port, () => STARTER).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(ProjectDisabledError);
+    expect(err.message).toMatch(/enabled: false/);
     expect(indexLines(root)).toEqual([]);
   });
 

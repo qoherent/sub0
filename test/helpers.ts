@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { unavailableUsage, type ChildOutcome, type ChildPort } from '../src/core/types.js';
+import { onTestFinished } from 'vitest';
+import { unavailableUsage, type ChildOutcome, type ChildPort, type StarterTools } from '../src/core/types.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { PI_HOST, PiDriver, type PiDriverOptions } from '../src/pi/driver.js';
 
@@ -12,6 +13,22 @@ export const FAKE_PI_COMMAND = [process.execPath, FAKE_PI];
 export function tempDir(prefix = 'subzero-test-'): string {
   return realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 }
+
+/** Writes a general file and points SUBZERO_GENERAL_CONFIG at it until the test ends; returns its path. */
+export function useGeneralConfig(yaml: string): string {
+  const file = path.join(tempDir('subzero-general-'), 'subzero.yaml');
+  writeFileSync(file, yaml);
+  const previous = process.env.SUBZERO_GENERAL_CONFIG;
+  process.env.SUBZERO_GENERAL_CONFIG = file;
+  onTestFinished(() => {
+    if (previous === undefined) delete process.env.SUBZERO_GENERAL_CONFIG;
+    else process.env.SUBZERO_GENERAL_CONFIG = previous;
+  });
+  return file;
+}
+
+/** A general file with a medium tier on the host pi, for the tests of a project with no file of its own. */
+export const GENERAL_MEDIUM_YAML = 'models:\n  tiers:\n    medium: { host: pi, model: local/general-medium, thinking: low }\n';
 
 export const DEFAULT_YAML = `
 skills:
@@ -132,9 +149,9 @@ export function piKernel(options: PiDriverOptions = {}): { kernel: Kernel; drive
 }
 
 /** A Kernel whose host pi runs the given child port, for tests that settle runs by hand. */
-export function kernelWithPort(port: ChildPort): Kernel {
+export function kernelWithPort(port: ChildPort, starterTools?: () => StarterTools): Kernel {
   const kernel = new Kernel();
-  kernel.registerChildDriver(PI_HOST, { port });
+  kernel.registerChildDriver(PI_HOST, { port, ...(starterTools !== undefined ? { starterTools } : {}) });
   return kernel;
 }
 

@@ -4,7 +4,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getAgent, loadAgentFile } from '../../src/config/agent-config.js';
 import { readParentSessionId } from '../../src/mcp/parent-session.js';
-import { tempDir } from '../helpers.js';
+import { DelegationService } from '../../src/service/delegation-service.js';
+import { FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, fakePiEnv, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const EXAMPLE = path.join(REPO, 'examples', 'sigil');
@@ -62,6 +63,24 @@ describe('SigilWiring', () => {
       expect(text).toMatch(/request path, the binding path and every guidance path/);
       expect(text).toMatch(/exact answer file path, and the round/);
     }
+  });
+});
+
+describe('general file only', () => {
+  it('covers AE2: runs one delegation end to end against the fake pi with a general file and no project file', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const fake = fakePiEnv();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: piKernel({ piCommand: FAKE_PI_COMMAND, env: fake.env, piAgentDir: tempDir() }).kernel,
+    });
+    const reply = await svc.delegate({ briefText: 'go' }, { wait: true });
+    expect(reply).toMatchObject({ kind: 'result', result: { status: 'completed' } });
+    const argv = fake.log()[0].argv as string[];
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/general-medium');
+    expect(argv[argv.indexOf('--tools') + 1]).toBe('read,bash,edit,write,grep,find,ls');
   });
 });
 
@@ -154,6 +173,19 @@ agents:
     const out = JSON.parse(stdout) as { hookSpecificOutput: { additionalContext: string } };
     expect(out.hookSpecificOutput.additionalContext).not.toContain('\n');
     expect(out.hookSpecificOutput.additionalContext).toMatch(/routing is off/i);
+  });
+
+  it('AE2: prints the routing text for a project with no file when the general file has a medium tier', () => {
+    const general = path.join(tempDir(), 'subzero.yaml');
+    writeFileSync(general, 'models:\n  tiers:\n    medium: { host: pi, model: local/gm, thinking: low }\n');
+    const prior = process.env.SUBZERO_GENERAL_CONFIG;
+    process.env.SUBZERO_GENERAL_CONFIG = general;
+    try {
+      const { stdout } = runHook(tempDir(), undefined);
+      expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain('model local/gm');
+    } finally {
+      process.env.SUBZERO_GENERAL_CONFIG = prior;
+    }
   });
 
   it('prints nothing with no project directory in the environment or the input', () => {
