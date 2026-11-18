@@ -7447,6 +7447,7 @@ import path3 from "node:path";
 // src/config/agent-config.ts
 var import_yaml = __toESM(require_dist(), 1);
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27190,6 +27191,13 @@ var MissingAgentFileError = class extends LoadError {
     this.name = "MissingAgentFileError";
   }
 };
+var ProjectDisabledError = class extends MissingAgentFileError {
+  constructor(agentFile) {
+    super(agentFile);
+    this.message = `subzero is switched off for this project by enabled: false in ${agentFile}`;
+    this.name = "ProjectDisabledError";
+  }
+};
 var MissingDefaultTierError = class extends LoadError {
   constructor() {
     super(`the medium tier is required in models.tiers${RUN_INIT}`);
@@ -27272,9 +27280,28 @@ var tierFieldSchemas = {
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function loadAgentFile(projectRoot) {
+function globalFile(env = process.env) {
+  const fromEnv = env.SUBZERO_GLOBAL_CONFIG;
+  return fromEnv !== void 0 && fromEnv !== "" ? fromEnv : path.join(os.homedir(), ".agents", "subzero.yaml");
+}
+function isSameFile(a, b) {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
+var PROJECT_IS_GLOBAL = "this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder";
+var PLACEHOLDER_STARTER_AGENTS = () => ({ general: ["read"], fallback: ["read"] });
+var BUILT_IN_TIMEOUT = 1200;
+function loadCatalog(projectRoot, options = {}) {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  return parseCatalog(readAgentText(agentFile), agentFile);
+  const global = globalFile();
+  const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
+  return build(() => readGlobalText(global), projectText, { ...options, agentFile, globalFile: global });
+}
+function loadAgentFile(projectRoot, options = {}) {
+  return loadCatalog(projectRoot, options);
 }
 function readAgentText(agentFile) {
   try {
@@ -27293,9 +27320,103 @@ function readTextOrNull(agentFile) {
     throw err;
   }
 }
-function parseCatalog(text, agentFile, options = {}) {
+function readGlobalText(file2) {
+  try {
+    return readFileSync(file2, "utf8");
+  } catch (err) {
+    const code2 = err.code;
+    if (code2 === "ENOENT") return null;
+    throw new LoadError(`global file is unreadable: ${file2} (${code2 ?? String(err)})`);
+  }
+}
+function buildCatalog(globalText, projectText, options) {
+  return build(() => globalText, projectText, options);
+}
+var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing"];
+function inFile(file2, step) {
+  try {
+    return step();
+  } catch (err) {
+    if (err instanceof LoadError && !err.message.includes(file2)) throw new LoadError(`${err.message} in ${file2}`);
+    throw err;
+  }
+}
+function build(readGlobal, projectText, options) {
+  const { agentFile } = options;
+  const project = projectText === null ? null : inFile(agentFile, () => parseLayer(projectText, agentFile, "project", options));
+  if (project !== null && !project.enabled) throw new ProjectDisabledError(agentFile);
+  const globalPath = options.globalFile ?? globalFile();
+  const globalText = readGlobal();
+  const global = globalText === null ? null : inFile(globalPath, () => parseLayer(globalText, globalPath, "global", options));
+  const tiers = /* @__PURE__ */ new Map();
+  const limits = /* @__PURE__ */ new Map();
+  const inherited = /* @__PURE__ */ new Set();
+  for (const layer of [global, project]) {
+    if (layer === null) continue;
+    for (const [name, tier] of layer.tiers) {
+      if (tier === null) tiers.delete(name);
+      else tiers.set(name, tier);
+    }
+    for (const [endpoint, parallel] of layer.limits) {
+      if (parallel === null) limits.delete(endpoint);
+      else limits.set(endpoint, parallel);
+      if (layer === global) inherited.add(endpoint);
+      else inherited.delete(endpoint);
+    }
+  }
+  const routing = { ...global?.routing, ...project?.routing };
+  const entries = /* @__PURE__ */ new Map();
+  inFile(agentFile, () => {
+    for (const [name, raw] of Object.entries(project?.agents ?? {})) {
+      entries.set(name, validateAgent(name, raw, project.skillFolders, tiers));
+    }
+  });
+  const used = /* @__PURE__ */ new Set();
+  for (const tier of tiers.values()) used.add(modelEndpoint(tier.model));
+  for (const entry of entries.values()) {
+    for (const override of entry.overrides.values()) {
+      if (override.model !== void 0) used.add(modelEndpoint(override.model));
+    }
+  }
+  for (const endpoint of [...limits.keys()]) {
+    if (used.has(endpoint)) continue;
+    if (inherited.has(endpoint)) limits.delete(endpoint);
+    else if (options.allowUnusedLimits !== true) {
+      throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it in ${agentFile}`);
+    }
+  }
+  const medium = tiers.get(DEFAULT_TIER);
+  if (options.allowMissingStarter !== true && medium === void 0) {
+    throw project === null ? new MissingAgentFileError(agentFile) : new MissingDefaultTierError();
+  }
+  if (medium !== void 0 && options.starterAgents !== void 0) fillBuiltInAgents(entries, medium.host, options.starterAgents);
+  if (options.allowMissingStarter !== true) {
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+  }
+  return {
+    agentFile,
+    entries,
+    tiers,
+    routing: { hook: routing.hook ?? true, ...routing.genericAgents !== void 0 ? { genericAgents: routing.genericAgents } : {} },
+    limits
+  };
+}
+function fillBuiltInAgents(entries, host, starterAgents) {
+  const missing = [GENERAL_AGENT, FALLBACK_AGENT].filter((name) => !entries.has(name));
+  if (missing.length === 0) return;
+  const tools = starterAgents(host);
+  if (tools === void 0) {
+    throw new LoadError(`the child driver of the host "${host}" offers no starter tools, so the built-in ${missing.join(" and ")} agent cannot be filled`);
+  }
+  for (const name of missing) {
+    entries.set(name, { name, skills: [], tools: name === GENERAL_AGENT ? tools.general : tools.fallback, timeout: BUILT_IN_TIMEOUT, overrides: /* @__PURE__ */ new Map() });
+  }
+}
+function parseLayer(text, file2, kind, options) {
+  const global = kind === "global";
   const allowMissingStarter = options.allowMissingStarter === true;
-  const malformed = (detail) => new LoadError(`agent file is malformed: ${agentFile}: ${detail}`);
+  const malformed = (detail) => new LoadError(`${global ? "global" : "agent"} file is malformed: ${file2}: ${detail}`);
   let parsed;
   try {
     parsed = (0, import_yaml.parse)(text);
@@ -27304,6 +27425,14 @@ function parseCatalog(text, agentFile, options = {}) {
   }
   const doc = parsed === null ? {} : parsed;
   if (!isRecord(doc)) throw malformed("expected a map");
+  if (global) {
+    for (const key of Object.keys(doc)) {
+      if (!GLOBAL_LAYER_KEYS.includes(key)) {
+        throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "${key}": ${file2}`);
+      }
+    }
+  }
+  if (doc.enabled !== void 0 && typeof doc.enabled !== "boolean") throw new LoadError("enabled must be true or false");
   const agentsMap = doc.agents ?? {};
   if (!isRecord(agentsMap)) throw malformed('expected an "agents" map');
   const skillsMap = doc.skills ?? {};
@@ -27312,8 +27441,13 @@ function parseCatalog(text, agentFile, options = {}) {
   if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
   if (doc.models !== void 0 && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
   const modelsMap = doc.models ?? {};
+  if (global) {
+    for (const key of Object.keys(modelsMap)) {
+      if (key !== "tiers") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "models.${key}": ${file2}`);
+    }
+  }
   if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
-  const baseDir = path.dirname(agentFile);
+  const baseDir = path.dirname(file2);
   const skillFolders = /* @__PURE__ */ new Map();
   for (const [name, value] of Object.entries(skillsMap)) {
     if (typeof value !== "string" || value.length === 0) {
@@ -27321,8 +27455,19 @@ function parseCatalog(text, agentFile, options = {}) {
     }
     skillFolders.set(name, path.resolve(baseDir, value));
   }
+  const removal = (what) => new LoadError(`${what}: a removal entry is only accepted in the agent file`);
   const limits = /* @__PURE__ */ new Map();
   for (const [endpoint, entry] of Object.entries(endpointsMap)) {
+    if (entry === null) {
+      if (global) throw removal(`endpoint "${endpoint}"`);
+      limits.set(endpoint, null);
+      continue;
+    }
+    if (global && isRecord(entry)) {
+      for (const key of Object.keys(entry)) {
+        if (key !== "parallel") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file2}`);
+      }
+    }
     const parallel = isRecord(entry) ? entry.parallel : void 0;
     if (typeof parallel !== "number" || !Number.isInteger(parallel) || parallel < 1) {
       throw new LoadError(`endpoint "${endpoint}": parallel must be a positive whole number`);
@@ -27331,31 +27476,14 @@ function parseCatalog(text, agentFile, options = {}) {
   }
   const tiers = /* @__PURE__ */ new Map();
   for (const [name, raw] of Object.entries(modelsMap.tiers ?? {})) {
-    tiers.set(name, validateTier(name, raw));
-  }
-  const entries = /* @__PURE__ */ new Map();
-  for (const [name, raw] of Object.entries(agentsMap)) {
-    entries.set(name, validateAgent(name, raw, skillFolders, tiers));
-  }
-  const routing = validateRouting(doc.routing);
-  const used = /* @__PURE__ */ new Set();
-  for (const tier of tiers.values()) used.add(modelEndpoint(tier.model));
-  for (const entry of entries.values()) {
-    for (const override of entry.overrides.values()) {
-      if (override.model !== void 0) used.add(modelEndpoint(override.model));
+    if (raw === null) {
+      if (global) throw removal(`tier "${name}"`);
+      tiers.set(name, null);
+    } else {
+      tiers.set(name, validateTier(name, raw));
     }
   }
-  for (const endpoint of limits.keys()) {
-    if (!used.has(endpoint) && options.allowUnusedLimits !== true) {
-      throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it`);
-    }
-  }
-  if (!allowMissingStarter) {
-    if (!tiers.has(DEFAULT_TIER)) throw new MissingDefaultTierError();
-    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
-    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
-  }
-  return { agentFile, entries, tiers, routing, limits };
+  return { enabled: doc.enabled !== false, tiers, limits, routing: validateRouting(doc.routing), skillFolders, agents: agentsMap };
 }
 function validateTier(name, raw) {
   if (!isRecord(raw)) throw new LoadError(`tier "${name}": must be a map of host, model and thinking`);
@@ -27450,7 +27578,7 @@ function validateAgent(name, raw, skillFolders, tiers) {
   };
 }
 function validateRouting(raw) {
-  if (raw === void 0 || raw === null) return { hook: true };
+  if (raw === void 0 || raw === null) return {};
   if (!isRecord(raw)) throw new LoadError("routing: must be a map");
   for (const key of Object.keys(raw)) {
     if (!ROUTING_KEYS.includes(key)) throw new LoadError(`routing: unknown key "${key}"`);
@@ -27460,7 +27588,7 @@ function validateRouting(raw) {
   if (list !== void 0 && !(Array.isArray(list) && list.every((v) => typeof v === "string" && v !== ""))) {
     throw new LoadError("routing: generic_agents must be a list of agent type names");
   }
-  return { hook: raw.hook !== false, genericAgents: list };
+  return { ...raw.hook !== void 0 ? { hook: raw.hook } : {}, ...list !== void 0 ? { genericAgents: list } : {} };
 }
 function resolveAgent(catalog, name, options = {}) {
   const entryName = name ?? GENERAL_AGENT;
@@ -27491,10 +27619,11 @@ function resolveAgent(catalog, name, options = {}) {
 }
 function addStarterEntries(projectRoot, spec) {
   const agentFile = path.join(projectRoot, AGENT_FILE);
+  if (isSameFile(agentFile, globalFile())) throw new LoadError(PROJECT_IS_GLOBAL);
   const text = readTextOrNull(agentFile);
-  if (text !== null) {
-    parseCatalog(text, agentFile, { allowMissingStarter: true });
-  }
+  const global = globalFile();
+  const globalText = readGlobalText(global);
+  if (text !== null) buildCatalog(globalText, text, { agentFile, globalFile: global, allowMissingStarter: true });
   const original = text ?? "";
   const doc = (0, import_yaml.parseDocument)(original);
   const existingHost = doc.getIn(["models", "tiers", DEFAULT_TIER, "host"]);
@@ -27519,7 +27648,7 @@ function addStarterEntries(projectRoot, spec) {
     spliceAgents(splicer, agents);
   }
   const next = splicer.result();
-  parseCatalog(next, agentFile);
+  buildCatalog(globalText, next, { agentFile, globalFile: global });
   mkdirSync(path.dirname(agentFile), { recursive: true });
   writeFileSync(agentFile, next);
   return result;
@@ -27544,7 +27673,9 @@ function createSplicer(original) {
       return { end: node2.range[1], indent: " ".repeat(first - (original.lastIndexOf("\n", first - 1) + 1)) };
     },
     insert(at, body) {
-      inserts.push({ at, text: (at > 0 && original[at - 1] !== "\n" ? "\n" : "") + body });
+      const nl = at > 0 && original[at - 1] !== "\n" ? original.indexOf("\n", at) : -2;
+      if (nl >= 0) inserts.push({ at: nl + 1, text: body });
+      else inserts.push({ at, text: (nl === -1 ? "\n" : "") + body });
     },
     insertInline(keys, entries) {
       const node2 = doc.getIn(keys, true);
@@ -27597,8 +27728,11 @@ function yamlKey(key) {
 }
 function spliceTiers(s, tiers) {
   if (Object.keys(tiers).length === 0) return;
-  const lines = (indent) => Object.entries(tiers).map(([name, tier]) => `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}
-`).join("");
+  const lines = (indent) => Object.entries(tiers).map(
+    ([name, tier]) => tier === null ? `${indent}${yamlKey(name)}:
+` : `${indent}${yamlKey(name)}: ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}
+`
+  ).join("");
   if (s.insertInline(["models", "tiers"], tiers)) return;
   if (!s.doc.hasIn(["models", "tiers"]) && s.insertInline(["models"], { tiers })) return;
   const tiersAt = s.mapAt(["models", "tiers"]);
@@ -29445,7 +29579,7 @@ var DelegationService = class {
    * (with a notice that says so). `general` never falls back.
    */
   chooseAgent(projectRoot, delegation) {
-    const catalog = loadAgentFile(projectRoot);
+    const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, "").trim();
     const options = { supportedHosts, ...tier !== void 0 && tier !== "" ? { tier } : {} };
@@ -29588,7 +29722,7 @@ var DelegationService = class {
 // src/config/agent-setup.ts
 var import_yaml3 = __toESM(require_dist(), 1);
 import { createHash, randomBytes as randomBytes3 } from "node:crypto";
-import { closeSync, fchmodSync, mkdirSync as mkdirSync3, openSync, renameSync as renameSync2, statSync as statSync3, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { closeSync, fchmodSync, mkdirSync as mkdirSync3, openSync, realpathSync as realpathSync2, renameSync as renameSync2, statSync as statSync3, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
 import path5 from "node:path";
 
 // src/config/tier-words.ts
@@ -29600,7 +29734,7 @@ var TIER_WORDS = [
 var LARGE_TIER_WARNING = "Setting large sends compound-engineering's session-model reviewers and plain subagent requests to the child model instead of Claude.";
 
 // src/config/agent-setup.ts
-var DEFAULT_SETUP_TIMEOUT = 1200;
+var DEFAULT_SETUP_TIMEOUT = BUILT_IN_TIMEOUT;
 var ChangeSetError = class extends Error {
   code = "invalid_change_set";
   constructor(message) {
@@ -29640,26 +29774,84 @@ function errnoReason(err) {
   const match = /^[A-Z0-9_]+: ([^,]+)/.exec(err.message);
   return match ? match[1].trim() : `${err.syscall} failed`;
 }
-function agentFileOf(projectRoot) {
-  return path5.join(projectRoot, AGENT_FILE);
-}
 function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
-function classify(agentFile, text) {
-  if (text === null) return { status: "no-file", catalog: null };
+function readLayers(projectRoot) {
+  const agentFile = path5.join(projectRoot, AGENT_FILE);
+  const globalPath = globalFile();
+  const projectText = isSameFile(agentFile, globalPath) ? null : readTextOrNull(agentFile);
+  return { agentFile, globalPath, globalText: readGlobalText(globalPath), projectText };
+}
+var targetPath2 = (l, scope) => scope === "global" ? l.globalPath : l.agentFile;
+var targetText = (l, scope) => scope === "global" ? l.globalText : l.projectText;
+function catalogOf(l, global, project, lenient) {
+  return buildCatalog(global, project, {
+    agentFile: l.agentFile,
+    globalFile: l.globalPath,
+    allowMissingStarter: true,
+    ...lenient ? { allowUnusedLimits: true } : {}
+  });
+}
+function strictCatalogOf(l, global, project) {
+  return buildCatalog(global, project, { agentFile: l.agentFile, globalFile: l.globalPath, starterAgents: PLACEHOLDER_STARTER_AGENTS });
+}
+function loadsStrictly(l) {
+  if (l.projectText === null) return true;
   try {
-    return { status: "ok", catalog: parseCatalog(text, agentFile) };
-  } catch (strict) {
-    if (!(strict instanceof LoadError)) throw strict;
+    strictCatalogOf(l, l.globalText, l.projectText);
+    return true;
+  } catch (err) {
+    if (err instanceof LoadError) return false;
+    throw err;
+  }
+}
+function namedIn(text) {
+  const out = { tiers: /* @__PURE__ */ new Map(), limits: /* @__PURE__ */ new Map() };
+  let doc;
+  try {
+    doc = text === null ? null : (0, import_yaml3.parse)(text);
+  } catch {
+    return out;
+  }
+  if (!isRecord(doc)) return out;
+  const tiers = isRecord(doc.models) && isRecord(doc.models.tiers) ? doc.models.tiers : {};
+  for (const [name, raw] of Object.entries(tiers)) out.tiers.set(name, raw !== null);
+  const endpoints = isRecord(doc.endpoints) ? doc.endpoints : {};
+  for (const [endpoint, raw] of Object.entries(endpoints)) {
+    out.limits.set(endpoint, isRecord(raw) && typeof raw.parallel === "number" ? raw.parallel : null);
+  }
+  return out;
+}
+function numericLimits(text) {
+  const out = /* @__PURE__ */ new Map();
+  for (const [endpoint, parallel] of namedIn(text).limits) if (parallel !== null) out.set(endpoint, parallel);
+  return out;
+}
+function viewOf(l, scope, global, project) {
+  if (scope === "project") {
+    let problem;
+    let catalog;
     try {
-      const catalog = parseCatalog(text, agentFile, { allowMissingStarter: true, allowUnusedLimits: true });
-      return { status: "repairable", catalog, problem: strict.message };
-    } catch (lenient) {
-      if (!(lenient instanceof LoadError)) throw lenient;
-      return { status: "refused", error: lenient };
+      catalog = catalogOf(l, global, project, false);
+    } catch (strict) {
+      if (!(strict instanceof LoadError)) throw strict;
+      catalog = catalogOf(l, global, project, true);
+      problem = strict.message;
+    }
+    return { tiers: catalog.tiers, limits: catalog.limits, project: catalog, projectNamed: namedIn(project), ...problem !== void 0 ? { problem } : {} };
+  }
+  const own2 = catalogOf(l, global, null, false);
+  const limits = numericLimits(global);
+  let merged = null;
+  if (project !== null) {
+    try {
+      merged = catalogOf(l, global, project, true);
+    } catch (err) {
+      if (!(err instanceof ProjectDisabledError)) throw err;
     }
   }
+  return { tiers: own2.tiers, limits, project: merged, projectNamed: merged === null ? namedIn(null) : namedIn(project) };
 }
 function emptyCatalog(agentFile) {
   return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map() };
@@ -29674,53 +29866,90 @@ function overrideEndpoints(catalog) {
   }
   return out;
 }
-function missingStarterOf(catalog) {
-  const out = [];
-  if (!catalog.tiers.has(DEFAULT_TIER)) out.push("medium");
-  if (!catalog.entries.has(GENERAL_AGENT)) out.push("general");
-  if (!catalog.entries.has(FALLBACK_AGENT)) out.push("fallback");
+function extraEndpoints(view, scope) {
+  if (view.project === null) return /* @__PURE__ */ new Set();
+  const out = overrideEndpoints(view.project);
+  if (scope === "global") {
+    for (const [name, tier] of view.project.tiers) if (view.projectNamed.tiers.get(name) === true) out.add(modelEndpoint(tier.model));
+  }
   return out;
 }
+function overriddenIn(global, project) {
+  return {
+    tiers: [...global.tiers.keys()].filter((t) => project.tiers.has(t)),
+    limits: [...global.limits.keys()].filter((e) => project.limits.has(e))
+  };
+}
 function readSetupState(projectRoot, options = {}) {
-  const agentFile = agentFileOf(projectRoot);
-  let text;
+  const scope = options.scope ?? "project";
+  let layers;
   try {
-    text = readTextOrNull(agentFile);
+    layers = readLayers(projectRoot);
+  } catch (err) {
+    if (err instanceof LoadError) return { status: "refused", agentFile: path5.join(projectRoot, AGENT_FILE), error: err.message };
+    throw err;
+  }
+  const agentFile = targetPath2(layers, scope);
+  const text = targetText(layers, scope);
+  let view;
+  try {
+    view = viewOf(layers, scope, layers.globalText, layers.projectText);
   } catch (err) {
     if (err instanceof LoadError) return { status: "refused", agentFile, error: err.message };
     throw err;
   }
-  const loaded = classify(agentFile, text);
-  if (loaded.status === "refused") return { status: "refused", agentFile, error: loaded.error.message };
-  const catalog = loaded.catalog ?? emptyCatalog(agentFile);
   const listed = options.listedModels === void 0 ? null : new Set(options.listedModels);
-  const tiers = [...catalog.tiers].map(([tier, t]) => ({
-    tier,
-    host: t.host,
-    model: t.model,
-    thinking: t.thinking,
-    endpoint: modelEndpoint(t.model),
-    dependents: dependentsOf(catalog, tier),
-    otherHost: options.host !== void 0 && t.host !== options.host,
-    listed: listed === null ? null : listed.has(t.model)
-  }));
-  const byOverride = overrideEndpoints(catalog);
+  const globalNamed = namedIn(layers.globalText);
+  const project = view.project ?? emptyCatalog(layers.agentFile);
+  const fromProject = (own2) => scope === "project" && own2 ? "project" : "global";
+  const globalTiers = scope === "project" && layers.globalText !== null ? catalogOf(layers, layers.globalText, null, false).tiers : /* @__PURE__ */ new Map();
+  const globalLimits = scope === "project" ? numericLimits(layers.globalText) : /* @__PURE__ */ new Map();
+  const tiers = [...view.tiers].map(([tier, t]) => {
+    const own2 = view.projectNamed.tiers.get(tier) === true;
+    const global = scope === "project" && own2 ? globalTiers.get(tier) : void 0;
+    return {
+      tier,
+      host: t.host,
+      model: t.model,
+      thinking: t.thinking,
+      endpoint: modelEndpoint(t.model),
+      source: fromProject(own2),
+      dependents: dependentsOf(project, tier),
+      otherHost: options.host !== void 0 && t.host !== options.host,
+      listed: listed === null ? null : listed.has(t.model),
+      ...global !== void 0 ? { global: { host: global.host, model: global.model, thinking: global.thinking } } : {}
+    };
+  });
+  const byOverride = extraEndpoints(view, scope);
   const tierEndpoints = new Set(tiers.map((t) => t.endpoint));
-  const limits = [...catalog.limits].map(([endpoint, parallel]) => {
+  const limits = [...view.limits].map(([endpoint, parallel]) => {
     const using = tiers.filter((t) => t.endpoint === endpoint).map((t) => t.tier);
     const overrideOnly = using.length === 0 && byOverride.has(endpoint);
-    return { endpoint, parallel, tiers: using, overrideOnly, unused: using.length === 0 && !overrideOnly };
+    const own2 = typeof view.projectNamed.limits.get(endpoint) === "number";
+    const global = scope === "project" && own2 ? globalLimits.get(endpoint) : void 0;
+    return {
+      endpoint,
+      parallel,
+      source: fromProject(own2),
+      tiers: using,
+      overrideOnly,
+      unused: using.length === 0 && !overrideOnly,
+      ...global !== void 0 ? { global: { parallel: global } } : {}
+    };
   });
+  const unused = limits.find((l) => l.unused);
+  const problem = view.problem ?? (unused === void 0 ? void 0 : `endpoint "${unused.endpoint}": no model of a tier or of a tier override belongs to it in ${agentFile}`);
   const snapshot = {
     agentFile,
+    scope,
     fileFingerprint: text === null ? null : sha256(text),
     tiers,
     limits,
     overrideOnlyEndpoints: [...byOverride].filter((e) => !tierEndpoints.has(e)),
-    missingStarter: missingStarterOf(catalog)
+    overridden: overriddenIn(globalNamed, view.projectNamed)
   };
-  if (loaded.status === "repairable") return { status: "repairable", problem: loaded.problem, ...snapshot };
-  return { status: loaded.status, ...snapshot };
+  if (problem !== void 0) return { status: "repairable", problem, ...snapshot };
+  return { status: text === null ? "no-file" : "ok", ...snapshot };
 }
 function nonEmpty(value, what) {
   if (typeof value !== "string" || value.trim() === "" || /[\r\n]/.test(value)) {
@@ -29785,23 +30014,19 @@ function normalizeChangeSet(changes) {
     return a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0);
   });
 }
-function previewChanges(projectRoot, changes, starter) {
-  const agentFile = agentFileOf(projectRoot);
-  const normalized = normalizeChangeSet(changes);
-  return plan(agentFile, readTextOrNull(agentFile), normalized, starter);
+function previewChanges(projectRoot, changes, starter, scope = "project") {
+  return plan(readLayers(projectRoot), scope, normalizeChangeSet(changes), starter);
 }
-function applyChanges(projectRoot, changes, fingerprint, starter) {
-  const agentFile = agentFileOf(projectRoot);
-  const normalized = normalizeChangeSet(changes);
-  const preview = plan(agentFile, readTextOrNull(agentFile), normalized, starter);
+function applyChanges(projectRoot, changes, fingerprint, starter, scope = "project") {
+  const preview = plan(readLayers(projectRoot), scope, normalizeChangeSet(changes), starter);
   if (preview.fingerprint !== fingerprint) throw new SetupConflictError();
   if (preview.refusals.length > 0) throw new SetupRefusedError(preview.refusals);
   if (preview.invalid !== void 0) throw new LoadError(preview.invalid);
   if (preview.nothingToChange) return { ...preview, written: false };
   try {
-    writeAtomic2(agentFile, preview.text);
+    writeAtomic2(preview.agentFile, preview.text);
   } catch (err) {
-    if (isErrnoException(err)) throw new SetupWriteError(path5.relative(projectRoot, agentFile), err);
+    if (isErrnoException(err)) throw new SetupWriteError(scope === "global" ? preview.agentFile : path5.relative(projectRoot, preview.agentFile), err);
     throw err;
   }
   return { ...preview, written: true };
@@ -29812,20 +30037,40 @@ function describeTier(t) {
 function sameTier(a, b) {
   return a.host === b.host && a.model === b.model && a.thinking === b.thinking;
 }
-function plan(agentFile, text, changes, starter) {
-  const loaded = classify(agentFile, text);
-  if (loaded.status === "refused") throw loaded.error;
-  const catalog = loaded.catalog ?? emptyCatalog(agentFile);
-  const timeout = starter.timeout ?? DEFAULT_SETUP_TIMEOUT;
+function plan(l, scope, changes, starter) {
+  const agentFile = targetPath2(l, scope);
+  const text = targetText(l, scope);
+  if (scope === "project" && isSameFile(l.agentFile, l.globalPath)) {
+    return {
+      agentFile,
+      scope,
+      fileExists: l.globalText !== null,
+      changes,
+      refusals: [{ change: null, message: PROJECT_IS_GLOBAL }],
+      droppedLimits: [],
+      overridden: { tiers: [], limits: [] },
+      text: l.globalText ?? "",
+      diff: "",
+      summary: [],
+      nothingToChange: true,
+      fingerprint: sha256(JSON.stringify({ file: l.globalText, changes, scope, host: starter.host, shared: true }))
+    };
+  }
+  const other = scope === "global" ? l.projectText : l.globalText;
+  const view = viewOf(l, scope, l.globalText, l.projectText);
+  const own2 = namedIn(text);
+  const inherited = scope === "project" ? namedIn(l.globalText) : namedIn(null);
+  const inheritsTier = (tier) => inherited.tiers.get(tier) === true;
+  const inheritsLimit = (endpoint) => typeof inherited.limits.get(endpoint) === "number";
   const refusals = [];
   const summary = [];
-  const finalTiers = new Map(catalog.tiers);
+  const finalTiers = new Map(view.tiers);
   const setTiers = /* @__PURE__ */ new Map();
   const unsetTiers = [];
   for (const change of changes) {
     if (change.op === "setTier") {
       const tier = { host: starter.host, model: change.model, thinking: change.thinking };
-      const before = catalog.tiers.get(change.tier);
+      const before = view.tiers.get(change.tier);
       if (before !== void 0 && sameTier(before, tier)) continue;
       summary.push(
         before === void 0 ? `add tier ${change.tier}: ${describeTier(tier)}` : `tier ${change.tier}: ${describeTier(before)} -> ${describeTier(tier)}`
@@ -29833,10 +30078,11 @@ function plan(agentFile, text, changes, starter) {
       setTiers.set(change.tier, tier);
       finalTiers.set(change.tier, tier);
     } else if (change.op === "unsetTier") {
-      const agents = dependentsOf(catalog, change.tier);
+      const keptByProject = scope === "global" && view.projectNamed.tiers.has(change.tier);
+      const agents = keptByProject || view.project === null ? [] : dependentsOf(view.project, change.tier);
       if (change.tier === DEFAULT_TIER) {
         refusals.push({ change, message: "the medium tier cannot be removed: every agent without its own tier runs on it" });
-      } else if (!catalog.tiers.has(change.tier)) {
+      } else if (!view.tiers.has(change.tier)) {
         refusals.push({ change, message: `tier "${change.tier}" is not configured, so it cannot be removed` });
       } else if (agents.length > 0) {
         refusals.push({
@@ -29851,13 +30097,19 @@ function plan(agentFile, text, changes, starter) {
       }
     }
   }
-  const noMediumTier = !finalTiers.has(DEFAULT_TIER);
+  const noMediumTier = !finalTiers.has(DEFAULT_TIER) && !(scope === "global" && view.projectNamed.tiers.get(DEFAULT_TIER) === true);
   if (noMediumTier) refusals.push({ change: null, message: "the medium tier is required: choose a model for it" });
-  const used = overrideEndpoints(catalog);
+  const allLimits = /* @__PURE__ */ new Map();
+  for (const [endpoint, parallel] of [...scope === "project" ? inherited.limits : [], ...own2.limits]) {
+    if (parallel === null) allLimits.delete(endpoint);
+    else allLimits.set(endpoint, parallel);
+  }
+  const used = extraEndpoints(view, scope);
   for (const t of finalTiers.values()) used.add(modelEndpoint(t.model));
-  const finalLimits = new Map(catalog.limits);
+  const finalLimits = new Map(allLimits);
   const setLimits = /* @__PURE__ */ new Map();
-  const removedLimits = [];
+  const clearedLimits = [];
+  const droppedLimits = [];
   for (const change of changes) {
     if (change.op === "setLimit") {
       if (!used.has(change.endpoint)) {
@@ -29867,94 +30119,110 @@ function plan(agentFile, text, changes, starter) {
         });
         continue;
       }
-      const before = catalog.limits.get(change.endpoint);
+      const before = allLimits.get(change.endpoint);
       if (before === change.parallel) continue;
       summary.push(
         before === void 0 ? `endpoint ${change.endpoint}: parallel limit ${change.parallel}` : `endpoint ${change.endpoint}: parallel limit ${before} -> ${change.parallel}`
       );
       setLimits.set(change.endpoint, change.parallel);
       finalLimits.set(change.endpoint, change.parallel);
-    } else if (change.op === "clearLimit" && catalog.limits.has(change.endpoint)) {
+    } else if (change.op === "clearLimit" && allLimits.has(change.endpoint)) {
       summary.push(`endpoint ${change.endpoint}: remove the parallel limit`);
-      removedLimits.push(change.endpoint);
+      clearedLimits.push(change.endpoint);
       finalLimits.delete(change.endpoint);
     }
   }
-  const droppedLimits = [];
-  for (const endpoint of catalog.limits.keys()) {
-    if (finalLimits.has(endpoint) && !used.has(endpoint)) {
-      summary.push(`endpoint ${endpoint}: remove the parallel limit, no model uses it any more`);
-      droppedLimits.push(endpoint);
-      removedLimits.push(endpoint);
-      finalLimits.delete(endpoint);
-    }
+  for (const endpoint of allLimits.keys()) {
+    if (!finalLimits.has(endpoint) || used.has(endpoint)) continue;
+    finalLimits.delete(endpoint);
+    if (typeof own2.limits.get(endpoint) !== "number") continue;
+    summary.push(`endpoint ${endpoint}: remove the parallel limit, no model uses it any more`);
+    droppedLimits.push(endpoint);
   }
-  const addedStarter = [];
-  if (!catalog.tiers.has(DEFAULT_TIER) && finalTiers.has(DEFAULT_TIER)) addedStarter.push("medium");
-  const starterAgents = {};
-  if (!catalog.entries.has(GENERAL_AGENT)) {
-    addedStarter.push("general");
-    starterAgents[GENERAL_AGENT] = { tools: starter.generalTools, timeout };
-    summary.push(`add the general agent (${timeout} seconds)`);
-  }
-  if (!catalog.entries.has(FALLBACK_AGENT)) {
-    addedStarter.push("fallback");
-    starterAgents[FALLBACK_AGENT] = { tools: starter.fallbackTools, timeout };
-    summary.push(`add the fallback agent (${timeout} seconds)`);
-  }
+  const hasTier = (name) => own2.tiers.get(name) === true;
+  const hasLimit = (endpoint) => typeof own2.limits.get(endpoint) === "number";
   const original = text ?? "";
   const first = createSplicer(original);
   const edits = [];
-  for (const [name, tier] of setTiers) if (catalog.tiers.has(name)) edits.push(...replaceTier(first.doc, name, tier));
-  edits.push(...deleteEntries(first, ["models", "tiers"], unsetTiers));
-  const keptLimits = [...catalog.limits.keys()].filter((e) => !removedLimits.includes(e));
-  if (removedLimits.length > 0) {
-    edits.push(...keptLimits.length === 0 ? deleteEntries(first, [], ["endpoints"]) : deleteEntries(first, ["endpoints"], removedLimits));
+  for (const [name, tier] of setTiers) if (hasTier(name)) edits.push(...replaceTier(first.doc, name, tier));
+  const goneTiers = [...unsetTiers.filter((t) => own2.tiers.has(t)), ...[...setTiers.keys()].filter((t) => own2.tiers.get(t) === false)];
+  const blockRoot = (0, import_yaml3.isMap)(first.doc.contents) && first.doc.contents.flow !== true;
+  if (blockRoot && goneTiers.length > 0 && [...own2.tiers.keys()].every((t) => goneTiers.includes(t))) {
+    const models = first.doc.get("models", true);
+    const onlyTiers = (0, import_yaml3.isMap)(models) && models.items.length === 1;
+    edits.push(...onlyTiers ? deleteEntries(first, [], ["models"]) : deleteEntries(first, ["models"], ["tiers"]));
+  } else {
+    edits.push(...deleteEntries(first, ["models", "tiers"], goneTiers));
+  }
+  const goneLimits = [...clearedLimits, ...droppedLimits, ...[...setLimits.keys()].filter((e) => own2.limits.has(e) && !hasLimit(e))].filter((e) => own2.limits.has(e));
+  const keptLimits = [...own2.limits.keys()].filter((e) => !goneLimits.includes(e));
+  if (goneLimits.length > 0) {
+    edits.push(...keptLimits.length === 0 && blockRoot ? deleteEntries(first, [], ["endpoints"]) : deleteEntries(first, ["endpoints"], goneLimits));
   }
   for (const [endpoint, parallel] of setLimits) {
-    if (keptLimits.includes(endpoint)) edits.push(replaceScalar(first.doc, ["endpoints", endpoint, "parallel"], parallel));
+    if (hasLimit(endpoint)) edits.push(replaceScalar(first.doc, ["endpoints", endpoint, "parallel"], parallel));
   }
   const second = edits.length === 0 ? first : createSplicer(applyEdits(original, edits));
-  spliceTiers(second, Object.fromEntries([...setTiers].filter(([name]) => !catalog.tiers.has(name))));
-  spliceAgents(second, starterAgents);
-  spliceLimits(second, Object.fromEntries([...setLimits].filter(([e]) => !keptLimits.includes(e))));
+  const newTiers = Object.fromEntries([...setTiers].filter(([name]) => !hasTier(name)));
+  for (const tier of unsetTiers) if (scope === "project" && inheritsTier(tier)) newTiers[tier] = null;
+  spliceTiers(second, newTiers);
+  const newLimits = Object.fromEntries([...setLimits].filter(([e]) => !hasLimit(e)));
+  for (const endpoint of clearedLimits) if (scope === "project" && inheritsLimit(endpoint)) newLimits[endpoint] = null;
+  spliceLimits(second, newLimits);
   const next = second.result();
   let invalid;
   if (!noMediumTier) {
+    const strictBefore = loadsStrictly(l);
     try {
-      const result = parseCatalog(next, agentFile);
-      const tiersMatch = result.tiers.size === finalTiers.size && [...finalTiers].every(([n, t]) => {
-        const got = result.tiers.get(n);
-        return got !== void 0 && sameTier(got, t);
-      });
-      const limitsMatch = result.limits.size === finalLimits.size && [...finalLimits].every(([e, n]) => result.limits.get(e) === n);
-      if (!tiersMatch || !limitsMatch) invalid = "the edited agent file does not hold the previewed tiers and limits; edit it by hand";
+      if (scope === "project") {
+        const result = catalogOf(l, l.globalText, next, false);
+        if (!sameTiers(result.tiers, finalTiers) || !sameLimits(result.limits, finalLimits)) invalid = MISMATCH;
+        if (invalid === void 0 && strictBefore) strictCatalogOf(l, l.globalText, next);
+      } else {
+        const result = catalogOf(l, next, null, false);
+        if (!sameTiers(result.tiers, finalTiers) || !sameLimits(numericLimits(next), finalLimits)) invalid = MISMATCH;
+        if (invalid === void 0 && view.project !== null) {
+          if (strictBefore) strictCatalogOf(l, next, l.projectText);
+          else catalogOf(l, next, l.projectText, true);
+        }
+      }
     } catch (err) {
       if (!(err instanceof LoadError)) throw err;
       invalid = err.message;
     }
   }
-  const fingerprint = sha256(
-    JSON.stringify({
-      file: text,
-      changes,
-      starter: { host: starter.host, timeout, generalTools: starter.generalTools, fallbackTools: starter.fallbackTools }
-    })
-  );
+  const overridden = { tiers: [], limits: [] };
+  if (scope === "global") {
+    const named = view.projectNamed;
+    overridden.tiers = [...setTiers.keys(), ...unsetTiers].filter((t) => named.tiers.has(t));
+    overridden.limits = [...setLimits.keys(), ...clearedLimits].filter((e) => named.limits.has(e));
+  }
+  const fingerprint = sha256(JSON.stringify({ file: text, other, changes, scope, host: starter.host }));
   return {
     agentFile,
+    scope,
     fileExists: text !== null,
     changes,
     refusals,
     droppedLimits,
-    addedStarter,
+    overridden,
     text: next,
-    diff: unifiedDiff(text, next),
+    diff: next === original ? "" : unifiedDiff(text, next, scope === "global" ? agentFile : AGENT_FILE),
     summary,
-    nothingToChange: text !== null && next === text,
+    nothingToChange: next === original,
     ...invalid !== void 0 ? { invalid } : {},
     fingerprint
   };
+}
+var MISMATCH = "the edited agent file does not hold the previewed tiers and limits; edit it by hand";
+function sameTiers(got, want) {
+  return got.size === want.size && [...want].every(([n, t]) => {
+    const tier = got.get(n);
+    return tier !== void 0 && sameTier(tier, t);
+  });
+}
+function sameLimits(got, want) {
+  return got.size === want.size && [...want].every(([e, n]) => got.get(e) === n);
 }
 function rangeOf(node2) {
   const range = node2?.range;
@@ -30018,6 +30286,8 @@ function deleteEntries(s, mapKeys, keys) {
   const keyStart = (pair) => rangeOf(pair.key)[0];
   const valueEnd = (pair) => rangeOf(pair.value)?.[1] ?? rangeOf(pair.key)[1];
   if (map2.flow !== true) return [...removed].map(([at, key]) => deleteBlockEntry(text, keyStart(items[at]), key));
+  const mapRange = rangeOf(map2);
+  if (removed.size === items.length && mapRange !== void 0) return [{ start: mapRange[0], end: mapRange[1], text: "{}" }];
   const edits = [];
   for (let first = 0; first < items.length; first++) {
     if (!removed.has(first)) continue;
@@ -30067,10 +30337,11 @@ function deleteBlockEntry(text, keyStart, key) {
 }
 function spliceLimits(s, limits) {
   if (Object.keys(limits).length === 0) return;
-  const entries = Object.fromEntries(Object.entries(limits).map(([e, n]) => [e, { parallel: n }]));
+  const entries = Object.fromEntries(Object.entries(limits).map(([e, n]) => [e, n === null ? null : { parallel: n }]));
   if (s.insertInline(["endpoints"], entries)) return;
   const at = s.mapAt(["endpoints"]);
-  const lines = (indent) => Object.entries(limits).map(([e, n]) => `${indent}${yamlKey(e)}:
+  const lines = (indent) => Object.entries(limits).map(([e, n]) => n === null ? `${indent}${yamlKey(e)}:
+` : `${indent}${yamlKey(e)}:
 ${indent}  parallel: ${n}
 `).join("");
   if (at !== void 0) s.insert(at.end, lines(at.indent));
@@ -30082,7 +30353,7 @@ function splitLines(text) {
   if (text === "") return [];
   return (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
 }
-function unifiedDiff(before, after, context = 2) {
+function unifiedDiff(before, after, label, context = 2) {
   if (before === after) return "";
   const a = splitLines(before ?? "");
   const b = splitLines(after);
@@ -30113,7 +30384,7 @@ function unifiedDiff(before, after, context = 2) {
     if (last !== void 0 && from <= last[1]) last[1] = Math.max(last[1], to);
     else hunks.push([from, to]);
   });
-  const out = [`--- ${before === null ? "/dev/null" : AGENT_FILE}`, `+++ ${AGENT_FILE}`];
+  const out = [`--- ${before === null ? "/dev/null" : label}`, `+++ ${label}`];
   for (const [from, to] of hunks) {
     const preceding = ops.slice(0, from);
     const hunk = ops.slice(from, to);
@@ -30126,7 +30397,12 @@ function unifiedDiff(before, after, context = 2) {
   }
   return out.join("\n") + "\n";
 }
-function writeAtomic2(file2, text) {
+function writeAtomic2(requested, text) {
+  let file2 = requested;
+  try {
+    file2 = realpathSync2(requested);
+  } catch {
+  }
   const dir = path5.dirname(file2);
   mkdirSync3(dir, { recursive: true });
   const tmp = path5.join(dir, `.${path5.basename(file2)}.${process.pid}.${randomBytes3(12).toString("hex")}.tmp`);
@@ -30223,7 +30499,7 @@ var SetupService = class {
     const host = this.host;
     return { host, models: await this.listModels(host) };
   }
-  /** The agent file's state, with each tier marked listed or not when the host lists its models. */
+  /** The project's state over both layers, with each tier marked listed or not when the host lists its models. */
   async show() {
     const host = this.host;
     let listedModels;
@@ -30263,13 +30539,13 @@ var SetupService = class {
     }
     return { host, results };
   }
-  /** What applying the change set would write; nothing is written. */
-  preview(changes) {
-    return previewChanges(this.projectRoot, changes, this.starter());
+  /** What applying the change set to the file of the scope would write; nothing is written. */
+  preview(changes, scope = "project") {
+    return previewChanges(this.projectRoot, changes, this.starter(), scope);
   }
-  /** Writes a change set exactly as previewed; refuses when the file or the change set moved since. */
-  apply(changes, fingerprint) {
-    return applyChanges(this.projectRoot, changes, fingerprint, this.starter());
+  /** Writes a change set exactly as previewed; refuses when the files, the change set or the scope moved since. */
+  apply(changes, fingerprint, scope = "project") {
+    return applyChanges(this.projectRoot, changes, fingerprint, this.starter(), scope);
   }
   async listModels(host) {
     const problem = this.kernel.prerequisites(host)?.();
@@ -30284,16 +30560,9 @@ var SetupService = class {
       throw new SetupServiceError("listing_failed", err instanceof Error ? err.message : String(err));
     }
   }
+  /** Guided setup writes tiers and limits only, so the host is all it needs. */
   starter() {
-    const host = this.host;
-    const tools = this.kernel.starterTools(host);
-    if (tools === void 0) {
-      throw new SetupServiceError(
-        "no_starter_tools",
-        `the child driver of the host "${host}" offers no starter tools, so setup cannot write the agent entries`
-      );
-    }
-    return { host, timeout: DEFAULT_SETUP_TIMEOUT, generalTools: tools.general, fallbackTools: tools.fallback };
+    return { host: this.host };
   }
 };
 
@@ -30304,8 +30573,8 @@ var USAGE = `usage:
   subzero config models [--host <host>]
   subzero config show [--host <host>]
   subzero config check [--host <host>] <model>:<thinking>...
-  subzero config preview [--host <host>] ${CHANGE_FLAGS}
-  subzero config apply --expect <fingerprint> [--host <host>] ${CHANGE_FLAGS}
+  subzero config preview [--host <host>] [--scope global|project] ${CHANGE_FLAGS}
+  subzero config apply --expect <fingerprint> [--host <host>] [--scope global|project] ${CHANGE_FLAGS}
   subzero run [--agent <agent>] <brief...>
   subzero tasks
   subzero attach <task id>
@@ -30434,6 +30703,11 @@ function nonEmptyArg(flag, arg) {
   if (arg.trim() === "") throw new ConfigUsageError(`${flag} needs a non-empty name`);
   return arg;
 }
+function parseScope(value) {
+  if (value === void 0) return "project";
+  if (value !== "global" && value !== "project") throw new ConfigUsageError(`--scope must be global or project (got "${value}")`);
+  return value;
+}
 function parseChanges(values) {
   const changes = [];
   for (const arg of values.tier ?? []) {
@@ -30454,6 +30728,7 @@ function parseChanges(values) {
 var HOST_OPTION = { host: { type: "string" } };
 var CHANGE_OPTIONS = {
   ...HOST_OPTION,
+  scope: { type: "string" },
   tier: { type: "string", multiple: true },
   unset: { type: "string", multiple: true },
   limit: { type: "string", multiple: true },
@@ -30500,7 +30775,7 @@ async function config2(service, args, io, options) {
       }
       case "preview": {
         const { values } = parse3(CHANGE_OPTIONS, false);
-        const { text: _text, ...preview } = setup(values.host).preview(parseChanges(values));
+        const { text: _text, ...preview } = setup(values.host).preview(parseChanges(values), parseScope(values.scope));
         return ok(io, preview);
       }
       case "apply": {
@@ -30508,7 +30783,7 @@ async function config2(service, args, io, options) {
         if (values.expect === void 0 || values.expect === "") {
           throw new ConfigUsageError("config apply needs --expect <fingerprint> from config preview");
         }
-        const { text: _text, ...applied } = setup(values.host).apply(parseChanges(values), values.expect);
+        const { text: _text, ...applied } = setup(values.host).apply(parseChanges(values), values.expect, parseScope(values.scope));
         return ok(io, applied);
       }
       default:

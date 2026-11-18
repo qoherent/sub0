@@ -1,6 +1,6 @@
 ---
 name: init
-description: Set up or change the models this project's subzero tiers run on, in .agents/subzero.yaml. Run it yourself with /subzero:init for guided setup, or /subzero:init <model> for the quick starter entries.
+description: Set up or change the models subzero's tiers run on, for every project (~/.agents/subzero.yaml) or only this one (.agents/subzero.yaml). Run it yourself with /subzero:init for guided setup, or /subzero:init <model> for the quick starter entries, which write this project's file only.
 argument-hint: "[<model> [--host pi] [--timeout seconds] [--thinking level]]"
 disable-model-invocation: true
 allowed-tools:
@@ -27,7 +27,7 @@ If the arguments above are not empty, run exactly this command, with the user's 
 SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" init $ARGUMENTS
 ```
 
-The arguments are `<model>` (for pi, a `provider/model` name such as `local/qwen`) and, optionally, `--host <host>` (default `pi`), `--timeout <seconds>` and `--thinking <level>`. Show the command's output to the user unchanged, whether it succeeded or failed. If it reports that something is missing, such as Node 22 or pi, relay that message and stop.
+`init <model>` writes the project file (`.agents/subzero.yaml`) only, never the global file. The arguments are `<model>` (for pi, a `provider/model` name such as `local/qwen`) and, optionally, `--host <host>` (default `pi`), `--timeout <seconds>` and `--thinking <level>`. Show the command's output to the user unchanged, whether it succeeded or failed. If it reports that something is missing, such as Node 22 or pi, relay that message and stop.
 
 ## Without a model: guided setup
 
@@ -47,8 +47,10 @@ If the arguments above are empty, run the guided setup.
    | show | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config show` |
    | models | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config models` |
    | check | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config check <model>:<thinking>`, once per model, with the Bash tool's timeout set to 180000 ms, because a cold local model can take two minutes to answer. |
-   | preview | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config preview <changes>` |
-   | apply | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config apply --expect <fingerprint> <changes>` with exactly the changes you previewed. |
+   | preview | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config preview --scope <scope> <changes>` |
+   | apply | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config apply --scope <scope> --expect <fingerprint> <changes>` with exactly the changes you previewed. |
+
+   `<scope>` is `global` for every project or `project` for this one, the answer to the guide's scope question. Pass the same `--scope` to preview and apply: an apply with a different scope than its preview is refused as a stale preview. `show` takes no scope.
 
    `<changes>` is any mix of these flags:
    - `--tier <tier>=<model>:<thinking>`, for example `--tier medium=ollama/qwen2.5-coder:7b:medium`; the thinking level is always last;
@@ -56,6 +58,6 @@ If the arguments above are empty, run the guided setup.
    - `--limit <endpoint>=<n>`;
    - `--no-limit <endpoint>`.
 
-3. After a write that created the file, or added or removed a tier, tell the user to start a new Claude Code session. Claude's routing text is built once per session, so the new tiers route only from the next session.
+3. After a write that created the file, or added or removed a tier, tell the user to start a new Claude Code session. Claude's routing text is built once per session, so the new tiers route only from the next session. A write of the global file also needs a new session in every other open project.
 
 If a command is denied or fails, stop and tell the user. Never fall back to editing the file.
