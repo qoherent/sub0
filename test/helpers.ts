@@ -14,21 +14,21 @@ export function tempDir(prefix = 'subzero-test-'): string {
   return realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 }
 
-/** Writes a general file and points SUBZERO_GENERAL_CONFIG at it until the test ends; returns its path. */
-export function useGeneralConfig(yaml: string): string {
-  const file = path.join(tempDir('subzero-general-'), 'subzero.yaml');
+/** Writes a global file and points SUBZERO_GLOBAL_CONFIG at it until the test ends; returns its path. */
+export function useGlobalConfig(yaml: string): string {
+  const file = path.join(tempDir('subzero-global-'), 'subzero.yaml');
   writeFileSync(file, yaml);
-  const previous = process.env.SUBZERO_GENERAL_CONFIG;
-  process.env.SUBZERO_GENERAL_CONFIG = file;
+  const previous = process.env.SUBZERO_GLOBAL_CONFIG;
+  process.env.SUBZERO_GLOBAL_CONFIG = file;
   onTestFinished(() => {
-    if (previous === undefined) delete process.env.SUBZERO_GENERAL_CONFIG;
-    else process.env.SUBZERO_GENERAL_CONFIG = previous;
+    if (previous === undefined) delete process.env.SUBZERO_GLOBAL_CONFIG;
+    else process.env.SUBZERO_GLOBAL_CONFIG = previous;
   });
   return file;
 }
 
-/** A general file with a medium tier on the host pi, for the tests of a project with no file of its own. */
-export const GENERAL_MEDIUM_YAML = 'models:\n  tiers:\n    medium: { host: pi, model: local/general-medium, thinking: low }\n';
+/** A global file with a medium tier on the host pi, for the tests of a project with no file of its own. */
+export const GLOBAL_MEDIUM_YAML = 'models:\n  tiers:\n    medium: { host: pi, model: local/global-medium, thinking: low }\n';
 
 export const DEFAULT_YAML = `
 skills:

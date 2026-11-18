@@ -1,7 +1,7 @@
 # Configuring subzero
 
 subzero reads one file per project, `.agents/subzero.yaml`, and can read a
-general file, `~/.agents/subzero.yaml`, under it. The files say which models the
+global file, `~/.agents/subzero.yaml`, under it. The files say which models the
 children run on, which agents you can ask for by name, and how routing behaves.
 This page is the full reference for both, for version `0.1.0-preview.1`. The
 README has the short path: install, then run `/subzero:init` in Claude Code or
@@ -25,17 +25,17 @@ manifests, endpoint connection fields). Those parts are not built; see
 - A missing, unreadable or malformed file, or any invalid entry, is a load error.
   It fails the whole load and starts no task; the error names the file it comes
   from, the entry and the problem. A project with no file is the exception when
-  the [general file](#the-general-file-one-setup-for-every-project) gives it a
+  the [global file](#the-global-file-one-setup-for-every-project) gives it a
   `medium` tier.
 - The folder `.agents/subzero/` next to it is subzero's own store (task records,
   the task index and child sessions). It is created owner-only and ignores
   itself in git. Do not put skills or configuration in it.
 
-A project with no agent file and no `medium` tier in the general file is not an
+A project with no agent file and no `medium` tier in the global file is not an
 error for the plugin: the hooks do nothing, no routing text is added and every
-subagent runs on Claude. With a `medium` tier in the general file, subzero is on
+subagent runs on Claude. With a `medium` tier in the global file, subzero is on
 in that project; see
-[the general file](#the-general-file-one-setup-for-every-project).
+[the global file](#the-global-file-one-setup-for-every-project).
 
 ## A complete example
 
@@ -74,7 +74,7 @@ agents:
 ```
 
 The top-level keys are `enabled`, `skills`, `endpoints`, `models`, `routing` and
-`agents`. After merging with the general file, the configuration must contain
+`agents`. After merging with the global file, the configuration must contain
 the `medium` tier. The `general` and `fallback` agents are required too, but a
 project that does not define them gets built-in ones (see
 [Built-in agents](#built-in-agents)).
@@ -241,9 +241,9 @@ plain "use a subagent" requests. Read
 [what a large tier changes](../README.md#what-configuring-a-large-tier-changes)
 before adding it.
 
-## The general file: one setup for every project
+## The global file: one setup for every project
 
-`~/.agents/subzero.yaml` is the general file. It holds the models you want in
+`~/.agents/subzero.yaml` is the global file. It holds the models you want in
 every project, so you set them up once instead of per project. The project file
 `.agents/subzero.yaml` is read over it and only has to list what differs.
 
@@ -274,8 +274,8 @@ Here the project runs `medium` with its own thinking level, drops `small`, and
 inherits the limit of `local`.
 
 - **Path.** `~/.agents/subzero.yaml`, or the full file path in
-  `SUBZERO_GENERAL_CONFIG` (an empty value counts as unset). A missing file
-  means there is no general layer.
+  `SUBZERO_GLOBAL_CONFIG` (an empty value counts as unset). A missing file
+  means there is no global layer.
 - **Allowed keys.** Only `models.tiers`, `endpoints.<endpoint>.parallel` and
   `routing`. Any other key, such as `agents`, `skills` or `enabled`, is a load
   error that names the file and the key. Agents and skills stay in the project,
@@ -287,16 +287,16 @@ inherits the limit of `local`.
 ### How the two files merge
 
 - **By name.** Tiers merge by tier name, limits by endpoint and routing by key.
-  A project entry replaces the general entry of the same name whole: a project
+  A project entry replaces the global entry of the same name whole: a project
   `medium` replaces the model and the thinking level together, so a model never
   keeps a thinking level chosen for another one. Entries the project does not
   name are inherited.
 - **Removing an inherited entry.** The project writes the tier or limit name
   with nothing after the colon: `large:` under `models.tiers`, or `local:` under
-  `endpoints`. Only the project file accepts this; in the general file it is an
+  `endpoints`. Only the project file accepts this; in the global file it is an
   error. A tier removed this way that an agent still names is the usual load
   error for an agent with an unknown tier.
-- **Unused inherited limits.** A limit from the general file that no model of
+- **Unused inherited limits.** A limit from the global file that no model of
   the project's tiers (or of an agent's `tiers:` overrides) uses is ignored in
   that project. A limit the project writes itself that no model uses is still a
   load error.
@@ -304,9 +304,9 @@ inherits the limit of `local`.
 
 ### When subzero is on in a project
 
-| General file | Project file | Result |
+| Global file | Project file | Result |
 |---|---|---|
-| any | `enabled: false` | Off. The general file is not read. |
+| any | `enabled: false` | Off. The global file is not read. |
 | has a `medium` tier | none | On, with the built-in agents. |
 | has a `medium` tier | valid | On. The project's entries override by name. |
 | no `medium` tier | none | Off, as before. |
@@ -314,7 +314,7 @@ inherits the limit of `local`.
 | no `medium` tier | exists, no `medium` tier | Load error. |
 | any | exists but does not load | Load error naming the file. |
 
-This changes one behavior of earlier previews: a general file with a `medium`
+This changes one behavior of earlier previews: a global file with a `medium`
 tier turns subzero on in every project, with or without a project file. The way
 out in one project is `enabled: false` (next).
 
@@ -326,7 +326,7 @@ enabled: false
 
 in the project's `.agents/subzero.yaml` switches subzero off there, the same as
 a project with no file: no hooks, no routing text, and every subagent runs on
-Claude. It is checked first. The general file is not read, so a broken general
+Claude. It is checked first. The global file is not read, so a broken global
 file cannot fail a project that is off, and the file needs no `medium` tier.
 `enabled: true` is accepted and changes nothing.
 
@@ -346,12 +346,12 @@ names the host.
 
 ### Errors and the session-start text
 
-- Every load error names the file it comes from, the general file or the
-  project's. A broken general file fails the load in every project that is on.
+- Every load error names the file it comes from, the global file or the
+  project's. A broken global file fails the load in every project that is on.
 - When routing is switched off because a file does not load, the session-start
   text says "the config file" and names the file.
 - The session-start routing text (Claude Code) and the tier description are
-  built once per session. After the general file changes, delegation applies at
+  built once per session. After the global file changes, delegation applies at
   once, but start a new session for the routing text. In pi the tier text
   refreshes at once after a guided write.
 
@@ -361,10 +361,10 @@ Run init with no model for guided setup: `/subzero:init` in Claude Code, or
 `/subzero init` in pi. It works the same in both:
 
 - It asks first whether the models are for every project or only this one. Every
-  project writes the general file, and creates it when it is missing. Only this
+  project writes the global file, and creates it when it is missing. Only this
   one writes the project file.
 - It shows what the files hold now, with each tier and limit marked as coming
-  from the general file or from this project, and what it will repair, such as
+  from the global file or from this project, and what it will repair, such as
   a missing `medium` tier. A file that fails to load for another reason is
   refused; fix it by hand or move it aside.
 - It lists the models the child host offers (for pi, what `pi --list-models`
@@ -381,25 +381,25 @@ Run init with no model for guided setup: `/subzero:init` in Claude Code, or
   or whose own limit uses an endpoint you move away from, may fail to load until
   it is fixed.
 - When you answer "every project", the defaults it offers are the tiers and
-  limits that come from the general file. A tier or limit this project
-  overrides is asked as if it were not set in the general file.
+  limits that come from the global file. A tier or limit this project
+  overrides is asked as if it were not set in the global file.
 - It writes tiers and limits only, never agents. The built-in agents cover
   `general` and `fallback`.
 
 After a write that creates a file or adds or removes a tier, start a new
 Claude Code session so the routing text names the new tiers. A write of the
-general file also needs a new session in every other open project. pi refreshes
+global file also needs a new session in every other open project. pi refreshes
 its `subagent` tier text in place in the session that wrote. A change to the
-general file applies to the next delegation at once.
+global file applies to the next delegation at once.
 
 In Claude Code the init skill does its work through `subzero config` commands
 (`models`, `show`, `check`, `preview` and `apply`), which print one JSON
 document each. They are the interface the skill uses, not a reference for
 users. `config apply` writes only with the fingerprint of a matching
 `config preview`. `config preview` and `config apply` take
-`--scope general|project` (default `project`), and apply must repeat the
+`--scope global|project` (default `project`), and apply must repeat the
 preview's scope. `config show` marks each tier and limit as coming from the
-general file or from the project. In pi the same steps are tools that are on
+global file or from the project. In pi the same steps are tools that are on
 only during a `/subzero init` run.
 
 The quick path takes a model and writes only the starter entries:
@@ -413,7 +413,7 @@ a terminal `subzero init <model>` with the same options as in Claude Code.
 `subzero init` with no model in a terminal is a usage error, because guided
 setup needs an agent to run it.
 
-`init <model>` is unchanged by the general file. It writes the project file only, never the general file: it
+`init <model>` is unchanged by the global file. It writes the project file only, never the global file: it
 adds a `medium` tier (with that host, model and thinking), a `general` agent
 with the full tool list and a read-only `fallback` agent, each only when the
 file lacks it. It preserves existing entries and lines, except
@@ -427,7 +427,7 @@ To add `small` or `large` afterwards, run guided init, or add them by hand.
 
 | Variable | Meaning |
 |---|---|
-| `SUBZERO_GENERAL_CONFIG` | The full path of the general file, instead of `~/.agents/subzero.yaml`. An empty value counts as unset. |
+| `SUBZERO_GLOBAL_CONFIG` | The full path of the global file, instead of `~/.agents/subzero.yaml`. An empty value counts as unset. |
 | `SUBZERO_PROJECT_DIR` | The project root. The plugin sets it from `CLAUDE_PROJECT_DIR`. An empty value counts as unset. Set it when you run `subzero` from outside the project. |
 | `SUBZERO_DATA` | Where the plugin keeps its per-session files (the session id and the readiness marker). Defaults to `CLAUDE_PLUGIN_DATA`, then `~/.subzero`. |
 | `SUBZERO_PI` | The pi command to run instead of `pi` on the PATH. |
@@ -437,12 +437,12 @@ login and configuration, so a model that works in `pi` works as a tier.
 
 ## Not supported yet
 
-These appear in design.md but are not read by this preview. The general file
+These appear in design.md but are not read by this preview. The global file
 `~/.agents/subzero.yaml` and `enabled: false` are built; see
-[the general file](#the-general-file-one-setup-for-every-project).
+[the global file](#the-global-file-one-setup-for-every-project).
 
 - **Unknown top-level keys are ignored, not rejected.** In the project file,
-  `version:`, `defaults:` and any other key you add do nothing (the general file
+  `version:`, `defaults:` and any other key you add do nothing (the global file
   rejects them). In particular `defaults.timeout` does
   not give agents a timeout: every agent needs its own.
 - **A personal override file and skill-shipped agents.** No
@@ -475,10 +475,10 @@ These appear in design.md but are not read by this preview. The general file
 
 | Message (start) | Cause and fix |
 |---|---|
-| `agent file is missing` | There is no `.agents/subzero.yaml` under the project root and the general file has no `medium` tier. Run `/subzero:init` in Claude Code or `/subzero init` in pi. |
+| `agent file is missing` | There is no `.agents/subzero.yaml` under the project root and the global file has no `medium` tier. Run `/subzero:init` in Claude Code or `/subzero init` in pi. |
 | `agent file is malformed` | The YAML does not parse, or a top-level section has the wrong type. The message names the file and says where. |
-| `general file is malformed` | The same for `~/.agents/subzero.yaml`. It fails every project that is on. |
-| `the general file holds only` | The general file has a key other than `models.tiers`, `endpoints` and `routing`. The message names the file and the key. |
+| `global file is malformed` | The same for `~/.agents/subzero.yaml`. It fails every project that is on. |
+| `the global file holds only` | The global file has a key other than `models.tiers`, `endpoints` and `routing`. The message names the file and the key. |
 | `subzero is switched off for this project` | The project file says `enabled: false`. Remove it to turn subzero on here. |
 | `the medium tier is required in models.tiers` | The file has no `medium` tier. Add one, or run `init`. |
 | `agent "<name>": description is required` | A named agent has no description. |

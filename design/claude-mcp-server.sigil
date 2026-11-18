@@ -12,7 +12,7 @@
   agent definition, project root, unknown agent error, load error,
   unresolved root error, model endpoint, model tier, routable tier,
       tier error, agent entry, general agent, agent file, off error,
-  general file, enabled switch, merged configuration,
+  global file, enabled switch, merged configuration,
     parallel limit, SUBZERO_PROJECT_DIR,
   fallback agent, tier text, unmatched tier text, agent alias,
 }
@@ -248,9 +248,9 @@ component ClaudeMcpServer {
     the named agent is not configured. A load error of a malformed
     agent file must be returned as a tool error as well, with no task made and
     with no pass-back, while the off error, which a project returns when its
-    agent file is missing and the general file holds no medium tier or when the
+    agent file is missing and the global file holds no medium tier or when the
     enabled switch of its agent file is false, is returned as a tool error with
-    the pass-back. A project whose agent file is missing and whose general file
+    the pass-back. A project whose agent file is missing and whose global file
     holds a medium tier delegates like any other.
 
     An error of the driver registry for a child host with no registered
@@ -390,11 +390,11 @@ component ClaudeMcpServer {
 
     With the model tier small configured, a delegate call with the tier text
     cheapest capable and the agent alias delegate runs the general agent on
-    small. In a project with no agent file and no medium tier in the general
+    small. In a project with no agent file and no medium tier in the global
     file, a delegate call returns the off error with the pass-back and makes no
     task, and in a project whose agent file holds an enabled switch of false it
     does the same. A delegate call in a project with no agent file and a medium
-    tier in the general file runs the general agent on that medium tier, and a
+    tier in the global file runs the general agent on that medium tier, and a
     delegate call with
     no
     tier text runs the general agent on its medium tier even when large is

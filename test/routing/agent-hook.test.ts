@@ -5,7 +5,7 @@ import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decideAgentSpawn, type HookContext, type SpawnInput } from '../../src/routing/routing.js';
 import { removeReadinessMarker, writeReadinessMarker } from '../../src/mcp/parent-session.js';
-import { GENERAL_MEDIUM_YAML, isAlive, tempDir, until, useGeneralConfig } from '../helpers.js';
+import { GLOBAL_MEDIUM_YAML, isAlive, tempDir, until, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const HOOK = path.join(REPO, 'dist', 'agent-hook.js');
@@ -165,22 +165,22 @@ describe('decideAgentSpawn', () => {
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), ctx()).decision).toBe('allow');
   });
 
-  it('denies a generic sonnet spawn toward the general medium when the project has no file', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('denies a generic sonnet spawn toward the global medium when the project has no file', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const out = decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup(undefined).ctx());
     expect(out.decision).toBe('deny');
     if (out.decision === 'deny') expect(out.reason).toContain('tier: "medium"');
   });
 
-  it('covers AE4: allows everything when the project says enabled false, with a general medium or a broken general file', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('covers AE4: allows everything when the project says enabled false, with a global medium or a broken global file', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup('enabled: false\n').ctx()).decision).toBe('allow');
-    useGeneralConfig('agents: [oops\n');
+    useGlobalConfig('agents: [oops\n');
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup('enabled: false\n').ctx()).decision).toBe('allow');
   });
 
-  it('allows everything with a broken general file', () => {
-    useGeneralConfig('agents: [oops\n');
+  it('allows everything with a broken global file', () => {
+    useGlobalConfig('agents: [oops\n');
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup(undefined).ctx()).decision).toBe('allow');
   });
 

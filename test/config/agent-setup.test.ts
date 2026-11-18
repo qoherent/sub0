@@ -14,7 +14,7 @@ import {
   type Change,
   type SetupStarterSpec,
 } from '../../src/config/agent-setup.js';
-import { GENERAL_MEDIUM_YAML, makeProject, tempDir, useGeneralConfig } from '../helpers.js';
+import { GLOBAL_MEDIUM_YAML, makeProject, tempDir, useGlobalConfig } from '../helpers.js';
 
 /** Loads a project as the hooks do: the built-in general and fallback fill what the file leaves out. */
 const loadAgentFile = (root: string) => loadCatalog(root, { starterAgents: PLACEHOLDER_STARTER_AGENTS });
@@ -675,114 +675,114 @@ function makeProjectAt(root: string, text: string): void {
   cpSync(path.join(makeProject(text), '.agents'), path.join(root, '.agents'), { recursive: true });
 }
 
-/** Points the general file at a path that may not exist yet, until the test ends. */
-function generalAt(file: string): string {
-  const previous = process.env.SUBZERO_GENERAL_CONFIG;
-  process.env.SUBZERO_GENERAL_CONFIG = file;
+/** Points the global file at a path that may not exist yet, until the test ends. */
+function globalAt(file: string): string {
+  const previous = process.env.SUBZERO_GLOBAL_CONFIG;
+  process.env.SUBZERO_GLOBAL_CONFIG = file;
   onTestFinished(() => {
-    if (previous === undefined) delete process.env.SUBZERO_GENERAL_CONFIG;
-    else process.env.SUBZERO_GENERAL_CONFIG = previous;
+    if (previous === undefined) delete process.env.SUBZERO_GLOBAL_CONFIG;
+    else process.env.SUBZERO_GLOBAL_CONFIG = previous;
   });
   return file;
 }
 
-const GENERAL_FULL = `endpoints:
+const GLOBAL_FULL = `endpoints:
   local:
     parallel: 2
 models:
   tiers:
-    medium: { host: pi, model: local/general-medium, thinking: low }
-    small: { host: pi, model: local/general-small, thinking: off }
-    large: { host: pi, model: cloud/general-large, thinking: high }
+    medium: { host: pi, model: local/global-medium, thinking: low }
+    small: { host: pi, model: local/global-small, thinking: off }
+    large: { host: pi, model: cloud/global-large, thinking: high }
 `;
 
 const setMedium: Change = { op: 'setTier', tier: 'medium', model: 'local/new-medium', thinking: 'high' };
 
 describe('AgentSetup scopes', () => {
-  it('refuses a project-scope preview and apply when the project file is the general file, and still writes it at general scope', () => {
+  it('refuses a project-scope preview and apply when the project file is the global file, and still writes it at global scope', () => {
     const root = tempDir('subzero-home-');
-    const shared = generalAt(fileOf(root));
+    const shared = globalAt(fileOf(root));
     mkdirSync(path.dirname(shared));
-    writeFileSync(shared, GENERAL_FULL);
+    writeFileSync(shared, GLOBAL_FULL);
     const project = previewChanges(root, [setMedium], STARTER, 'project');
-    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the general file; run guided init with the every-project choice/) }]);
+    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the global file; run guided init with the every-project choice/) }]);
     expect(project.nothingToChange).toBe(true);
     expect(() => applyChanges(root, [setMedium], project.fingerprint, STARTER, 'project')).toThrow(SetupRefusedError);
-    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_FULL);
+    expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_FULL);
 
-    const general = previewChanges(root, [setMedium], STARTER, 'general');
-    expect(general.refusals).toEqual([]);
-    expect(applyChanges(root, [setMedium], general.fingerprint, STARTER, 'general').written).toBe(true);
-    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_FULL.replace('local/general-medium, thinking: low', 'local/new-medium, thinking: high'));
+    const global = previewChanges(root, [setMedium], STARTER, 'global');
+    expect(global.refusals).toEqual([]);
+    expect(applyChanges(root, [setMedium], global.fingerprint, STARTER, 'global').written).toBe(true);
+    expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_FULL.replace('local/global-medium, thinking: low', 'local/new-medium, thinking: high'));
   });
 
-  it('writes through a symlinked general file, leaving the link in place and the target holding the new text', () => {
+  it('writes through a symlinked global file, leaving the link in place and the target holding the new text', () => {
     const dir = tempDir('subzero-dotfiles-');
     const target = path.join(dir, 'real.yaml');
-    writeFileSync(target, GENERAL_FULL);
-    const link = generalAt(path.join(tempDir('subzero-home-'), 'subzero.yaml'));
+    writeFileSync(target, GLOBAL_FULL);
+    const link = globalAt(path.join(tempDir('subzero-home-'), 'subzero.yaml'));
     symlinkSync(target, link);
     const root = makeProject(HAND_WRITTEN);
-    const preview = previewChanges(root, [setMedium], STARTER, 'general');
-    expect(applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'general').written).toBe(true);
+    const preview = previewChanges(root, [setMedium], STARTER, 'global');
+    expect(applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'global').written).toBe(true);
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
-    expect(readFileSync(target, 'utf8')).toBe(GENERAL_FULL.replace('local/general-medium, thinking: low', 'local/new-medium, thinking: high'));
+    expect(readFileSync(target, 'utf8')).toBe(GLOBAL_FULL.replace('local/global-medium, thinking: low', 'local/new-medium, thinking: high'));
     expect(readdirSync(dir)).toEqual(['real.yaml']);
     expect(readdirSync(path.dirname(link))).toEqual(['subzero.yaml']);
   });
 
-  it('covers AE6: a general-scope change to medium lists that this project keeps its own', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('covers AE6: a global-scope change to medium lists that this project keeps its own', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject(HAND_WRITTEN);
-    const preview = previewChanges(root, [setMedium, { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'high' }], STARTER, 'general');
-    expect(preview).toMatchObject({ scope: 'general', refusals: [], overridden: { tiers: ['medium'], limits: [] } });
+    const preview = previewChanges(root, [setMedium, { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'high' }], STARTER, 'global');
+    expect(preview).toMatchObject({ scope: 'global', refusals: [], overridden: { tiers: ['medium'], limits: [] } });
     expect(previewChanges(root, [setMedium], STARTER).overridden).toEqual({ tiers: [], limits: [] });
   });
 
   it('reports a limit this project overrides, and none for a project that names nothing', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const change: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 5 }];
-    expect(previewChanges(makeProject(HAND_WRITTEN), change, STARTER, 'general').overridden).toEqual({ tiers: [], limits: ['local'] });
+    expect(previewChanges(makeProject(HAND_WRITTEN), change, STARTER, 'global').overridden).toEqual({ tiers: [], limits: ['local'] });
     const bare = makeProject(`${AGENTS}`);
-    expect(previewChanges(bare, [setMedium, ...change], STARTER, 'general').overridden).toEqual({ tiers: [], limits: [] });
+    expect(previewChanges(bare, [setMedium, ...change], STARTER, 'global').overridden).toEqual({ tiers: [], limits: [] });
   });
 
-  it('creates the general file and its folder from nothing, and a second preview shows nothing to change', () => {
-    const file = generalAt(path.join(tempDir(), 'home', '.agents', 'subzero.yaml'));
+  it('creates the global file and its folder from nothing, and a second preview shows nothing to change', () => {
+    const file = globalAt(path.join(tempDir(), 'home', '.agents', 'subzero.yaml'));
     const root = tempDir();
     const changes: Change[] = [setMedium, { op: 'setLimit', endpoint: 'local', parallel: 1 }];
-    const preview = previewChanges(root, changes, STARTER, 'general');
+    const preview = previewChanges(root, changes, STARTER, 'global');
     expect(preview).toMatchObject({ agentFile: file, fileExists: false, refusals: [], nothingToChange: false });
     expect(preview.diff).toContain('--- /dev/null');
     expect(preview.text).toContain('medium: { host: pi, model: local/new-medium, thinking: high }');
     expect(existsSync(path.dirname(file))).toBe(false);
 
-    expect(applyChanges(root, changes, preview.fingerprint, STARTER, 'general').written).toBe(true);
+    expect(applyChanges(root, changes, preview.fingerprint, STARTER, 'global').written).toBe(true);
     expect(readFileSync(file, 'utf8')).toBe(preview.text);
     expect(existsSync(fileOf(root))).toBe(false);
     expect(loadAgentFile(root).tiers.get('medium')).toEqual({ host: 'pi', model: 'local/new-medium', thinking: 'high' });
-    expect(previewChanges(root, changes, STARTER, 'general')).toMatchObject({ nothingToChange: true, diff: '', fileExists: true });
+    expect(previewChanges(root, changes, STARTER, 'global')).toMatchObject({ nothingToChange: true, diff: '', fileExists: true });
   });
 
-  it('writes the general file and leaves the project file untouched, and the other way round', () => {
-    const general = useGeneralConfig(GENERAL_FULL);
+  it('writes the global file and leaves the project file untouched, and the other way round', () => {
+    const global = useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(HAND_WRITTEN);
     const change: Change[] = [{ op: 'setTier', tier: 'large', model: 'cloud/other', thinking: 'low' }];
 
-    const g = previewChanges(root, change, STARTER, 'general');
-    applyChanges(root, change, g.fingerprint, STARTER, 'general');
+    const g = previewChanges(root, change, STARTER, 'global');
+    applyChanges(root, change, g.fingerprint, STARTER, 'global');
     expect(read(root)).toBe(HAND_WRITTEN);
-    expect(readFileSync(general, 'utf8')).toBe(GENERAL_FULL.replace('cloud/general-large, thinking: high', 'cloud/other, thinking: low'));
+    expect(readFileSync(global, 'utf8')).toBe(GLOBAL_FULL.replace('cloud/global-large, thinking: high', 'cloud/other, thinking: low'));
 
-    const generalNow = readFileSync(general, 'utf8');
+    const globalNow = readFileSync(global, 'utf8');
     const p = previewChanges(root, [setMedium], STARTER);
     applyChanges(root, [setMedium], p.fingerprint, STARTER);
-    expect(readFileSync(general, 'utf8')).toBe(generalNow);
+    expect(readFileSync(global, 'utf8')).toBe(globalNow);
     expect(read(root)).toContain('medium: { host: pi, model: local/new-medium, thinking: high }');
   });
 
-  it('previews a project-scope change in a project with no file and a general medium as the changed tier only', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('previews a project-scope change in a project with no file and a global medium as the changed tier only', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = tempDir();
     const changes: Change[] = [{ op: 'setTier', tier: 'small', model: 'local/small', thinking: 'low' }];
     const preview = previewChanges(root, changes, STARTER);
@@ -796,13 +796,13 @@ describe('AgentSetup scopes', () => {
   });
 
   it('is nothing to change when the project sets what it inherits', () => {
-    useGeneralConfig(GENERAL_FULL);
-    const same: Change = { op: 'setTier', tier: 'small', model: 'local/general-small', thinking: 'off' };
+    useGlobalConfig(GLOBAL_FULL);
+    const same: Change = { op: 'setTier', tier: 'small', model: 'local/global-small', thinking: 'off' };
     expect(previewChanges(tempDir(), [same], STARTER)).toMatchObject({ nothingToChange: true, diff: '' });
   });
 
   it('writes a limit and a tier on top of a lone-tier project file with a null removal and agents that use inherited tiers', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const text = `models:\n  tiers:\n    large:\nagents:\n  helper:\n    description: h\n    tier: small\n    tools: [read]\n    timeout: 5\n`;
     const root = makeProject(text);
     expect(readSetupState(root, { host: 'pi' })).toMatchObject({ status: 'ok' });
@@ -816,7 +816,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('removes an inherited tier by writing a null entry, and deletes a project-only tier', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const root = tempDir();
     const preview = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER);
     expect(preview.refusals).toEqual([]);
@@ -833,7 +833,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('writes a null entry over a project tier that overrides an inherited one, and a tier over a null entry', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(`models:\n  tiers:\n    large: { host: pi, model: cloud/own, thinking: low }\n    small:\n`);
     const unset = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER);
     expect(unset.text).toBe('models:\n  tiers:\n    small:\n    large:\n');
@@ -844,7 +844,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('removes an inherited limit by writing a null entry, and a project-only limit by deleting it', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const root = tempDir();
     const preview = previewChanges(root, [{ op: 'clearLimit', endpoint: 'local' }], STARTER);
     expect(preview.text).toBe('endpoints:\n  local:\n');
@@ -858,13 +858,13 @@ describe('AgentSetup scopes', () => {
   });
 
   it('keeps an inherited limit working when a project tier moves onto its endpoint, and drops it silently when no model uses it', () => {
-    useGeneralConfig(`${GENERAL_FULL}  # more\n`.replace('local/general-small', 'cloud/general-small'));
+    useGlobalConfig(`${GLOBAL_FULL}  # more\n`.replace('local/global-small', 'cloud/global-small'));
     const root = tempDir();
     // local limit is inherited but only medium uses it; the project moves medium away.
     const away = previewChanges(root, [{ op: 'setTier', tier: 'medium', model: 'cloud/m', thinking: 'low' }], STARTER);
     expect(away).toMatchObject({ refusals: [], droppedLimits: [] });
     expect(away.invalid).toBeUndefined();
-    // and back onto an endpoint the general limit covers.
+    // and back onto an endpoint the global limit covers.
     const moved = makeProject(away.text);
     expect(loadAgentFile(moved).limits.size).toBe(0);
     const comeBack: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/again', thinking: 'low' }];
@@ -877,132 +877,132 @@ describe('AgentSetup scopes', () => {
   it('refuses a change set with no medium in either layer, and counts the inherited medium otherwise', () => {
     const small: Change = { op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' };
     expect(previewChanges(tempDir(), [small], STARTER).refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     expect(previewChanges(tempDir(), [small], STARTER).refusals).toEqual([]);
     expect(previewChanges(tempDir(), [{ op: 'unsetTier', tier: 'medium' }], STARTER).refusals[0]!.message).toMatch(/medium tier cannot be removed/);
   });
 
-  it('refuses a general change with no medium when the project has none, and lets one through when the project has its own', () => {
+  it('refuses a global change with no medium when the project has none, and lets one through when the project has its own', () => {
     const small: Change = { op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' };
-    generalAt(path.join(tempDir(), 'subzero.yaml'));
-    expect(previewChanges(tempDir(), [small], STARTER, 'general').refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
-    expect(previewChanges(makeProject(HAND_WRITTEN), [small], STARTER, 'general').refusals).toEqual([]);
+    globalAt(path.join(tempDir(), 'subzero.yaml'));
+    expect(previewChanges(tempDir(), [small], STARTER, 'global').refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
+    expect(previewChanges(makeProject(HAND_WRITTEN), [small], STARTER, 'global').refusals).toEqual([]);
   });
 
   it('refuses apply with a fingerprint from the other scope', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject(HAND_WRITTEN);
     const asProject = previewChanges(root, [setMedium], STARTER).fingerprint;
-    const asGeneral = previewChanges(root, [setMedium], STARTER, 'general').fingerprint;
-    expect(asProject).not.toBe(asGeneral);
-    expect(() => applyChanges(root, [setMedium], asProject, STARTER, 'general')).toThrow(SetupConflictError);
-    expect(() => applyChanges(root, [setMedium], asGeneral, STARTER)).toThrow(SetupConflictError);
+    const asGlobal = previewChanges(root, [setMedium], STARTER, 'global').fingerprint;
+    expect(asProject).not.toBe(asGlobal);
+    expect(() => applyChanges(root, [setMedium], asProject, STARTER, 'global')).toThrow(SetupConflictError);
+    expect(() => applyChanges(root, [setMedium], asGlobal, STARTER)).toThrow(SetupConflictError);
     expect(read(root)).toBe(HAND_WRITTEN);
   });
 
-  it('refuses apply when the general file changed since a project-scope preview', () => {
-    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('refuses apply when the global file changed since a project-scope preview', () => {
+    const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = tempDir();
     const change: Change[] = [{ op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' }];
     const { fingerprint } = previewChanges(root, change, STARTER);
-    writeFileSync(general, GENERAL_FULL);
+    writeFileSync(global, GLOBAL_FULL);
     expect(() => applyChanges(root, change, fingerprint, STARTER)).toThrow(SetupConflictError);
   });
 
-  it('names the general path when the file system refuses a write there, leaving the file untouched', () => {
-    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('names the global path when the file system refuses a write there, leaving the file untouched', () => {
+    const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = tempDir();
-    const preview = previewChanges(root, [setMedium], STARTER, 'general');
+    const preview = previewChanges(root, [setMedium], STARTER, 'global');
     seam.fail = 'rename';
     let thrown: unknown;
     try {
-      applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'general');
+      applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'global');
     } catch (err) {
       thrown = err;
     }
     seam.fail = undefined;
     expect(thrown).toBeInstanceOf(SetupWriteError);
-    expect(thrown).toMatchObject({ code: 'write_failed', message: `could not write ${general}: EIO (i/o error)` });
-    expect(readFileSync(general, 'utf8')).toBe(GENERAL_MEDIUM_YAML);
-    expect(readdirSync(path.dirname(general))).toEqual(['subzero.yaml']);
+    expect(thrown).toMatchObject({ code: 'write_failed', message: `could not write ${global}: EIO (i/o error)` });
+    expect(readFileSync(global, 'utf8')).toBe(GLOBAL_MEDIUM_YAML);
+    expect(readdirSync(path.dirname(global))).toEqual(['subzero.yaml']);
   });
 
-  it('refuses a general-scope unset of a tier a project agent uses, and leaves the file alone', () => {
-    const general = useGeneralConfig(GENERAL_FULL);
+  it('refuses a global-scope unset of a tier a project agent uses, and leaves the file alone', () => {
+    const global = useGlobalConfig(GLOBAL_FULL);
     const project = `agents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n  reviewer:\n    description: r\n    tiers:\n      large: { model: cloud/r }\n    tools: [read]\n    timeout: 5\n`;
     const root = makeProject(project);
     const unset: Change[] = [{ op: 'unsetTier', tier: 'large' }];
-    const preview = previewChanges(root, unset, STARTER, 'general');
+    const preview = previewChanges(root, unset, STARTER, 'global');
     expect(preview.refusals).toEqual([
       { change: unset[0], agents: ['helper', 'reviewer'], message: expect.stringMatching(/tier "large" cannot be removed: helper, reviewer use it/) },
     ]);
-    expect(() => applyChanges(root, unset, preview.fingerprint, STARTER, 'general')).toThrow(SetupRefusedError);
-    expect(readFileSync(general, 'utf8')).toBe(GENERAL_FULL);
+    expect(() => applyChanges(root, unset, preview.fingerprint, STARTER, 'global')).toThrow(SetupRefusedError);
+    expect(readFileSync(global, 'utf8')).toBe(GLOBAL_FULL);
 
-    const ok = previewChanges(root, [{ op: 'setTier', tier: 'large', model: 'cloud/x', thinking: 'low' }, { op: 'unsetTier', tier: 'small' }], STARTER, 'general');
+    const ok = previewChanges(root, [{ op: 'setTier', tier: 'large', model: 'cloud/x', thinking: 'low' }, { op: 'unsetTier', tier: 'small' }], STARTER, 'global');
     expect(ok.refusals).toEqual([]);
     expect(ok.invalid).toBeUndefined();
   });
 
-  it('does not refuse a general-scope unset of a tier the project defines or removes itself', () => {
-    useGeneralConfig(GENERAL_FULL);
+  it('does not refuse a global-scope unset of a tier the project defines or removes itself', () => {
+    useGlobalConfig(GLOBAL_FULL);
     const own = makeProject(`models:\n  tiers:\n    large: { host: pi, model: cloud/own, thinking: low }\nagents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n`);
-    const preview = previewChanges(own, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'general');
+    const preview = previewChanges(own, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'global');
     expect(preview.refusals).toEqual([]);
     expect(preview.invalid).toBeUndefined();
     expect(preview.overridden).toEqual({ tiers: ['large'], limits: [] });
     expect(preview.text).not.toContain('large');
   });
 
-  it('ignores a project that switches itself off, in the general scope', () => {
-    useGeneralConfig(GENERAL_FULL);
+  it('ignores a project that switches itself off, in the global scope', () => {
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject('enabled: false\n');
-    const preview = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'general');
+    const preview = previewChanges(root, [{ op: 'unsetTier', tier: 'large' }], STARTER, 'global');
     expect(preview.refusals).toEqual([]);
     expect(preview.overridden).toEqual({ tiers: [], limits: [] });
-    expect(readSetupState(root, { scope: 'general' })).toMatchObject({ status: 'ok' });
+    expect(readSetupState(root, { scope: 'global' })).toMatchObject({ status: 'ok' });
     expect(readSetupState(root)).toMatchObject({ status: 'refused', error: expect.stringMatching(/enabled: false/) });
   });
 
-  it('refuses a broken general file in either scope, naming it', () => {
-    const general = useGeneralConfig('agents: {}\n');
-    for (const scope of ['general', 'project'] as const) {
+  it('refuses a broken global file in either scope, naming it', () => {
+    const global = useGlobalConfig('agents: {}\n');
+    for (const scope of ['global', 'project'] as const) {
       const state = readSetupState(tempDir(), { scope });
-      expect(state).toMatchObject({ status: 'refused', error: expect.stringContaining(general) });
+      expect(state).toMatchObject({ status: 'refused', error: expect.stringContaining(global) });
       expect(() => previewChanges(tempDir(), [setMedium], STARTER, scope)).toThrow(LoadError);
     }
   });
 
-  it('refuses a general-scope change that would leave this project own limit unused, and writes nothing', () => {
-    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('refuses a global-scope change that would leave this project own limit unused, and writes nothing', () => {
+    const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject('endpoints:\n  local:\n    parallel: 1\n');
     expect(loadAgentFile(root).limits).toEqual(new Map([['local', 1]]));
     const move: Change[] = [{ op: 'setTier', tier: 'medium', model: 'cloud/m', thinking: 'low' }];
-    const preview = previewChanges(root, move, STARTER, 'general');
+    const preview = previewChanges(root, move, STARTER, 'global');
     expect(preview.invalid).toMatch(/endpoint "local": no model of a tier or of a tier override belongs to it/);
     expect(preview.invalid).toContain(fileOf(root));
-    expect(() => applyChanges(root, move, preview.fingerprint, STARTER, 'general')).toThrow(LoadError);
-    expect(readFileSync(general, 'utf8')).toBe(GENERAL_MEDIUM_YAML);
+    expect(() => applyChanges(root, move, preview.fingerprint, STARTER, 'global')).toThrow(LoadError);
+    expect(readFileSync(global, 'utf8')).toBe(GLOBAL_MEDIUM_YAML);
     expect(read(root)).toBe('endpoints:\n  local:\n    parallel: 1\n');
     expect(loadAgentFile(root).limits).toEqual(new Map([['local', 1]]));
   });
 
-  it('does not newly refuse a general-scope change for a project that already had an unused own limit', () => {
-    const general = useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('does not newly refuse a global-scope change for a project that already had an unused own limit', () => {
+    const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const text = 'endpoints:\n  cloud:\n    parallel: 1\n';
     const root = makeProject(text);
     expect(() => loadAgentFile(root)).toThrow(LoadError);
     const change: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/new-medium', thinking: 'high' }];
-    const preview = previewChanges(root, change, STARTER, 'general');
+    const preview = previewChanges(root, change, STARTER, 'global');
     expect(preview.invalid).toBeUndefined();
     expect(preview.refusals).toEqual([]);
-    expect(applyChanges(root, change, preview.fingerprint, STARTER, 'general').written).toBe(true);
-    expect(readFileSync(general, 'utf8')).toContain('local/new-medium');
+    expect(applyChanges(root, change, preview.fingerprint, STARTER, 'global').written).toBe(true);
+    expect(readFileSync(global, 'utf8')).toContain('local/new-medium');
     expect(read(root)).toBe(text);
   });
 
   it('removes the whole tiers section, and an empty models, when the last block-style tier of a project that inherits medium goes', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const tail = 'routing:\n  hook: true\n';
     const root = makeProject(`${tail}models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n`);
     const unset: Change[] = [{ op: 'unsetTier', tier: 'small' }];
@@ -1020,7 +1020,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('keeps the tiers map when a removal entry for an inherited tier takes the place of the last own tier', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject('models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n');
     const unset: Change[] = [{ op: 'unsetTier', tier: 'small' }];
     const preview = previewChanges(root, unset, STARTER);
@@ -1031,7 +1031,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('removes the whole endpoints section when the last block-style limit goes, so the file loads', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject('endpoints:\n  local:\n    parallel: 1\nrouting:\n  hook: true\n');
     const clear: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
     const preview = previewChanges(root, clear, STARTER);
@@ -1042,7 +1042,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('still removes a last tier or limit from flow-style maps, and one of several', () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const unsetSmall: Change[] = [{ op: 'unsetTier', tier: 'small' }];
     const clearLocal: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
     for (const [text, changes] of [
@@ -1065,7 +1065,7 @@ describe('AgentSetup scopes', () => {
   });
 
   it('writes a removal entry inside a whole-file flow map when its last own tier or limit overrides an inherited one', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const tier = makeProject('{ models: { tiers: { small: { host: pi, model: a/b, thinking: low } } } }\n');
     const unset: Change[] = [{ op: 'unsetTier', tier: 'small' }];
     const tierPreview = previewChanges(tier, unset, STARTER);
@@ -1097,19 +1097,19 @@ describe('AgentSetup scopes', () => {
     const unsetSmall: Change[] = [{ op: 'unsetTier', tier: 'small' }];
     const clearLocal: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
     const tinySmall = '{ host: pi, model: a/b, thinking: low }';
-    const cases: { text: string; changes: Change[]; general: string; tiers: string[]; limits: number }[] = [
+    const cases: { text: string; changes: Change[]; global: string; tiers: string[]; limits: number }[] = [
       // the file of the review: a trailing comma on its own line, inheriting nothing to remove
-      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
-      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
       // the same with an inherited entry, so a removal entry is written back inside the retained map
-      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, general: GENERAL_FULL, tiers: ['medium', 'small', 'large'], limits: 0 },
-      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, general: GENERAL_FULL, tiers: ['medium', 'large'], limits: 1 },
+      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, global: GLOBAL_FULL, tiers: ['medium', 'small', 'large'], limits: 0 },
+      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, global: GLOBAL_FULL, tiers: ['medium', 'large'], limits: 1 },
       // a comment between entries and after the last one
-      { text: `{ models: { tiers: { # note\n  small: ${tinySmall}, # more\n  } } }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
-      { text: `models:\n  tiers: { # note\n    small: ${tinySmall}\n    , }\nrouting: { hook: true }\n`, changes: unsetSmall, general: GENERAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: `{ models: { tiers: { # note\n  small: ${tinySmall}, # more\n  } } }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: `models:\n  tiers: { # note\n    small: ${tinySmall}\n    , }\nrouting: { hook: true }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
     ];
-    for (const { text, changes, general, tiers, limits } of cases) {
-      useGeneralConfig(general);
+    for (const { text, changes, global, tiers, limits } of cases) {
+      useGlobalConfig(global);
       const root = makeProject(text);
       const preview = previewChanges(root, changes, STARTER);
       expect(preview.invalid, text).toBeUndefined();
@@ -1121,95 +1121,95 @@ describe('AgentSetup scopes', () => {
     }
 
     // Bytes outside the emptied container stay as they were.
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject(`# top\nroot: 1\nmodels: { tiers: {\n  small: ${tinySmall}\n  , } }   # keep\nrouting: { hook: true }\n`);
     expect(previewChanges(root, unsetSmall, STARTER).text).toBe('# top\nroot: 1\nrouting: { hook: true }\n');
     const kept = makeProject(`# top\nroot: 1\nmodels:\n  tiers: { # c\n    small: ${tinySmall}\n    , }   # keep\n`);
     expect(previewChanges(kept, unsetSmall, STARTER).text).toBe('# top\nroot: 1\n');
   });
 
-  it('removes the whole general tiers section when the last general tier goes and the project has its own medium', () => {
-    const general = useGeneralConfig('models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n');
+  it('removes the whole global tiers section when the last global tier goes and the project has its own medium', () => {
+    const global = useGlobalConfig('models:\n  tiers:\n    small:\n      host: pi\n      model: local/s\n      thinking: low\n');
     const root = makeProject('models:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: low }\n');
     const unset: Change[] = [{ op: 'unsetTier', tier: 'small' }];
-    const preview = previewChanges(root, unset, STARTER, 'general');
+    const preview = previewChanges(root, unset, STARTER, 'global');
     expect(preview.refusals).toEqual([]);
     expect(preview.invalid).toBeUndefined();
     expect(preview.text).toBe('');
-    applyChanges(root, unset, preview.fingerprint, STARTER, 'general');
-    expect(readFileSync(general, 'utf8')).toBe('');
+    applyChanges(root, unset, preview.fingerprint, STARTER, 'global');
+    expect(readFileSync(global, 'utf8')).toBe('');
     expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium']);
   });
 
-  it('marks each tier and limit as general or project, and names what this project overrides', () => {
-    useGeneralConfig(GENERAL_FULL);
+  it('marks each tier and limit as global or project, and names what this project overrides', () => {
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(`endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n    mine: { host: pi, model: local/mine, thinking: low }\n    large:\n`);
     const state = readSetupState(root, { host: 'pi' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.tiers.map((t) => [t.tier, t.source, t.model])).toEqual([
       ['medium', 'project', 'local/own'],
-      ['small', 'general', 'local/general-small'],
+      ['small', 'global', 'local/global-small'],
       ['mine', 'project', 'local/mine'],
     ]);
     expect(state.limits).toEqual([
-      { endpoint: 'local', parallel: 1, tiers: ['medium', 'small', 'mine'], overrideOnly: false, unused: false, source: 'project', general: { parallel: 2 } },
+      { endpoint: 'local', parallel: 1, tiers: ['medium', 'small', 'mine'], overrideOnly: false, unused: false, source: 'project', global: { parallel: 2 } },
     ]);
     expect(state.overridden).toEqual({ tiers: ['medium', 'large'], limits: ['local'] });
-    // The general file's own value rides on an overridden entry only: not on a general tier, nor on a project-only one.
-    expect(state.tiers.map((t) => [t.tier, t.general])).toEqual([
-      ['medium', { host: 'pi', model: 'local/general-medium', thinking: 'low' }],
+    // The global file's own value rides on an overridden entry only: not on a global tier, nor on a project-only one.
+    expect(state.tiers.map((t) => [t.tier, t.global])).toEqual([
+      ['medium', { host: 'pi', model: 'local/global-medium', thinking: 'low' }],
       ['small', undefined],
       ['mine', undefined],
     ]);
-    expect(state.tiers.filter((t) => t.source === 'general').every((t) => !('general' in t))).toBe(true);
+    expect(state.tiers.filter((t) => t.source === 'global').every((t) => !('global' in t))).toBe(true);
 
     const inheritedOnly = readSetupState(tempDir(), { host: 'pi' });
     if (inheritedOnly.status !== 'no-file') throw new Error(`unexpected ${inheritedOnly.status}`);
-    expect(inheritedOnly.tiers.every((t) => t.source === 'general')).toBe(true);
-    expect(inheritedOnly.limits.map((l) => l.source)).toEqual(['general']);
+    expect(inheritedOnly.tiers.every((t) => t.source === 'global')).toBe(true);
+    expect(inheritedOnly.limits.map((l) => l.source)).toEqual(['global']);
     expect(inheritedOnly.fileFingerprint).toBeNull();
-    expect(inheritedOnly.tiers.some((t) => 'general' in t)).toBe(false);
-    expect(inheritedOnly.limits.some((l) => 'general' in l)).toBe(false);
+    expect(inheritedOnly.tiers.some((t) => 'global' in t)).toBe(false);
+    expect(inheritedOnly.limits.some((l) => 'global' in l)).toBe(false);
   });
 
-  it('reads the general file in the general scope, with the dependents from this project', () => {
-    const general = useGeneralConfig(GENERAL_FULL);
+  it('reads the global file in the global scope, with the dependents from this project', () => {
+    const global = useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(`agents:\n  helper:\n    description: h\n    tier: large\n    tools: [read]\n    timeout: 5\n`);
-    const state = readSetupState(root, { scope: 'general' });
+    const state = readSetupState(root, { scope: 'global' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
-    expect(state.agentFile).toBe(general);
+    expect(state.agentFile).toBe(global);
     expect(state.tiers.map((t) => [t.tier, t.source, t.dependents])).toEqual([
-      ['medium', 'general', []],
-      ['small', 'general', []],
-      ['large', 'general', ['helper']],
+      ['medium', 'global', []],
+      ['small', 'global', []],
+      ['large', 'global', ['helper']],
     ]);
-    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 2, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'general' }]);
+    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 2, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'global' }]);
   });
 
-  it('carries no general value in the general scope, where the listed values are the general file\'s own', () => {
-    useGeneralConfig(GENERAL_FULL);
+  it('carries no global value in the global scope, where the listed values are the global file\'s own', () => {
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(`endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n`);
-    const state = readSetupState(root, { scope: 'general' });
+    const state = readSetupState(root, { scope: 'global' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
-    expect(state.tiers.find((t) => t.tier === 'medium')).toMatchObject({ model: 'local/general-medium', source: 'general' });
-    expect(state.tiers.some((t) => 'general' in t)).toBe(false);
-    expect(state.limits.some((l) => 'general' in l)).toBe(false);
+    expect(state.tiers.find((t) => t.tier === 'medium')).toMatchObject({ model: 'local/global-medium', source: 'global' });
+    expect(state.tiers.some((t) => 'global' in t)).toBe(false);
+    expect(state.limits.some((l) => 'global' in l)).toBe(false);
   });
 
-  it('carries the general value of an overridden tier that the general file holds, and omits it for a tier only this project holds', () => {
-    useGeneralConfig(GENERAL_FULL);
+  it('carries the global value of an overridden tier that the global file holds, and omits it for a tier only this project holds', () => {
+    useGlobalConfig(GLOBAL_FULL);
     const root = makeProject(`models:\n  tiers:\n    small: { host: pi, model: cloud/own-small, thinking: low }\n    extra: { host: pi, model: cloud/e, thinking: low }\n`);
     const state = readSetupState(root, { host: 'pi' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
-    expect(state.tiers.find((t) => t.tier === 'small')).toMatchObject({ model: 'cloud/own-small', source: 'project', general: { host: 'pi', model: 'local/general-small', thinking: 'off' } });
-    expect(state.tiers.find((t) => t.tier === 'extra')).not.toHaveProperty('general');
-    expect(state.tiers.find((t) => t.tier === 'medium')).not.toHaveProperty('general');
+    expect(state.tiers.find((t) => t.tier === 'small')).toMatchObject({ model: 'cloud/own-small', source: 'project', global: { host: 'pi', model: 'local/global-small', thinking: 'off' } });
+    expect(state.tiers.find((t) => t.tier === 'extra')).not.toHaveProperty('global');
+    expect(state.tiers.find((t) => t.tier === 'medium')).not.toHaveProperty('global');
   });
 });
 
 describe('addStarterEntries on top of layered files', () => {
   it('parses a file guided init wrote (a lone tier, a null removal) as layers and adds the starter entries', () => {
-    useGeneralConfig(GENERAL_FULL);
+    useGlobalConfig(GLOBAL_FULL);
     const text = `models:\n  tiers:\n    large:\nagents:\n  helper:\n    description: h\n    tier: small\n    tools: [read]\n    timeout: 5\n`;
     const root = makeProject(text);
     const result = addStarterEntries(root, { host: 'pi', model: 'local/m', thinking: 'low', timeout: 100, generalTools: ['read'], fallbackTools: ['read'] });

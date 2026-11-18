@@ -9,18 +9,18 @@
   `.agents/subzero.yaml` only after you confirm the diff. `init <model>` stays
   as the quick path. The plugin's init skill uses the new `subzero config`
   commands.
-- General config file: `~/.agents/subzero.yaml` (or the path in
-  `SUBZERO_GENERAL_CONFIG`) holds `models.tiers`, endpoint `parallel` limits and
+- Global config file: `~/.agents/subzero.yaml` (or the path in
+  `SUBZERO_GLOBAL_CONFIG`) holds `models.tiers`, endpoint `parallel` limits and
   `routing` for every project. A project's `.agents/subzero.yaml` is read over it
-  and merged by name; a project entry replaces the general one whole, and
+  and merged by name; a project entry replaces the global one whole, and
   `large:` or `local:` with nothing after the colon removes an inherited tier or
-  limit. Any other key in the general file is a load error.
-- Behavior change: a general file with a `medium` tier turns subzero on in every
+  limit. Any other key in the global file is a load error.
+- Behavior change: a global file with a `medium` tier turns subzero on in every
   project, with or without a project file, using built-in `general` and
   `fallback` agents. Put `enabled: false` in a project's `.agents/subzero.yaml`
   to switch subzero off there.
 - Guided init asks first whether the models are for every project or only this
   one, and writes tiers and limits only, never agents. `subzero config preview`
-  and `apply` take `--scope general|project`, and `config show` marks where each
+  and `apply` take `--scope global|project`, and `config show` marks where each
   tier and limit comes from. `init <model>` is unchanged.
-- Load errors name the file they come from, the general file or the project file.
+- Load errors name the file they come from, the global file or the project file.

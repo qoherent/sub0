@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { registerPiExtension } from '../../src/pi-parent/extension.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import { fakePi } from './fake-pi-api.js';
-import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, GENERAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, TIERED_YAML, useGeneralConfig } from '../helpers.js';
+import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, GLOBAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, TIERED_YAML, useGlobalConfig } from '../helpers.js';
 
 describe('pi extension', () => {
   it('registers subagent and starts a background child on the requested tier', async () => {
@@ -24,11 +24,11 @@ describe('pi extension', () => {
   });
 });
 
-describe('pi extension with a general file', () => {
+describe('pi extension with a global file', () => {
   const STARTER = () => ({ general: ['read'], fallback: ['read'] });
 
-  it('describes the tiers and runs subagent on the general medium for a project with no file', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('describes the tiers and runs subagent on the global medium for a project with no file', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = tempDir('subzero-project-');
     const { port, started } = manualPort();
     const fake = fakePi(root);
@@ -43,7 +43,7 @@ describe('pi extension with a general file', () => {
   });
 
   it('keeps the base description and refuses naming enabled: false when the project is switched off', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = makeProject('enabled: false\n');
     const { port, started } = manualPort();
     const fake = fakePi(root);

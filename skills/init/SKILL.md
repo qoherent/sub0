@@ -27,7 +27,7 @@ If the arguments above are not empty, run exactly this command, with the user's 
 SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" init $ARGUMENTS
 ```
 
-`init <model>` writes the project file (`.agents/subzero.yaml`) only, never the general file. The arguments are `<model>` (for pi, a `provider/model` name such as `local/qwen`) and, optionally, `--host <host>` (default `pi`), `--timeout <seconds>` and `--thinking <level>`. Show the command's output to the user unchanged, whether it succeeded or failed. If it reports that something is missing, such as Node 22 or pi, relay that message and stop.
+`init <model>` writes the project file (`.agents/subzero.yaml`) only, never the global file. The arguments are `<model>` (for pi, a `provider/model` name such as `local/qwen`) and, optionally, `--host <host>` (default `pi`), `--timeout <seconds>` and `--thinking <level>`. Show the command's output to the user unchanged, whether it succeeded or failed. If it reports that something is missing, such as Node 22 or pi, relay that message and stop.
 
 ## Without a model: guided setup
 
@@ -50,7 +50,7 @@ If the arguments above are empty, run the guided setup.
    | preview | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config preview --scope <scope> <changes>` |
    | apply | `SUBZERO_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero" config apply --scope <scope> --expect <fingerprint> <changes>` with exactly the changes you previewed. |
 
-   `<scope>` is `general` for every project or `project` for this one, the answer to the guide's scope question. Pass the same `--scope` to preview and apply: an apply with a different scope than its preview is refused as a stale preview. `show` takes no scope.
+   `<scope>` is `global` for every project or `project` for this one, the answer to the guide's scope question. Pass the same `--scope` to preview and apply: an apply with a different scope than its preview is refused as a stale preview. `show` takes no scope.
 
    `<changes>` is any mix of these flags:
    - `--tier <tier>=<model>:<thinking>`, for example `--tier medium=ollama/qwen2.5-coder:7b:medium`; the thinking level is always last;
@@ -58,6 +58,6 @@ If the arguments above are empty, run the guided setup.
    - `--limit <endpoint>=<n>`;
    - `--no-limit <endpoint>`.
 
-3. After a write that created the file, or added or removed a tier, tell the user to start a new Claude Code session. Claude's routing text is built once per session, so the new tiers route only from the next session. A write of the general file also needs a new session in every other open project.
+3. After a write that created the file, or added or removed a tier, tell the user to start a new Claude Code session. Claude's routing text is built once per session, so the new tiers route only from the next session. A write of the global file also needs a new session in every other open project.
 
 If a command is denied or fails, stop and tell the user. Never fall back to editing the file.

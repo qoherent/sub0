@@ -1,7 +1,7 @@
 // @sigil implements design/agent-config.sigil AgentConfig
 //
 // Loads .agents/subzero.yaml under a project root that the caller hands over, layered over
-// the general file ~/.agents/subzero.yaml, resolves an agent entry at one model tier into
+// the global file ~/.agents/subzero.yaml, resolves an agent entry at one model tier into
 // an agent definition, writes the starter entries for `subzero init`, and resolves that
 // project root for DelegationService. Nothing here is cached: every call reads both files
 // again. AgentConfig names no host: the supported hosts and the starter tools of a host
@@ -227,15 +227,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The general file: SUBZERO_GENERAL_CONFIG when set and not empty, else ~/.agents/subzero.yaml. */
-export function generalFile(env: NodeJS.ProcessEnv = process.env): string {
-  const fromEnv = env.SUBZERO_GENERAL_CONFIG;
+/** The global file: SUBZERO_GLOBAL_CONFIG when set and not empty, else ~/.agents/subzero.yaml. */
+export function globalFile(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = env.SUBZERO_GLOBAL_CONFIG;
   return fromEnv !== undefined && fromEnv !== '' ? fromEnv : path.join(os.homedir(), '.agents', 'subzero.yaml');
 }
 
 /**
  * Whether two paths name one file: by real path when both exist, else by resolved path.
- * In a project rooted at the home folder, the project file is the general file.
+ * In a project rooted at the home folder, the project file is the global file.
  */
 export function isSameFile(a: string, b: string): boolean {
   try {
@@ -245,8 +245,8 @@ export function isSameFile(a: string, b: string): boolean {
   }
 }
 
-/** Why a project-scope write is refused when the project file is the general file. */
-export const PROJECT_IS_GENERAL = "this project's file is the general file; run guided init with the every-project choice, or open the tool in a project folder";
+/** Why a project-scope write is refused when the project file is the global file. */
+export const PROJECT_IS_GLOBAL = "this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder";
 
 /** The starter tools of a child host, or undefined when its driver offers none. */
 export type StarterAgents = (host: string) => StarterTools | undefined;
@@ -262,13 +262,13 @@ export interface LoadOptions {
   starterAgents?: StarterAgents;
 }
 
-/** Read both files, layer the agent file over the general file and validate the merge. */
+/** Read both files, layer the agent file over the global file and validate the merge. */
 export function loadCatalog(projectRoot: string, options: LoadOptions = {}): AgentCatalog {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  const general = generalFile();
-  // A project rooted at the home folder: the one file is the general layer, and the project has no file of its own.
-  const projectText = isSameFile(agentFile, general) ? null : readTextOrNull(agentFile);
-  return build(() => readGeneralText(general), projectText, { ...options, agentFile, generalFile: general });
+  const global = globalFile();
+  // A project rooted at the home folder: the one file is the global layer, and the project has no file of its own.
+  const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
+  return build(() => readGlobalText(global), projectText, { ...options, agentFile, globalFile: global });
 }
 
 /** Read and validate the agent file. One invalid entry fails the whole load. */
@@ -297,14 +297,14 @@ export function readTextOrNull(agentFile: string): string | null {
   }
 }
 
-/** The general file's text, or null when there is none. */
-export function readGeneralText(file: string): string | null {
+/** The global file's text, or null when there is none. */
+export function readGlobalText(file: string): string | null {
   try {
     return readFileSync(file, 'utf8');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') return null;
-    throw new LoadError(`general file is unreadable: ${file} (${code ?? String(err)})`);
+    throw new LoadError(`global file is unreadable: ${file} (${code ?? String(err)})`);
   }
 }
 
@@ -318,19 +318,19 @@ export interface ParseOptions {
 export interface BuildOptions extends ParseOptions, LoadOptions {
   /** The project's agent file, which names it in errors and is the base of its skill folders. */
   agentFile: string;
-  /** Names the general file in errors; the resolved general file when absent. */
-  generalFile?: string;
+  /** Names the global file in errors; the resolved global file when absent. */
+  globalFile?: string;
 }
 
 /**
- * Validate the text of a general file and a project agent file as one configuration,
+ * Validate the text of a global file and a project agent file as one configuration,
  * with the load rules delegation uses. A null text is a file that does not exist.
  */
-export function buildCatalog(generalText: string | null, projectText: string | null, options: BuildOptions): AgentCatalog {
-  return build(() => generalText, projectText, options);
+export function buildCatalog(globalText: string | null, projectText: string | null, options: BuildOptions): AgentCatalog {
+  return build(() => globalText, projectText, options);
 }
 
-/** Validate agent file text on its own, as a project with no general file. */
+/** Validate agent file text on its own, as a project with no global file. */
 export function parseCatalog(text: string, agentFile: string, options: ParseOptions = {}): AgentCatalog {
   return build(() => null, text, { ...options, agentFile });
 }
@@ -345,7 +345,7 @@ interface Layer {
   agents: Record<string, unknown>;
 }
 
-const GENERAL_LAYER_KEYS = ['models', 'endpoints', 'routing'];
+const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing'];
 
 /** Run a step on one file's content; a load error that does not name the file gets it. */
 function inFile<T>(file: string, step: () => T): T {
@@ -357,18 +357,18 @@ function inFile<T>(file: string, step: () => T): T {
   }
 }
 
-function build(readGeneral: () => string | null, projectText: string | null, options: BuildOptions): AgentCatalog {
+function build(readGlobal: () => string | null, projectText: string | null, options: BuildOptions): AgentCatalog {
   const { agentFile } = options;
   const project = projectText === null ? null : inFile(agentFile, () => parseLayer(projectText, agentFile, 'project', options));
   if (project !== null && !project.enabled) throw new ProjectDisabledError(agentFile);
-  const generalPath = options.generalFile ?? generalFile();
-  const generalText = readGeneral();
-  const general = generalText === null ? null : inFile(generalPath, () => parseLayer(generalText, generalPath, 'general', options));
+  const globalPath = options.globalFile ?? globalFile();
+  const globalText = readGlobal();
+  const global = globalText === null ? null : inFile(globalPath, () => parseLayer(globalText, globalPath, 'global', options));
 
   const tiers = new Map<string, ModelTier>();
   const limits = new Map<string, number>();
   const inherited = new Set<string>();
-  for (const layer of [general, project]) {
+  for (const layer of [global, project]) {
     if (layer === null) continue;
     for (const [name, tier] of layer.tiers) {
       if (tier === null) tiers.delete(name);
@@ -377,11 +377,11 @@ function build(readGeneral: () => string | null, projectText: string | null, opt
     for (const [endpoint, parallel] of layer.limits) {
       if (parallel === null) limits.delete(endpoint);
       else limits.set(endpoint, parallel);
-      if (layer === general) inherited.add(endpoint);
+      if (layer === global) inherited.add(endpoint);
       else inherited.delete(endpoint);
     }
   }
-  const routing = { ...general?.routing, ...project?.routing };
+  const routing = { ...global?.routing, ...project?.routing };
 
   const entries = new Map<string, AgentEntry>();
   inFile(agentFile, () => {
@@ -438,10 +438,10 @@ function fillBuiltInAgents(entries: Map<string, AgentEntry>, host: string, start
 }
 
 /** The per-file step: syntax, field rules, and the keys this kind of file may hold. */
-function parseLayer(text: string, file: string, kind: 'general' | 'project', options: ParseOptions): Layer {
-  const general = kind === 'general';
+function parseLayer(text: string, file: string, kind: 'global' | 'project', options: ParseOptions): Layer {
+  const global = kind === 'global';
   const allowMissingStarter = options.allowMissingStarter === true;
-  const malformed = (detail: string) => new LoadError(`${general ? 'general' : 'agent'} file is malformed: ${file}: ${detail}`);
+  const malformed = (detail: string) => new LoadError(`${global ? 'global' : 'agent'} file is malformed: ${file}: ${detail}`);
   let parsed: unknown;
   try {
     parsed = parseYaml(text);
@@ -450,10 +450,10 @@ function parseLayer(text: string, file: string, kind: 'general' | 'project', opt
   }
   const doc: unknown = parsed === null ? {} : parsed;
   if (!isRecord(doc)) throw malformed('expected a map');
-  if (general) {
+  if (global) {
     for (const key of Object.keys(doc)) {
-      if (!GENERAL_LAYER_KEYS.includes(key)) {
-        throw new LoadError(`the general file holds only models.tiers, endpoints and routing, not "${key}": ${file}`);
+      if (!GLOBAL_LAYER_KEYS.includes(key)) {
+        throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "${key}": ${file}`);
       }
     }
   }
@@ -466,9 +466,9 @@ function parseLayer(text: string, file: string, kind: 'general' | 'project', opt
   if (!isRecord(endpointsMap)) throw malformed('"endpoints" must be a map');
   if (doc.models !== undefined && !(allowMissingStarter && doc.models === null) && !isRecord(doc.models)) throw malformed('"models" must be a map');
   const modelsMap = (doc.models ?? {}) as Record<string, unknown>;
-  if (general) {
+  if (global) {
     for (const key of Object.keys(modelsMap)) {
-      if (key !== 'tiers') throw new LoadError(`the general file holds only models.tiers, endpoints and routing, not "models.${key}": ${file}`);
+      if (key !== 'tiers') throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "models.${key}": ${file}`);
     }
   }
   if (modelsMap.tiers !== undefined && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
@@ -486,13 +486,13 @@ function parseLayer(text: string, file: string, kind: 'general' | 'project', opt
   const limits = new Map<string, number | null>();
   for (const [endpoint, entry] of Object.entries(endpointsMap)) {
     if (entry === null) {
-      if (general) throw removal(`endpoint "${endpoint}"`);
+      if (global) throw removal(`endpoint "${endpoint}"`);
       limits.set(endpoint, null);
       continue;
     }
-    if (general && isRecord(entry)) {
+    if (global && isRecord(entry)) {
       for (const key of Object.keys(entry)) {
-        if (key !== 'parallel') throw new LoadError(`the general file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file}`);
+        if (key !== 'parallel') throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file}`);
       }
     }
     const parallel = isRecord(entry) ? entry.parallel : undefined;
@@ -505,7 +505,7 @@ function parseLayer(text: string, file: string, kind: 'general' | 'project', opt
   const tiers = new Map<string, ModelTier | null>();
   for (const [name, raw] of Object.entries((modelsMap.tiers ?? {}) as Record<string, unknown>)) {
     if (raw === null) {
-      if (general) throw removal(`tier "${name}"`);
+      if (global) throw removal(`tier "${name}"`);
       tiers.set(name, null);
     } else {
       tiers.set(name, validateTier(name, raw));
@@ -728,13 +728,13 @@ export interface StarterResult {
  */
 export function addStarterEntries(projectRoot: string, spec: StarterSpec): StarterResult {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  if (isSameFile(agentFile, generalFile())) throw new LoadError(PROJECT_IS_GENERAL);
+  if (isSameFile(agentFile, globalFile())) throw new LoadError(PROJECT_IS_GLOBAL);
   const text = readTextOrNull(agentFile);
 
   // Parsed as the layer it is, so a file guided init wrote (a lone tier, a null removal) is never refused by a single-file rule.
-  const general = generalFile();
-  const generalText = readGeneralText(general);
-  if (text !== null) buildCatalog(generalText, text, { agentFile, generalFile: general, allowMissingStarter: true });
+  const global = globalFile();
+  const globalText = readGlobalText(global);
+  if (text !== null) buildCatalog(globalText, text, { agentFile, globalFile: global, allowMissingStarter: true });
 
   const original = text ?? '';
   const doc: Document = parseDocument(original);
@@ -762,7 +762,7 @@ export function addStarterEntries(projectRoot: string, spec: StarterSpec): Start
     spliceAgents(splicer, agents);
   }
   const next = splicer.result();
-  buildCatalog(generalText, next, { agentFile, generalFile: general }); // entries that do not load are never written
+  buildCatalog(globalText, next, { agentFile, globalFile: global }); // entries that do not load are never written
   mkdirSync(path.dirname(agentFile), { recursive: true });
   writeFileSync(agentFile, next);
   return result;

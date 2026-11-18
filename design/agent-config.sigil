@@ -15,16 +15,16 @@ component AgentConfig {
     The configuration is two layers. The *agent file*, .agents/subzero.yaml
     under the project root, holds a *skills map* from skill name to
     *skill folder*, an *endpoints map*, a *models map* and an *agents map* of
-    named agents, each an *agent entry*. The *general file*,
-    ~/.agents/subzero.yaml, whose path SUBZERO_GENERAL_CONFIG may name instead,
+    named agents, each an *agent entry*. The *global file*,
+    ~/.agents/subzero.yaml, whose path SUBZERO_GLOBAL_CONFIG may name instead,
     holds only a models map with its tiers map, an endpoints map and the
     *routing block* that the agent file may also hold.
 
-    The *merged configuration* is the general file and the agent file combined
+    The *merged configuration* is the global file and the agent file combined
     by name: each model tier by its name, each endpoints entry by its model
     endpoint and each key of the routing block by its key. An entry of the agent
-    file replaces the entry of the general file with that name whole, and an
-    entry that the agent file does not name is taken from the general file. An
+    file replaces the entry of the global file with that name whole, and an
+    entry that the agent file does not name is taken from the global file. An
     agent file that names a model tier or an endpoints entry with no value
     holds a *removal entry*, which takes it out of the merged configuration.
     The agent file may hold an *enabled switch*, and an agent file whose enabled
@@ -110,7 +110,7 @@ component AgentConfig {
     parallel limit of a model endpoint, or remove it. It changes each
     model tier and each model endpoint at most once, and each model tier that
     it sets runs on the child host that its caller gives. A *setup scope* says
-    which file a change set is for: the general file or the agent file, which
+    which file a change set is for: the global file or the agent file, which
     is the default. The
     *tier dependents* of a model tier are the agent entries that name it as
     their own tier or hold a tier override for it, the general agent and the
@@ -121,7 +121,7 @@ component AgentConfig {
     it, each parallel limit that the write drops because no model belongs to
     its model endpoint after it, each model tier and endpoints entry that the
     change set sets or removes and that the agent file of this project
-    overrides, when the setup scope is the general file, and a diff and a
+    overrides, when the setup scope is the global file, and a diff and a
     summary of the write. It also holds a
     *preview fingerprint* over the text of the file of its setup scope or its
     absence, the change set, the setup scope and the child host of the write.
@@ -133,8 +133,8 @@ component AgentConfig {
 
   logic {
     On load, read the agent file first. When it holds an enabled switch that is
-    false, stop with the *off error* before the general file is read. Otherwise
-    read the general file when it exists, validate the general file as a layer
+    false, stop with the *off error* before the global file is read. Otherwise
+    read the global file when it exists, validate the global file as a layer
     that holds only a models map with its tiers map, an endpoints map and the
     routing block, validate the agent file as a layer against the
     *agent-file schema*, which consists only of the validation rules in this
@@ -144,11 +144,11 @@ component AgentConfig {
     the general agent, the fallback agent and the medium tier included, and every
     tier override. Resolve each skill folder relative to the directory of the
     agent file into an absolute path. Take out of the merged configuration an
-    endpoints entry that only the general file holds and no model belongs to,
+    endpoints entry that only the global file holds and no model belongs to,
     without an error. The flow returns each agent entry, each model tier and the
     names of each routable tier to its caller, or stops with the off error when
     the agent file is missing and the merged configuration holds no medium tier,
-    or with a *load error* that names the file it comes from, the general file
+    or with a *load error* that names the file it comes from, the global file
     or the agent file, and the offending entry or model tier, or names the
     missing general agent, fallback agent or medium tier, or says that a
     file is unreadable or malformed. One invalid model tier or agent entry
@@ -171,10 +171,10 @@ component AgentConfig {
     to no model tier, and any other tier text is an *unmatched tier text*,
     which the caller treats as an empty tier text.
 
-    On a read of the *setup state*, read the general file and the agent file
+    On a read of the *setup state*, read the global file and the agent file
     and return each model tier of the merged configuration with its tier
     dependents, its model endpoint and the file it comes from, and, when the
-    agent file overrides it, the general file's model tier, and each endpoints
+    agent file overrides it, the global file's model tier, and each endpoints
     entry with the model tiers whose model belongs to it, the file it comes
     from, whether only a tier override uses it and whether no model uses it,
     which ends the flow. A missing agent file gives a setup state with no file.
@@ -192,9 +192,9 @@ component AgentConfig {
     model of a model tier or of a tier override belongs to, and refuse the
     whole change set when no medium tier would remain in the merged
     configuration. When the setup scope is the agent file, removing a model
-    tier or a parallel limit that only the general file holds writes a removal
-    entry. When the setup scope is the general file, also build the merged
-    configuration of this project with the changed general file, refuse a
+    tier or a parallel limit that only the global file holds writes a removal
+    entry. When the setup scope is the global file, also build the merged
+    configuration of this project with the changed global file, refuse a
     change after which that merged configuration would lack a model tier that
     an agent entry of this project names as its own tier or holds a tier
     override for, and keep a load error of this project that the change would
@@ -235,16 +235,16 @@ component AgentConfig {
     lists only the tier names, the routable tiers or the routing block needs no
     tool list, and fills each built-in agent without one.
 
-    The general file must be rejected with a load error that names the general
+    The global file must be rejected with a load error that names the global
     file and the key when it holds anything other than a models map with a
     tiers map, an endpoints map or the routing block, the enabled switch, a
-    skills map and an agents map included. An empty SUBZERO_GENERAL_CONFIG
-    counts as unset, a missing general file is no layer and no error, and an
-    unreadable or malformed general file must be rejected with a load error that
+    skills map and an agents map included. An empty SUBZERO_GLOBAL_CONFIG
+    counts as unset, a missing global file is no layer and no error, and an
+    unreadable or malformed global file must be rejected with a load error that
     names it. A removal entry is accepted only in the agent file. The enabled
     switch must be true or false.
 
-    Each load error must name the file it comes from, the general file or the
+    Each load error must name the file it comes from, the global file or the
     agent file. An agent entry whose own tier or tier override names a model
     tier is checked against the model tiers of the merged configuration, and a
     model tier that a removal entry took out is not configured. A general agent
@@ -265,7 +265,7 @@ component AgentConfig {
     An endpoints entry must be rejected with a load error that names its
     model endpoint when its parallel limit is not a positive whole number, or
     when no model of a model tier or of a tier override belongs to its
-    model endpoint, except an endpoints entry that only the general file holds,
+    model endpoint, except an endpoints entry that only the global file holds,
     which is ignored in a project whose models do not use it.
 
     An agent entry must be rejected, naming it, when it has no timeout or its
@@ -292,11 +292,11 @@ component AgentConfig {
     any agent runs at a model tier is decided by the child host of its resolved
     agent definition.
 
-    AgentConfig must read the agent file and the general file again on each call
+    AgentConfig must read the agent file and the global file again on each call
     that asks for an agent definition or a model tier, so that an edit to
     either is picked up without a restart.
 
-    AgentConfig must read only the agent file and the general file, and it
+    AgentConfig must read only the agent file and the global file, and it
     writes the agent file only to add the starter entries and the file of the
     setup scope only to apply a change set, as its interface describes. It
     must not read a personal override file, write *subzero.lock* or ask for
@@ -313,11 +313,11 @@ component AgentConfig {
     above it, remove several entries of one map in the same write, and set a
     parallel limit, creating the endpoints map when it is missing, and for the
     agent file write a removal entry for a model tier or an endpoints entry
-    that only the general file holds. AgentConfig must
+    that only the global file holds. AgentConfig must
     write nothing when the file exists and does not
     load for a reason other than missing starter entries or, for a change set,
     a missing medium tier or a parallel limit that no model uses, and must write
-    only entries that load. A write for the general file creates its folder
+    only entries that load. A write for the global file creates its folder
     when it is missing.
 
     An apply must write a change set only with the preview fingerprint of its
@@ -348,7 +348,7 @@ component AgentConfig {
     names SUBZERO_PROJECT_DIR as the setting to fix, and must resolve again on
     the next call.
 
-    AgentConfig finds the general file at the path that SUBZERO_GENERAL_CONFIG
+    AgentConfig finds the global file at the path that SUBZERO_GLOBAL_CONFIG
     names, or else in the home folder of the user, and no test reads the home
     folder of a developer.
   }
@@ -379,29 +379,29 @@ component AgentConfig {
     the built-in fallback agent. When the caller gives no starter tools, a
     call that returns an agent definition gives a load error that names the
     missing agent. An agent file with no model tier named medium, when the
-    general file holds none either, gives a load error that names the
+    global file holds none either, gives a load error that names the
     medium tier.
 
-    A general file with the model tiers small, medium and large and a parallel
+    A global file with the model tiers small, medium and large and a parallel
     limit for the model endpoint local, and an agent file with only a medium
     tier and a parallel limit for local, give a merged configuration with the
-    agent file's medium tier whole, the general small and large, and the agent
-    file's parallel limit for local. With a general file that holds a medium
+    agent file's medium tier whole, the global small and large, and the agent
+    file's parallel limit for local. With a global file that holds a medium
     tier and no agent file, the project is on, and the general agent resolves
     to a built-in agent on the medium tier with the tool list for a general
     agent from the starter tools that the caller gives and a timeout of 1200
     seconds, and the fallback agent to a built-in agent whose tool list only
-    reads. With a general file that holds
+    reads. With a global file that holds
     no medium tier and no agent file, the project is off with the off error.
     An agent file that holds only an enabled switch of false is off with the
-    off error, whether or not a general file exists, and a broken general file
+    off error, whether or not a global file exists, and a broken global file
     does not reach it.
 
-    A general file that holds an agents map gives a load error that names the
-    general file and the agents key, in every project that is on. A removal
+    A global file that holds an agents map gives a load error that names the
+    global file and the agents key, in every project that is on. A removal
     entry for large in the agent file takes large out of the merged
     configuration, and an agent entry whose own tier is large then gives a load
-    error that names the agent file. A general parallel limit for a model
+    error that names the agent file. A global parallel limit for a model
     endpoint that no model tier of the project uses is ignored in that project.
 
     A model tier large with the child host claude, when only pi is a
@@ -457,15 +457,15 @@ component AgentConfig {
     the agent file loads. An apply whose write the file system refuses returns
     the write error and leaves the file as it was.
 
-    A change set for the general file that sets the medium tier, in a project
+    A change set for the global file that sets the medium tier, in a project
     whose agent file holds its own medium tier, gives a setup preview that
     lists that medium tier as overridden by this project. A change set for the
-    general file that removes large is refused when an agent entry of this
+    global file that removes large is refused when an agent entry of this
     project names large, and is not refused when the agent file of this project
     holds its own large. A change set for the agent file that sets only small,
-    in a project with no agent file and a general file that holds a medium
+    in a project with no agent file and a global file that holds a medium
     tier, writes only the tier small and no agent entry. A change set for the
-    agent file that removes a model tier that only the general file holds
+    agent file that removes a model tier that only the global file holds
     writes a removal entry for it.
   }
 
@@ -532,7 +532,7 @@ component AgentConfig {
     tier or agent entry, the missing general agent, fallback agent or medium
     tier, or says that a file is unreadable or malformed, so that a front end
     can show it. Return the off error, which says whether the agent file is
-    missing and the general file holds no medium tier or the enabled switch of
+    missing and the global file holds no medium tier or the enabled switch of
     the agent file is false, so that every caller treats the project as off and
     no subagent runs on a model that no file names.
 
@@ -574,14 +574,14 @@ component AgentConfig {
     The tier word and the tier text mapping live here and not in a
     parent adapter, so that the Claude Code parent host and the pi parent host
     map a request the same way. A project with no agent file and no medium tier
-    in the general file gets the off error, which says to run subzero init, so
+    in the global file gets the off error, which says to run subzero init, so
     that no subagent runs on a model that no file names.
 
-    The general file lets a person set the model tiers once for every project,
+    The global file lets a person set the model tiers once for every project,
     and the agent file lists only what differs, so an entry of the agent file
-    replaces the general entry whole and a model never keeps a thinking level
+    replaces the global entry whole and a model never keeps a thinking level
     chosen for another model. The agent file is read first so that a project
-    that switches itself off never depends on the general file, and the general
+    that switches itself off never depends on the global file, and the global
     file holds no agent and no skill so that a file in a home folder cannot give
     every repository a tool list or a skill folder. The built-in agents mean a
     guided setup writes only the model tiers and limits that a person chose.

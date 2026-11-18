@@ -7,7 +7,7 @@ import type { ChildDriver, ModelCheckRequest, ModelCheckResult } from '../../src
 import { Kernel } from '../../src/kernel/kernel.js';
 import { PI_HOST } from '../../src/pi/driver.js';
 import { SetupService, SetupServiceError } from '../../src/service/setup-service.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useGlobalConfig } from '../helpers.js';
 
 const piModel = (provider: string, id: string) => ({
   id,
@@ -144,26 +144,26 @@ describe('SetupService.show', () => {
   });
 
   it('shows both layers with a source on every tier and limit, and the entries this project overrides', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML.replace('medium: {', 'large: { host: pi, model: cloud/l, thinking: high }\n    medium: {'));
+    useGlobalConfig(GLOBAL_MEDIUM_YAML.replace('medium: {', 'large: { host: pi, model: cloud/l, thinking: high }\n    medium: {'));
     const { service } = fakePiService(makeProject(DEFAULT_YAML));
     const shown = await service.show();
     if (shown.state.status === 'refused') throw new Error('unexpected refused state');
     expect(shown.state.tiers.map((t) => [t.tier, t.source])).toEqual([
-      ['large', 'general'],
+      ['large', 'global'],
       ['medium', 'project'],
       ['small', 'project'],
       ['cloud', 'project'],
     ]);
     expect(shown.state.limits.map((l) => [l.endpoint, l.source])).toEqual([['local', 'project']]);
     expect(shown.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
-    // The general file's own medium rides on the overridden tier; a tier only one layer holds carries none.
-    expect(shown.state.tiers.map((t) => [t.tier, t.general])).toEqual([
+    // The global file's own medium rides on the overridden tier; a tier only one layer holds carries none.
+    expect(shown.state.tiers.map((t) => [t.tier, t.global])).toEqual([
       ['large', undefined],
-      ['medium', { host: 'pi', model: 'local/general-medium', thinking: 'low' }],
+      ['medium', { host: 'pi', model: 'local/global-medium', thinking: 'low' }],
       ['small', undefined],
       ['cloud', undefined],
     ]);
-    expect(shown.state.limits.map((l) => l.general)).toEqual([undefined]);
+    expect(shown.state.limits.map((l) => l.global)).toEqual([undefined]);
   });
 
   it('reports no file for a project without an agent file', async () => {
@@ -277,17 +277,17 @@ describe('SetupService.preview and apply', () => {
     expect(service.apply(changes, preview.fingerprint).written).toBe(true);
   });
 
-  it('takes the scope: the general file is previewed and written, the project file left alone', () => {
-    const general = path.join(tempDir(), '.agents', 'subzero.yaml');
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', general);
+  it('takes the scope: the global file is previewed and written, the project file left alone', () => {
+    const global = path.join(tempDir(), '.agents', 'subzero.yaml');
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', global);
     const root = makeProject(DEFAULT_YAML);
     const service = new SetupService({ kernel: kernelWith({}), projectRoot: root });
     const changes = [{ op: 'setTier' as const, tier: 'medium', model: 'local/everywhere', thinking: 'low' as const }];
-    const preview = service.preview(changes, 'general');
-    expect(preview).toMatchObject({ scope: 'general', agentFile: general, fileExists: false, overridden: { tiers: ['medium'], limits: [] } });
+    const preview = service.preview(changes, 'global');
+    expect(preview).toMatchObject({ scope: 'global', agentFile: global, fileExists: false, overridden: { tiers: ['medium'], limits: [] } });
     expect(() => service.apply(changes, preview.fingerprint)).toThrow(SetupConflictError);
-    expect(service.apply(changes, preview.fingerprint, 'general').written).toBe(true);
-    expect(readFileSync(general, 'utf8')).toBe('models:\n  tiers:\n    medium: { host: pi, model: local/everywhere, thinking: low }\n');
+    expect(service.apply(changes, preview.fingerprint, 'global').written).toBe(true);
+    expect(readFileSync(global, 'utf8')).toBe('models:\n  tiers:\n    medium: { host: pi, model: local/everywhere, thinking: low }\n');
     expect(readFileSync(path.join(root, '.agents', 'subzero.yaml'), 'utf8')).toBe(DEFAULT_YAML);
   });
 

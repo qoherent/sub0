@@ -10,7 +10,7 @@
   model tier, tier error, agent file, timeout, fallback agent,
   working directory, medium tier, setup state, change set, setup preview,
   preview fingerprint, change set error, stale preview error, write error,
-  refused change, setup scope, merged configuration, off error, general file,
+  refused change, setup scope, merged configuration, off error, global file,
   enabled switch, built-in agent,
 }
 @design/task-store.sigil from TaskStore import {
@@ -116,7 +116,7 @@ component DelegationService {
     setup state it asks whether the chosen models are for every project or
     only this one, which gives the setup scope of its preview and apply, and
     before the confirmation it says which model tier or limit of the change
-    set this project overrides when the setup scope is the general file. After the
+    set this project overrides when the setup scope is the global file. After the
     stale preview error of an apply it previews the change set again, and
     after any other setup refusal of an apply it ends the init, writing
     nothing.
@@ -439,13 +439,13 @@ component DelegationService {
     gives the instruction to wait for them. A task
     ended by a session cancel gives the stop notice and no completion notice.
 
-    A delegation in a project with no agent file and a general file that holds
+    A delegation in a project with no agent file and a global file that holds
     a medium tier runs the general agent as a built-in agent on the medium
     tier, with the starter tools of the child driver. A delegation in a project
-    with no agent file and no medium tier in the general file returns the off
+    with no agent file and no medium tier in the global file returns the off
     error and makes no task, and says to run subzero init. A delegation in a
     project whose agent file holds an enabled switch of false returns the off
-    error and makes no task, whatever the general file holds.
+    error and makes no task, whatever the global file holds.
 
     A shutdown while a child run ignores its cancel past the deadline records
     that task as cancelled, and its task record does not stay running.

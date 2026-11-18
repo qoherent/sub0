@@ -54,8 +54,8 @@ const USAGE = `usage:
   subzero config models [--host <host>]
   subzero config show [--host <host>]
   subzero config check [--host <host>] <model>:<thinking>...
-  subzero config preview [--host <host>] [--scope general|project] ${CHANGE_FLAGS}
-  subzero config apply --expect <fingerprint> [--host <host>] [--scope general|project] ${CHANGE_FLAGS}
+  subzero config preview [--host <host>] [--scope global|project] ${CHANGE_FLAGS}
+  subzero config apply --expect <fingerprint> [--host <host>] [--scope global|project] ${CHANGE_FLAGS}
   subzero run [--agent <agent>] <brief...>
   subzero tasks
   subzero attach <task id>
@@ -220,7 +220,7 @@ function nonEmptyArg(flag: string, arg: string): string {
 /** The file a preview or apply writes: the project's by default. */
 function parseScope(value: string | undefined): SetupScope {
   if (value === undefined) return 'project';
-  if (value !== 'general' && value !== 'project') throw new ConfigUsageError(`--scope must be general or project (got "${value}")`);
+  if (value !== 'global' && value !== 'project') throw new ConfigUsageError(`--scope must be global or project (got "${value}")`);
   return value;
 }
 

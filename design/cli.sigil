@@ -15,7 +15,7 @@
 }
 @design/agent-config.sigil from AgentConfig import {
   change set, preview fingerprint, stale preview error, unresolved root error,
-  write error, refused change, setup scope, general file,
+  write error, refused change, setup scope, global file,
 }
 @design/task-store.sigil from TaskStore import {
     task record, task status, parent session id, start-up sweep,
@@ -119,11 +119,11 @@ component Cli {
     that has the name of the command.
     Split each model from its thinking level at the last colon, because a model
     can hold a colon. Take the setup scope of a preview or an apply from the
-    option scope, which is general or project and project when it is left out,
+    option scope, which is global or project and project when it is left out,
     and treat any other value as a usage error that exits 2 and writes nothing.
     The command show takes no setup scope and prints the setup state of the
     merged configuration with the file each model tier and limit comes from,
-    the general file or the agent file. A preview for the general file also
+    the global file or the agent file. A preview for the global file also
     prints each model tier and limit of the change set that this project
     overrides. Print one
     JSON document on stdout: ok true with the
@@ -223,10 +223,10 @@ component Cli {
     nothing. Subzero config apply on a project whose agent file the file system
     refuses to write prints ok false with the code of the write error, exits 1
     and leaves the agent file as it was. Subzero config preview with the option
-    scope general and a tier previews the general file and creates it when it
+    scope global and a tier previews the global file and creates it when it
     is missing, and the same with the option scope other is a usage error that
-    exits 2. Subzero config show in a project with no agent file and a general
-    file that holds a medium tier prints each model tier with the source general
+    exits 2. Subzero config show in a project with no agent file and a global
+    file that holds a medium tier prints each model tier with the source global
     file.
   }
 

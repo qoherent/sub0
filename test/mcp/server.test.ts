@@ -9,7 +9,7 @@ import { formatListing } from '../../src/mcp/format.js';
 import { createSubzeroServer } from '../../src/mcp/server.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import type { TaskView } from '../../src/store/task-store.js';
-import { FAKE_PI, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, GENERAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, until, useGeneralConfig } from '../helpers.js';
+import { FAKE_PI, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, GLOBAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, until, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 
@@ -428,20 +428,20 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(tools).toEqual(['read,grep,find,ls', 'read,bash,edit,write,grep,find,ls']);
   });
 
-  it('covers AE2: runs delegate on the general medium with only a general file, and lists its tiers', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+  it('covers AE2: runs delegate on the global medium with only a global file, and lists its tiers', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const { root, call, textOf, fake, client } = await connect();
     rmSync(path.join(root, '.agents', 'subzero.yaml'));
     const { tools } = await client.listTools();
-    expect(tools.find((t) => t.name === 'delegate')!.description).toContain('medium → local/general-medium (host pi)');
+    expect(tools.find((t) => t.name === 'delegate')!.description).toContain('medium → local/global-medium (host pi)');
     const reply = textOf(await call('delegate', { tier: 'medium', brief: 'go' }));
     expect(reply.split('\n')[0]).toMatch(/· general:medium · status: completed/);
     const argv = fake.log()[0].argv;
-    expect(argv[argv.indexOf('--model') + 1]).toBe('local/general-medium');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/global-medium');
   });
 
   it('covers AE4: passes back a delegation when the project says enabled false, naming enabled: false', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const { root, call, textOf, service, fake } = await connect();
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
     for (const args of [{ brief: 'go' }, { brief: 'go', tier: 'medium' }]) {
@@ -453,7 +453,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(await service.list()).toEqual([]);
   });
 
-  it('passes back a delegation when there is no project file and no general medium', async () => {
+  it('passes back a delegation when there is no project file and no global medium', async () => {
     const { root, call, textOf } = await connect();
     rmSync(path.join(root, '.agents', 'subzero.yaml'));
     const result: any = await call('delegate', { brief: 'go', tier: 'medium' });
@@ -504,13 +504,13 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(broken).not.toMatch(/→/);
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
     expect(await delegateText()).toBe(broken);
-    useGeneralConfig('agents: [');
+    useGlobalConfig('agents: [');
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), TIERED_YAML);
     expect(await delegateText()).toBe(broken);
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'enabled: false\n');
     expect(await delegateText()).toBe(broken);
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), makeProjectYamlWithoutGeneral());
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     expect(await delegateText()).toMatch(/medium → r9700\/Qwen3.8 \(host pi\)/);
   });
 

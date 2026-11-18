@@ -438,7 +438,7 @@ An agent definition can come from two kinds of places, which are merged in layer
    ```
 
    The user-level file is `~/.agents/subzero.yaml`, mirroring `~/.agents/skills`. **Built** (see
-   [configuration.md](configuration.md#the-general-file-one-setup-for-every-project)): the file holds
+   [configuration.md](configuration.md#the-global-file-one-setup-for-every-project)): the file holds
    only `models.tiers`, endpoint `parallel` limits and `routing`, and the workspace file is merged over
    it by name, a workspace entry replacing the user entry whole, with `enabled: false` in the
    workspace file as the opt-out. Agents and skills stay out of it. **Not built**: endpoint keys and

@@ -2,7 +2,7 @@
 //
 // Reads the tiers, endpoint limits and tier dependents of the layered agent files for
 // guided init, previews a change set to one of them, and applies a previewed change
-// set. The scope picks the file: the project's .agents/subzero.yaml or the general
+// set. The scope picks the file: the project's .agents/subzero.yaml or the global
 // file. Edits splice the existing text, so every line a change does not touch keeps
 // its bytes, and setup never adds an agent. A preview is bound to its apply by a
 // fingerprint over the layers' text, the change set and the scope; the result is
@@ -19,16 +19,16 @@ import {
   createSplicer,
   DEFAULT_TIER,
   flowYaml,
-  generalFile,
+  globalFile,
   isRecord,
   isSameFile,
   isThinkingLevel,
   LoadError,
   modelEndpoint,
   PLACEHOLDER_STARTER_AGENTS,
-  PROJECT_IS_GENERAL,
+  PROJECT_IS_GLOBAL,
   ProjectDisabledError,
-  readGeneralText,
+  readGlobalText,
   readTextOrNull,
   spliceTiers,
   THINKING_LEVELS,
@@ -48,8 +48,8 @@ export interface SetupStarterSpec {
   host: string;
 }
 
-/** The file a change writes: the project's agent file, or the general file every project reads. */
-export type SetupScope = 'general' | 'project';
+/** The file a change writes: the project's agent file, or the global file every project reads. */
+export type SetupScope = 'global' | 'project';
 
 export type Change =
   | { op: 'setTier'; tier: string; model: string; thinking: ThinkingLevel }
@@ -121,8 +121,8 @@ export interface TierState {
   otherHost: boolean;
   /** Whether the caller's model list holds the model; null when no list was given. */
   listed: boolean | null;
-  /** The general file's own value of this tier, present only when this project overrides a tier that file also holds. */
-  general?: ModelTier;
+  /** The global file's own value of this tier, present only when this project overrides a tier that file also holds. */
+  global?: ModelTier;
 }
 
 export interface LimitState {
@@ -136,11 +136,11 @@ export interface LimitState {
   overrideOnly: boolean;
   /** No model belongs to the endpoint: setup drops the limit. */
   unused: boolean;
-  /** The general file's own limit of this endpoint, present only when this project overrides a limit that file also holds. */
-  general?: { parallel: number };
+  /** The global file's own limit of this endpoint, present only when this project overrides a limit that file also holds. */
+  global?: { parallel: number };
 }
 
-/** The tier and endpoint names this project's agent file names, as an override or a removal of the general file's. */
+/** The tier and endpoint names this project's agent file names, as an override or a removal of the global file's. */
 export interface Overridden {
   tiers: string[];
   limits: string[];
@@ -152,12 +152,12 @@ export interface SetupSnapshot {
   scope: SetupScope;
   /** sha256 of that file's text; null when there is no file. */
   fileFingerprint: string | null;
-  /** The project scope lists the merged tiers, the general scope the general file's. */
+  /** The project scope lists the merged tiers, the global scope the global file's. */
   tiers: TierState[];
   limits: LimitState[];
   /** Endpoints that only agent override models use. */
   overrideOnlyEndpoints: string[];
-  /** The tiers and limits of the general file that this project's agent file overrides or removes. */
+  /** The tiers and limits of the global file that this project's agent file overrides or removes. */
   overridden: Overridden;
 }
 
@@ -186,7 +186,7 @@ export interface Refusal {
 }
 
 export interface SetupPreview {
-  /** The file the write goes to: the project's agent file, or the general file. */
+  /** The file the write goes to: the project's agent file, or the global file. */
   agentFile: string;
   scope: SetupScope;
   fileExists: boolean;
@@ -195,7 +195,7 @@ export interface SetupPreview {
   refusals: Refusal[];
   /** Endpoints whose limit is removed because no model uses them after the change. */
   droppedLimits: string[];
-  /** For a general-scope preview, what this project's agent file overrides: the change does not apply here. */
+  /** For a global-scope preview, what this project's agent file overrides: the change does not apply here. */
   overridden: Overridden;
   /** The file text after the write; the refused changes are left out. */
   text: string;
@@ -221,42 +221,42 @@ function sha256(text: string): string {
 /** The two files' text, as they are now. */
 interface Layers {
   agentFile: string;
-  generalPath: string;
-  generalText: string | null;
+  globalPath: string;
+  globalText: string | null;
   projectText: string | null;
 }
 
 function readLayers(projectRoot: string): Layers {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  const generalPath = generalFile();
-  // A project rooted at the home folder: the one file is the general layer, and the project has no file of its own.
-  const projectText = isSameFile(agentFile, generalPath) ? null : readTextOrNull(agentFile);
-  return { agentFile, generalPath, generalText: readGeneralText(generalPath), projectText };
+  const globalPath = globalFile();
+  // A project rooted at the home folder: the one file is the global layer, and the project has no file of its own.
+  const projectText = isSameFile(agentFile, globalPath) ? null : readTextOrNull(agentFile);
+  return { agentFile, globalPath, globalText: readGlobalText(globalPath), projectText };
 }
 
-const targetPath = (l: Layers, scope: SetupScope) => (scope === 'general' ? l.generalPath : l.agentFile);
-const targetText = (l: Layers, scope: SetupScope) => (scope === 'general' ? l.generalText : l.projectText);
+const targetPath = (l: Layers, scope: SetupScope) => (scope === 'global' ? l.globalPath : l.agentFile);
+const targetText = (l: Layers, scope: SetupScope) => (scope === 'global' ? l.globalText : l.projectText);
 
 /** Load text as the layers it is; a missing medium tier, general or fallback is not a problem setup repairs. */
-function catalogOf(l: Layers, general: string | null, project: string | null, lenient: boolean): AgentCatalog {
-  return buildCatalog(general, project, {
+function catalogOf(l: Layers, global: string | null, project: string | null, lenient: boolean): AgentCatalog {
+  return buildCatalog(global, project, {
     agentFile: l.agentFile,
-    generalFile: l.generalPath,
+    globalFile: l.globalPath,
     allowMissingStarter: true,
     ...(lenient ? { allowUnusedLimits: true } : {}),
   });
 }
 
 /** Load text with the rules delegation uses: a null tiers or models map, an unused own limit and a missing medium tier are errors. */
-function strictCatalogOf(l: Layers, general: string | null, project: string | null): AgentCatalog {
-  return buildCatalog(general, project, { agentFile: l.agentFile, generalFile: l.generalPath, starterAgents: PLACEHOLDER_STARTER_AGENTS });
+function strictCatalogOf(l: Layers, global: string | null, project: string | null): AgentCatalog {
+  return buildCatalog(global, project, { agentFile: l.agentFile, globalFile: l.globalPath, starterAgents: PLACEHOLDER_STARTER_AGENTS });
 }
 
 /** Whether the files as they are now load with the rules delegation uses. A project with no file has nothing to be broken already. */
 function loadsStrictly(l: Layers): boolean {
   if (l.projectText === null) return true;
   try {
-    strictCatalogOf(l, l.generalText, l.projectText);
+    strictCatalogOf(l, l.globalText, l.projectText);
     return true;
   } catch (err) {
     if (err instanceof LoadError) return false;
@@ -297,38 +297,38 @@ function numericLimits(text: string | null): Map<string, number> {
 
 /** What setup sees of the layers at one scope. */
 interface View {
-  /** The tiers the scope lists: the merged ones for the project, the general file's for general. */
+  /** The tiers the scope lists: the merged ones for the project, the global file's for global. */
   tiers: Map<string, ModelTier>;
   /** The limits the scope lists, before any that no model uses is dropped. */
   limits: Map<string, number>;
   /** This project's merged catalog; null when the project has no file or is switched off. */
   project: AgentCatalog | null;
-  /** What the project file names, empty when the project does not read the general file. */
+  /** What the project file names, empty when the project does not read the global file. */
   projectNamed: Named;
   /** The load error setup repairs, when there is one. */
   problem?: string;
 }
 
 /** Load the layers at a scope with the text given. A load error is the file's, for the caller to refuse. */
-function viewOf(l: Layers, scope: SetupScope, general: string | null, project: string | null): View {
+function viewOf(l: Layers, scope: SetupScope, global: string | null, project: string | null): View {
   if (scope === 'project') {
     let problem: string | undefined;
     let catalog: AgentCatalog;
     try {
-      catalog = catalogOf(l, general, project, false);
+      catalog = catalogOf(l, global, project, false);
     } catch (strict) {
       if (!(strict instanceof LoadError)) throw strict;
-      catalog = catalogOf(l, general, project, true);
+      catalog = catalogOf(l, global, project, true);
       problem = strict.message;
     }
     return { tiers: catalog.tiers, limits: catalog.limits, project: catalog, projectNamed: namedIn(project), ...(problem !== undefined ? { problem } : {}) };
   }
-  const own = catalogOf(l, general, null, false);
-  const limits = numericLimits(general);
+  const own = catalogOf(l, global, null, false);
+  const limits = numericLimits(global);
   let merged: AgentCatalog | null = null;
   if (project !== null) {
     try {
-      merged = catalogOf(l, general, project, true);
+      merged = catalogOf(l, global, project, true);
     } catch (err) {
       if (!(err instanceof ProjectDisabledError)) throw err;
     }
@@ -352,21 +352,21 @@ function overrideEndpoints(catalog: AgentCatalog): Set<string> {
   return out;
 }
 
-/** Endpoints that this project's models use beyond the tiers the scope lists: agent overrides, and its own tiers when editing the general file. */
+/** Endpoints that this project's models use beyond the tiers the scope lists: agent overrides, and its own tiers when editing the global file. */
 function extraEndpoints(view: View, scope: SetupScope): Set<string> {
   if (view.project === null) return new Set();
   const out = overrideEndpoints(view.project);
-  if (scope === 'general') {
+  if (scope === 'global') {
     for (const [name, tier] of view.project.tiers) if (view.projectNamed.tiers.get(name) === true) out.add(modelEndpoint(tier.model));
   }
   return out;
 }
 
-/** The tiers and limits of the general file that the project file names. */
-function overriddenIn(general: Named, project: Named): Overridden {
+/** The tiers and limits of the global file that the project file names. */
+function overriddenIn(global: Named, project: Named): Overridden {
   return {
-    tiers: [...general.tiers.keys()].filter((t) => project.tiers.has(t)),
-    limits: [...general.limits.keys()].filter((e) => project.limits.has(e)),
+    tiers: [...global.tiers.keys()].filter((t) => project.tiers.has(t)),
+    limits: [...global.limits.keys()].filter((e) => project.limits.has(e)),
   };
 }
 
@@ -387,22 +387,22 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
   const text = targetText(layers, scope);
   let view: View;
   try {
-    view = viewOf(layers, scope, layers.generalText, layers.projectText);
+    view = viewOf(layers, scope, layers.globalText, layers.projectText);
   } catch (err) {
     if (err instanceof LoadError) return { status: 'refused', agentFile, error: err.message };
     throw err;
   }
   const listed = options.listedModels === undefined ? null : new Set(options.listedModels);
-  const generalNamed = namedIn(layers.generalText);
+  const globalNamed = namedIn(layers.globalText);
   const project = view.project ?? emptyCatalog(layers.agentFile);
-  const fromProject = (own: boolean) => (scope === 'project' && own ? 'project' : 'general');
-  // What the general file holds itself, to tell where this project overrides it; the general scope lists those values already.
-  const generalTiers = scope === 'project' && layers.generalText !== null ? catalogOf(layers, layers.generalText, null, false).tiers : new Map<string, ModelTier>();
-  const generalLimits = scope === 'project' ? numericLimits(layers.generalText) : new Map<string, number>();
+  const fromProject = (own: boolean) => (scope === 'project' && own ? 'project' : 'global');
+  // What the global file holds itself, to tell where this project overrides it; the global scope lists those values already.
+  const globalTiers = scope === 'project' && layers.globalText !== null ? catalogOf(layers, layers.globalText, null, false).tiers : new Map<string, ModelTier>();
+  const globalLimits = scope === 'project' ? numericLimits(layers.globalText) : new Map<string, number>();
 
   const tiers: TierState[] = [...view.tiers].map(([tier, t]) => {
     const own = view.projectNamed.tiers.get(tier) === true;
-    const general = scope === 'project' && own ? generalTiers.get(tier) : undefined;
+    const global = scope === 'project' && own ? globalTiers.get(tier) : undefined;
     return {
       tier,
       host: t.host,
@@ -413,7 +413,7 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
       dependents: dependentsOf(project, tier),
       otherHost: options.host !== undefined && t.host !== options.host,
       listed: listed === null ? null : listed.has(t.model),
-      ...(general !== undefined ? { general: { host: general.host, model: general.model, thinking: general.thinking } } : {}),
+      ...(global !== undefined ? { global: { host: global.host, model: global.model, thinking: global.thinking } } : {}),
     };
   });
   const byOverride = extraEndpoints(view, scope);
@@ -422,7 +422,7 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
     const using = tiers.filter((t) => t.endpoint === endpoint).map((t) => t.tier);
     const overrideOnly = using.length === 0 && byOverride.has(endpoint);
     const own = typeof view.projectNamed.limits.get(endpoint) === 'number';
-    const general = scope === 'project' && own ? generalLimits.get(endpoint) : undefined;
+    const global = scope === 'project' && own ? globalLimits.get(endpoint) : undefined;
     return {
       endpoint,
       parallel,
@@ -430,7 +430,7 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
       tiers: using,
       overrideOnly,
       unused: using.length === 0 && !overrideOnly,
-      ...(general !== undefined ? { general: { parallel: general } } : {}),
+      ...(global !== undefined ? { global: { parallel: global } } : {}),
     };
   });
   const unused = limits.find((l) => l.unused);
@@ -442,7 +442,7 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
     tiers,
     limits,
     overrideOnlyEndpoints: [...byOverride].filter((e) => !tierEndpoints.has(e)),
-    overridden: overriddenIn(generalNamed, view.projectNamed),
+    overridden: overriddenIn(globalNamed, view.projectNamed),
   };
   if (problem !== undefined) return { status: 'repairable', problem, ...snapshot };
   return { status: text === null ? 'no-file' : 'ok', ...snapshot };
@@ -545,7 +545,7 @@ export function applyChanges(
   try {
     writeAtomic(preview.agentFile, preview.text);
   } catch (err) {
-    if (isErrnoException(err)) throw new SetupWriteError(scope === 'general' ? preview.agentFile : path.relative(projectRoot, preview.agentFile), err);
+    if (isErrnoException(err)) throw new SetupWriteError(scope === 'global' ? preview.agentFile : path.relative(projectRoot, preview.agentFile), err);
     throw err;
   }
   return { ...preview, written: true };
@@ -562,28 +562,28 @@ function sameTier(a: ModelTier, b: ModelTier): boolean {
 function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupStarterSpec): SetupPreview {
   const agentFile = targetPath(l, scope);
   const text = targetText(l, scope);
-  if (scope === 'project' && isSameFile(l.agentFile, l.generalPath)) {
-    // Writing the project file would put project-only keys into the general file.
+  if (scope === 'project' && isSameFile(l.agentFile, l.globalPath)) {
+    // Writing the project file would put project-only keys into the global file.
     return {
       agentFile,
       scope,
-      fileExists: l.generalText !== null,
+      fileExists: l.globalText !== null,
       changes,
-      refusals: [{ change: null, message: PROJECT_IS_GENERAL }],
+      refusals: [{ change: null, message: PROJECT_IS_GLOBAL }],
       droppedLimits: [],
       overridden: { tiers: [], limits: [] },
-      text: l.generalText ?? '',
+      text: l.globalText ?? '',
       diff: '',
       summary: [],
       nothingToChange: true,
-      fingerprint: sha256(JSON.stringify({ file: l.generalText, changes, scope, host: starter.host, shared: true })),
+      fingerprint: sha256(JSON.stringify({ file: l.globalText, changes, scope, host: starter.host, shared: true })),
     };
   }
-  const other = scope === 'general' ? l.projectText : l.generalText;
-  const view = viewOf(l, scope, l.generalText, l.projectText);
+  const other = scope === 'global' ? l.projectText : l.globalText;
+  const view = viewOf(l, scope, l.globalText, l.projectText);
   const own = namedIn(text);
-  // The project scope inherits the general file's entries, and writes a removal entry for one it removes.
-  const inherited = scope === 'project' ? namedIn(l.generalText) : namedIn(null);
+  // The project scope inherits the global file's entries, and writes a removal entry for one it removes.
+  const inherited = scope === 'project' ? namedIn(l.globalText) : namedIn(null);
   const inheritsTier = (tier: string) => inherited.tiers.get(tier) === true;
   const inheritsLimit = (endpoint: string) => typeof inherited.limits.get(endpoint) === 'number';
 
@@ -605,8 +605,8 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
       setTiers.set(change.tier, tier);
       finalTiers.set(change.tier, tier);
     } else if (change.op === 'unsetTier') {
-      // Removing a general tier leaves a project that defines or removes the tier itself as it is.
-      const keptByProject = scope === 'general' && view.projectNamed.tiers.has(change.tier);
+      // Removing a global tier leaves a project that defines or removes the tier itself as it is.
+      const keptByProject = scope === 'global' && view.projectNamed.tiers.has(change.tier);
       const agents = keptByProject || view.project === null ? [] : dependentsOf(view.project, change.tier);
       if (change.tier === DEFAULT_TIER) {
         refusals.push({ change, message: 'the medium tier cannot be removed: every agent without its own tier runs on it' });
@@ -625,8 +625,8 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
       }
     }
   }
-  // The project scope counts the inherited medium tier; the general scope the project's own.
-  const noMediumTier = !finalTiers.has(DEFAULT_TIER) && !(scope === 'general' && view.projectNamed.tiers.get(DEFAULT_TIER) === true);
+  // The project scope counts the inherited medium tier; the global scope the project's own.
+  const noMediumTier = !finalTiers.has(DEFAULT_TIER) && !(scope === 'global' && view.projectNamed.tiers.get(DEFAULT_TIER) === true);
   if (noMediumTier) refusals.push({ change: null, message: 'the medium tier is required: choose a model for it' });
 
   // Every limit either file holds, whether or not a model uses it now: a tier that moves onto its endpoint makes an inherited limit count.
@@ -668,7 +668,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   for (const endpoint of allLimits.keys()) {
     if (!finalLimits.has(endpoint) || used.has(endpoint)) continue;
     finalLimits.delete(endpoint);
-    // A limit only the general file holds is ignored where no model uses it, so the project file has nothing to remove.
+    // A limit only the global file holds is ignored where no model uses it, so the project file has nothing to remove.
     if (typeof own.limits.get(endpoint) !== 'number') continue;
     summary.push(`endpoint ${endpoint}: remove the parallel limit, no model uses it any more`);
     droppedLimits.push(endpoint);
@@ -718,9 +718,9 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
     const strictBefore = loadsStrictly(l);
     try {
       if (scope === 'project') {
-        const result = catalogOf(l, l.generalText, next, false);
+        const result = catalogOf(l, l.globalText, next, false);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(result.limits, finalLimits)) invalid = MISMATCH;
-        if (invalid === undefined && strictBefore) strictCatalogOf(l, l.generalText, next);
+        if (invalid === undefined && strictBefore) strictCatalogOf(l, l.globalText, next);
       } else {
         const result = catalogOf(l, next, null, false);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(numericLimits(next), finalLimits)) invalid = MISMATCH;
@@ -737,7 +737,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   }
 
   const overridden: Overridden = { tiers: [], limits: [] };
-  if (scope === 'general') {
+  if (scope === 'global') {
     const named = view.projectNamed;
     overridden.tiers = [...setTiers.keys(), ...unsetTiers].filter((t) => named.tiers.has(t));
     overridden.limits = [...setLimits.keys(), ...clearedLimits].filter((e) => named.limits.has(e));
@@ -753,7 +753,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
     droppedLimits,
     overridden,
     text: next,
-    diff: next === original ? '' : unifiedDiff(text, next, scope === 'general' ? agentFile : AGENT_FILE),
+    diff: next === original ? '' : unifiedDiff(text, next, scope === 'global' ? agentFile : AGENT_FILE),
     summary,
     nothingToChange: next === original,
     ...(invalid !== undefined ? { invalid } : {}),

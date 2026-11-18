@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { getAgent, loadAgentFile } from '../../src/config/agent-config.js';
 import { readParentSessionId } from '../../src/mcp/parent-session.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
-import { FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, fakePiEnv, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
+import { FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, fakePiEnv, piKernel, tempDir, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const EXAMPLE = path.join(REPO, 'examples', 'sigil');
@@ -66,9 +66,9 @@ describe('SigilWiring', () => {
   });
 });
 
-describe('general file only', () => {
-  it('covers AE2: runs one delegation end to end against the fake pi with a general file and no project file', async () => {
-    useGeneralConfig(GENERAL_MEDIUM_YAML);
+describe('global file only', () => {
+  it('covers AE2: runs one delegation end to end against the fake pi with a global file and no project file', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const root = tempDir('subzero-project-');
     const fake = fakePiEnv();
     const svc = new DelegationService({
@@ -79,7 +79,7 @@ describe('general file only', () => {
     const reply = await svc.delegate({ briefText: 'go' }, { wait: true });
     expect(reply).toMatchObject({ kind: 'result', result: { status: 'completed' } });
     const argv = fake.log()[0].argv as string[];
-    expect(argv[argv.indexOf('--model') + 1]).toBe('local/general-medium');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/global-medium');
     expect(argv[argv.indexOf('--tools') + 1]).toBe('read,bash,edit,write,grep,find,ls');
   });
 });
@@ -175,16 +175,16 @@ agents:
     expect(out.hookSpecificOutput.additionalContext).toMatch(/routing is off/i);
   });
 
-  it('AE2: prints the routing text for a project with no file when the general file has a medium tier', () => {
-    const general = path.join(tempDir(), 'subzero.yaml');
-    writeFileSync(general, 'models:\n  tiers:\n    medium: { host: pi, model: local/gm, thinking: low }\n');
-    const prior = process.env.SUBZERO_GENERAL_CONFIG;
-    process.env.SUBZERO_GENERAL_CONFIG = general;
+  it('AE2: prints the routing text for a project with no file when the global file has a medium tier', () => {
+    const global = path.join(tempDir(), 'subzero.yaml');
+    writeFileSync(global, 'models:\n  tiers:\n    medium: { host: pi, model: local/gm, thinking: low }\n');
+    const prior = process.env.SUBZERO_GLOBAL_CONFIG;
+    process.env.SUBZERO_GLOBAL_CONFIG = global;
     try {
       const { stdout } = runHook(tempDir(), undefined);
       expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toContain('model local/gm');
     } finally {
-      process.env.SUBZERO_GENERAL_CONFIG = prior;
+      process.env.SUBZERO_GLOBAL_CONFIG = prior;
     }
   });
 

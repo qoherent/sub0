@@ -7,12 +7,12 @@ import {
   MissingAgentFileError,
   ProjectDisabledError,
   THINKING_LEVELS,
-  generalFile,
+  globalFile,
   loadAgentFile,
   loadCatalog,
   resolveAgent,
 } from '../../src/config/agent-config.js';
-import { tempDir, useGeneralConfig } from '../helpers.js';
+import { tempDir, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const read = (file: string) => (existsSync(path.join(REPO, file)) ? readFileSync(path.join(REPO, file), 'utf8') : '');
@@ -60,7 +60,7 @@ function yamlBlocks(heading: string): string[] {
   return [...sectionOfDoc(heading).matchAll(/```yaml\n([\s\S]*?)\n```/g)].map((match) => match[1]! + '\n');
 }
 
-const GENERAL_SECTION = 'The general file: one setup for every project';
+const GLOBAL_SECTION = 'The global file: one setup for every project';
 
 const MINIMAL = `
 models:
@@ -92,11 +92,11 @@ describe('docs/configuration.md', () => {
     expect(resolveAgent(catalog, undefined)).toMatchObject({ name: 'general', thinking: 'medium' });
   });
 
-  describe('the general file', () => {
-    const [generalYaml, projectYaml, disabledYaml] = yamlBlocks(GENERAL_SECTION);
+  describe('the global file', () => {
+    const [globalYaml, projectYaml, disabledYaml] = yamlBlocks(GLOBAL_SECTION);
 
     it('has an example pair that merges as the page says', () => {
-      useGeneralConfig(generalYaml!);
+      useGlobalConfig(globalYaml!);
       const catalog = loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER });
       // The project's medium replaces model and thinking together, and its `small:` removes the inherited tier.
       expect([...catalog.tiers.keys()]).toEqual(['medium']);
@@ -112,7 +112,7 @@ describe('docs/configuration.md', () => {
     });
 
     it('turns subzero on with no project file, and a project agent replaces the built-in one', () => {
-      useGeneralConfig(generalYaml!);
+      useGlobalConfig(globalYaml!);
       const bare = tempDir('subzero-configdoc-');
       expect([...loadCatalog(bare, { starterAgents: STARTER }).entries.keys()]).toEqual(['general', 'fallback']);
       const own = projectWith('agents:\n  general: { tools: [read], timeout: 9 }\n');
@@ -120,28 +120,28 @@ describe('docs/configuration.md', () => {
       expect(DOC).toMatch(/has a `medium` tier \| none \| On, with the built-in agents/);
     });
 
-    it('is off with no medium tier in the general file and no project file', () => {
-      useGeneralConfig('routing:\n  hook: false\n');
+    it('is off with no medium tier in the global file and no project file', () => {
+      useGlobalConfig('routing:\n  hook: false\n');
       expect(() => loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER })).toThrow(MissingAgentFileError);
       expect(DOC).toMatch(/no `medium` tier \| none \| Off, as before/);
     });
 
-    it('is switched off by enabled: false before the general file is read', () => {
+    it('is switched off by enabled: false before the global file is read', () => {
       expect(disabledYaml).toBe('enabled: false\n');
-      useGeneralConfig('this is: [not valid\n');
+      useGlobalConfig('this is: [not valid\n');
       expect(() => loadCatalog(projectWith(disabledYaml!), { starterAgents: STARTER })).toThrow(ProjectDisabledError);
-      expect(DOC).toMatch(/The general file is not read/);
-      // Without it, the broken general file fails the project, and the error names that file.
-      const path_ = useGeneralConfig('this is: [not valid\n');
-      expect(() => loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER })).toThrow(`general file is malformed: ${path_}`);
+      expect(DOC).toMatch(/The global file is not read/);
+      // Without it, the broken global file fails the project, and the error names that file.
+      const path_ = useGlobalConfig('this is: [not valid\n');
+      expect(() => loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER })).toThrow(`global file is malformed: ${path_}`);
       // A project file with no medium tier anywhere is still a load error.
-      useGeneralConfig('routing:\n  hook: true\n');
+      useGlobalConfig('routing:\n  hook: true\n');
       expect(() => loadCatalog(projectWith('endpoints: {}\n'), { starterAgents: STARTER })).toThrow(LoadError);
     });
 
     it('holds only models.tiers, endpoints and routing, and an error names the file and the key', () => {
-      for (const key of ['models.tiers', 'endpoints', 'routing']) expect(sectionOfDoc(GENERAL_SECTION)).toContain(key.split('.')[0]);
-      const file = useGeneralConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
+      for (const key of ['models.tiers', 'endpoints', 'routing']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
+      const file = useGlobalConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
       expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`not "agents": ${file}`);
       for (const [yaml, fragment] of [
         ['skills: {}\n', '"skills"'],
@@ -149,43 +149,43 @@ describe('docs/configuration.md', () => {
         ['version: 1\n', '"version"'],
         ['models:\n  other: 1\n', '"models.other"'],
       ] as const) {
-        const where = useGeneralConfig(yaml);
+        const where = useGlobalConfig(yaml);
         expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`${fragment}: ${where}`);
       }
       expect(DOC).toMatch(/Any other key, such as `agents`, `skills` or `enabled`, is a load error that names the file and the key/);
     });
 
     it('merges limits by endpoint, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {
-      useGeneralConfig('models:\n  tiers:\n    medium: { host: pi, model: local/x, thinking: low }\nendpoints:\n  local: { parallel: 2 }\n');
+      useGlobalConfig('models:\n  tiers:\n    medium: { host: pi, model: local/x, thinking: low }\nendpoints:\n  local: { parallel: 2 }\n');
       const moved = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\n');
       expect(loadCatalog(moved, { starterAgents: STARTER }).limits.size).toBe(0);
       const removed = projectWith('endpoints:\n  local:\n');
       expect(loadCatalog(removed, { starterAgents: STARTER }).limits.size).toBe(0);
       const own = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\nendpoints:\n  local: { parallel: 1 }\n');
       expect(() => loadCatalog(own, { starterAgents: STARTER })).toThrow(/no model of a tier/);
-      // The removal entry is refused in the general file.
-      useGeneralConfig('models:\n  tiers:\n    large:\n');
+      // The removal entry is refused in the global file.
+      useGlobalConfig('models:\n  tiers:\n    large:\n');
       expect(() => loadCatalog(moved, { starterAgents: STARTER })).toThrow(/removal entry is only accepted in the agent file/);
-      expect(DOC).toMatch(/Only the project file accepts this; in the general file it is an error/);
+      expect(DOC).toMatch(/Only the project file accepts this; in the global file it is an error/);
       expect(DOC).toMatch(/`large:` under `models.tiers`, or `local:` under `endpoints`/);
     });
 
     it('fails delegation, naming the host, when the child driver has no starter tools', () => {
-      useGeneralConfig(generalYaml!);
+      useGlobalConfig(globalYaml!);
       expect(() => loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: () => undefined })).toThrow(/host "pi" offers no starter tools/);
       expect(DOC).toContain('`offers no starter tools`');
     });
 
     it('names the environment variable, and the loader reads it as a full path with empty as unset', () => {
-      expect(DOC).toMatch(/\| `SUBZERO_GENERAL_CONFIG` \| The full path of the general file[^|]*empty value counts as unset/);
-      expect(generalFile({ SUBZERO_GENERAL_CONFIG: '/x/general.yaml' })).toBe('/x/general.yaml');
-      expect(generalFile({ SUBZERO_GENERAL_CONFIG: '' })).toBe(generalFile({}));
-      expect(generalFile({})).toMatch(/\.agents[\\/]subzero\.yaml$/);
+      expect(DOC).toMatch(/\| `SUBZERO_GLOBAL_CONFIG` \| The full path of the global file[^|]*empty value counts as unset/);
+      expect(globalFile({ SUBZERO_GLOBAL_CONFIG: '/x/global.yaml' })).toBe('/x/global.yaml');
+      expect(globalFile({ SUBZERO_GLOBAL_CONFIG: '' })).toBe(globalFile({}));
+      expect(globalFile({})).toMatch(/\.agents[\\/]subzero\.yaml$/);
       expect(DOC).toContain('`~/.agents/subzero.yaml`');
     });
 
     it('documents the behavior change, the opt-out and the session-start caveat', () => {
-      const text = flat(sectionOfDoc(GENERAL_SECTION));
+      const text = flat(sectionOfDoc(GLOBAL_SECTION));
       expect(text).toMatch(/turns subzero on in every project, with or without a project file/);
       expect(text).toMatch(/`enabled: false`/);
       expect(text).toMatch(/start a new session for the routing text/);
@@ -284,14 +284,14 @@ describe('docs/configuration.md', () => {
     expect(init).toMatch(/creates it when it is missing/);
     expect(init).toMatch(/reads out what this project keeps its own/);
     expect(init).toMatch(/tiers and limits only, never agents/);
-    expect(init).toMatch(/`--scope general\|project` \(default `project`\), and apply must repeat the preview's scope/);
-    expect(init).toMatch(/`config show` marks each tier and limit as coming from the general file or from the project/);
-    expect(init).toMatch(/`init <model>` is unchanged by the general file. It writes the project file/);
+    expect(init).toMatch(/`--scope global\|project` \(default `project`\), and apply must repeat the preview's scope/);
+    expect(init).toMatch(/`config show` marks each tier and limit as coming from the global file or from the project/);
+    expect(init).toMatch(/`init <model>` is unchanged by the global file. It writes the project file/);
     expect(init).toMatch(/add `small` or `large` afterwards, run guided init/i);
     expect(init).toMatch(/checked against this project only: another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
-    expect(init).toMatch(/defaults it offers are the tiers and limits that come from the general file/);
-    expect(init).toMatch(/A write of the general file also needs a new session in every other open project/);
-    expect(init).toMatch(/It writes the project file only, never the general file/);
+    expect(init).toMatch(/defaults it offers are the tiers and limits that come from the global file/);
+    expect(init).toMatch(/A write of the global file also needs a new session in every other open project/);
+    expect(init).toMatch(/It writes the project file only, never the global file/);
   });
 
   it('tells the README and the CHANGELOG about the one-time setup and the behavior change', () => {
@@ -299,11 +299,11 @@ describe('docs/configuration.md', () => {
     expect(setup).toMatch(/whether the models are for every project or only this one/);
     expect(setup).toContain('~/.agents/subzero.yaml');
     expect(setup).toMatch(/`enabled: false`/);
-    expect(README).toMatch(/general file has a `medium` tier, subzero is on in every project/);
-    expect(CHANGELOG).toContain('SUBZERO_GENERAL_CONFIG');
-    expect(CHANGELOG).toMatch(/Behavior change: a general file with a `medium` tier turns subzero on in every project/);
+    expect(README).toMatch(/global file has a `medium` tier, subzero is on in every project/);
+    expect(CHANGELOG).toContain('SUBZERO_GLOBAL_CONFIG');
+    expect(CHANGELOG).toMatch(/Behavior change: a global file with a `medium` tier turns subzero on in every project/);
     expect(CHANGELOG).toContain('`enabled: false`');
-    expect(CHANGELOG).toContain('--scope general|project');
+    expect(CHANGELOG).toContain('--scope global|project');
   });
 
   it('links only to files that exist, and carries no dash pileups or banned words', () => {

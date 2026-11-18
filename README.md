@@ -7,7 +7,7 @@ thinking and tool calls stay in a separate pi session.
 
 It is built for the compound-engineering plugin. That plugin asks for subagents by
 tier ("cheapest capable", "mid-tier", "session model"). When your project, or your
-general file in `~/.agents/`, has a matching tier, subzero sends those subagents to
+global file in `~/.agents/`, has a matching tier, subzero sends those subagents to
 your model instead of Claude's. Tiers you do not configure stay on Claude.
 
 ## Preview and known limits
@@ -40,9 +40,9 @@ limits before you use it:
 
 The plugin's hooks run in every project where it is installed: one when a session
 starts, one on every Agent call, and a background completion hook at Stop. In a project
-with no agent file, and no `medium` tier in your general file, the hook does nothing:
+with no agent file, and no `medium` tier in your global file, the hook does nothing:
 it prints no message, adds no routing text and lets every subagent run on Claude.
-Once your general file has a `medium` tier, subzero is on in every project; put
+Once your global file has a `medium` tier, subzero is on in every project; put
 `enabled: false` in a project's `.agents/subzero.yaml` to switch it off there.
 
 ## Prerequisites
@@ -121,12 +121,12 @@ the first time. If pi is not installed, it says so and writes nothing.
 
 Set up once for every project, or per project:
 
-- **Every project** writes `~/.agents/subzero.yaml`, the general file, and
+- **Every project** writes `~/.agents/subzero.yaml`, the global file, and
   creates it when it is missing. After that, subzero is on in every project with
   built-in `general` and `fallback` agents, with no file of its own. It tells you
   what this project keeps its own, because the change does not apply there.
 - **Only this one** writes `.agents/subzero.yaml` in the project, which overrides
-  the general file by tier name and limit name.
+  the global file by tier name and limit name.
 
 A project switches subzero off with `enabled: false` in its own file. Guided
 init writes tiers and limits only, never agents.
@@ -142,7 +142,7 @@ lists, as `provider/model`:
 ```
 
 For example `/subzero:init local/qwen`, or `/subzero init local/qwen` in pi. It
-writes the project's `.agents/subzero.yaml`, never the general file, with a `medium` tier on that model, a `general`
+writes the project's `.agents/subzero.yaml`, never the global file, with a `medium` tier on that model, a `general`
 agent that can read, write and run commands, and a read-only `fallback` agent.
 Optional arguments are `--timeout <seconds>` (default 1200) and
 `--thinking <level>` (default medium). If pi is not installed, it says so and
@@ -162,14 +162,14 @@ models:
 
 After init creates a file or adds or removes a tier, start a new Claude Code
 session in the project, so the session-start hook reads the files. A change to
-the general file applies to the next delegation at once, but the routing text is
+the global file applies to the next delegation at once, but the routing text is
 built once per session. pi refreshes its tier text in place, so it needs no new
 session. To add `small` or `large`
 later, run `/subzero:init` (or `/subzero init` in pi) again and choose them, or
 add them to a file by hand; read
 [what a `large` tier changes](#what-configuring-a-large-tier-changes) first.
 
-Every key of the files, the general file and how it merges, how a request picks
+Every key of the files, the global file and how it merges, how a request picks
 its model, the checks the files must pass and what is not supported yet are in the
 [configuration reference](docs/configuration.md).
 

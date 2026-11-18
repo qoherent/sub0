@@ -9,7 +9,7 @@ import {
   configuredTierNames,
   getAgent,
   getRouting,
-  generalFile,
+  globalFile,
   LoadError,
   listAgentNames,
   loadAgentFile,
@@ -473,10 +473,10 @@ agents:
   });
 });
 
-describe('AgentConfig general file', () => {
+describe('AgentConfig global file', () => {
   afterEach(() => vi.unstubAllEnvs());
 
-  const GENERAL_TIERS = `models:
+  const GLOBAL_TIERS = `models:
   tiers:
     small: { host: pi, model: local/s, thinking: off }
     medium: { host: pi, model: r9700/Qwen3.8, thinking: low }
@@ -487,11 +487,11 @@ endpoints:
 `;
   const STARTER = (host: string) => (host === 'pi' ? { general: ['read', 'write', 'bash'], fallback: ['read', 'grep'] } : undefined);
 
-  /** Writes the general file and points SUBZERO_GENERAL_CONFIG at it. */
-  function withGeneral(text: string): string {
-    const file = path.join(tempDir('subzero-general-'), 'general.yaml');
+  /** Writes the global file and points SUBZERO_GLOBAL_CONFIG at it. */
+  function withGlobal(text: string): string {
+    const file = path.join(tempDir('subzero-global-'), 'global.yaml');
     writeFileSync(file, text);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', file);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', file);
     return file;
   }
 
@@ -508,8 +508,8 @@ endpoints:
     throw new Error('expected a throw');
   };
 
-  it('merges by name: the project medium replaces the general one whole, the rest is inherited (AE1)', () => {
-    withGeneral(GENERAL_TIERS);
+  it('merges by name: the project medium replaces the global one whole, the rest is inherited (AE1)', () => {
+    withGlobal(GLOBAL_TIERS);
     const root = projectWith(
       `models:\n  tiers:\n    medium: { host: pi, model: local/p, thinking: high }\nendpoints:\n  local:\n    parallel: 5\nagents:\n${GENERAL}${FALLBACK}`,
     );
@@ -520,8 +520,8 @@ endpoints:
     expect(catalog.limits.get('local')).toBe(5);
   });
 
-  it('is on with only a general medium tier, filling general and fallback from the provider (AE2)', () => {
-    withGeneral(GENERAL_TIERS);
+  it('is on with only a global medium tier, filling general and fallback from the provider (AE2)', () => {
+    withGlobal(GLOBAL_TIERS);
     const root = projectWith(null);
     const catalog = load(root);
     expect(catalog.agentFile).toBe(projectFile(root));
@@ -532,101 +532,101 @@ endpoints:
   });
 
   it('is off with no medium tier in either file and no project file (AE3)', () => {
-    withGeneral('models:\n  tiers:\n    small: { host: pi, model: local/s, thinking: off }\n');
+    withGlobal('models:\n  tiers:\n    small: { host: pi, model: local/s, thinking: off }\n');
     const err = errorOf(() => load(projectWith(null)));
     expect(err).toBeInstanceOf(MissingAgentFileError);
     expect(err).not.toBeInstanceOf(ProjectDisabledError);
   });
 
-  it('is off with enabled: false, before the general file is read (AE4)', () => {
+  it('is off with enabled: false, before the global file is read (AE4)', () => {
     const disabled = projectWith('enabled: false\n');
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     expect(() => load(disabled)).toThrow(ProjectDisabledError);
     expect(() => load(disabled)).toThrow(MissingAgentFileError);
-    withGeneral('models: [unclosed');
+    withGlobal('models: [unclosed');
     expect(() => load(disabled)).toThrow(ProjectDisabledError);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', path.join(tempDir(), 'missing.yaml'));
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', path.join(tempDir(), 'missing.yaml'));
     expect(() => load(disabled)).toThrow(ProjectDisabledError);
-    expect(() => buildCatalog(GENERAL_TIERS, 'enabled: false\n', { agentFile: projectFile(disabled) })).toThrow(ProjectDisabledError);
+    expect(() => buildCatalog(GLOBAL_TIERS, 'enabled: false\n', { agentFile: projectFile(disabled) })).toThrow(ProjectDisabledError);
   });
 
   it('keeps a project file with no medium anywhere on the existing load error, not the off error', () => {
-    withGeneral('models:\n  tiers:\n    small: { host: pi, model: local/s, thinking: off }\n');
+    withGlobal('models:\n  tiers:\n    small: { host: pi, model: local/s, thinking: off }\n');
     const err = errorOf(() => load(projectWith(`models:\n  tiers:\n    large: { host: pi, model: local/l, thinking: high }\nagents:\n${GENERAL}${FALLBACK}`)));
     expect(err).toBeInstanceOf(LoadError);
     expect(err).not.toBeInstanceOf(MissingAgentFileError);
     expect(err.message).toMatch(/the medium tier is required/);
   });
 
-  it('refuses an agents, skills, enabled or unknown key in the general file, naming the file and the key (AE5)', () => {
+  it('refuses an agents, skills, enabled or unknown key in the global file, naming the file and the key (AE5)', () => {
     const root = projectWith(null);
     for (const key of ['agents', 'skills', 'enabled', 'colour']) {
-      const file = withGeneral(`${GENERAL_TIERS}${key}: {}\n`);
+      const file = withGlobal(`${GLOBAL_TIERS}${key}: {}\n`);
       const err = errorOf(() => load(root));
       expect(err).toBeInstanceOf(LoadError);
       expect(err.message).toContain(file);
       expect(err.message).toContain(`"${key}"`);
     }
-    const file = withGeneral('models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n  extra: 1\n');
+    const file = withGlobal('models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n  extra: 1\n');
     const err = errorOf(() => load(root));
     expect(err.message).toContain(file);
     expect(err.message).toContain('"models.extra"');
   });
 
-  it('refuses an endpoint key other than parallel in the general file, naming the file and the key, but ignores it in a project file', () => {
-    const file = withGeneral(GENERAL_TIERS.replace('    parallel: 2', '    parallel: 2\n    colour: red'));
+  it('refuses an endpoint key other than parallel in the global file, naming the file and the key, but ignores it in a project file', () => {
+    const file = withGlobal(GLOBAL_TIERS.replace('    parallel: 2', '    parallel: 2\n    colour: red'));
     const err = errorOf(() => load(projectWith(null)));
     expect(err).toBeInstanceOf(LoadError);
     expect(err.message).toContain(file);
     expect(err.message).toContain('endpoints.local.colour');
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     const root = projectWith(`endpoints:\n  local:\n    parallel: 3\n    colour: red\nagents:\n${GENERAL}${FALLBACK}`);
     expect(load(root).limits.get('local')).toBe(3);
   });
 
-  it('loads a file that is both the project file and the general file once, as the general layer only', () => {
+  it('loads a file that is both the project file and the global file once, as the global layer only', () => {
     const root = tempDir('subzero-home-');
     const shared = projectFile(root);
     mkdirSync(path.dirname(shared));
-    writeFileSync(shared, GENERAL_TIERS);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', shared);
+    writeFileSync(shared, GLOBAL_TIERS);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', shared);
     const catalog = load(root);
     expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low' });
     expect(catalog.limits.get('local')).toBe(2);
     expect(catalog.entries.get('general')).toMatchObject({ timeout: 1200, skills: [] });
     // Reached through a link, it is still the same file.
-    const link = path.join(tempDir('subzero-link-'), 'general.yaml');
+    const link = path.join(tempDir('subzero-link-'), 'global.yaml');
     symlinkSync(shared, link);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', link);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', link);
     expect(load(root).tiers.size).toBe(3);
     // A limit no model uses is dropped as an inherited one, where a project file's own would be an error.
-    writeFileSync(shared, `${GENERAL_TIERS}  unused:\n    parallel: 1\n`);
+    writeFileSync(shared, `${GLOBAL_TIERS}  unused:\n    parallel: 1\n`);
     expect(load(root).limits.has('unused')).toBe(false);
-    // Agents in that one file are refused as the general layer refuses them, not read as a project layer.
-    writeFileSync(shared, `${GENERAL_TIERS}agents:\n${GENERAL}${FALLBACK}`);
-    expect(errorOf(() => load(root)).message).toMatch(/the general file holds only models.tiers, endpoints and routing, not "agents"/);
+    // Agents in that one file are refused as the global layer refuses them, not read as a project layer.
+    writeFileSync(shared, `${GLOBAL_TIERS}agents:\n${GENERAL}${FALLBACK}`);
+    expect(errorOf(() => load(root)).message).toMatch(/the global file holds only models.tiers, endpoints and routing, not "agents"/);
   });
 
-  it('refuses to add starter entries to a project file that is the general file, writing nothing', () => {
+  it('refuses to add starter entries to a project file that is the global file, writing nothing', () => {
     const root = tempDir('subzero-home-');
     const shared = projectFile(root);
     mkdirSync(path.dirname(shared));
-    writeFileSync(shared, GENERAL_TIERS);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', shared);
+    writeFileSync(shared, GLOBAL_TIERS);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', shared);
     const spec: StarterSpec = { host: 'pi', model: 'local/new', thinking: 'low', timeout: 30, generalTools: ['read'], fallbackTools: ['read'] };
     const err = errorOf(() => addStarterEntries(root, spec));
     expect(err).toBeInstanceOf(LoadError);
-    expect(err.message).toMatch(/this project's file is the general file; run guided init with the every-project choice, or open the tool in a project folder/);
-    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_TIERS);
+    expect(err.message).toMatch(/this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder/);
+    expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_TIERS);
     // The same refusal when the file does not exist yet.
     const bare = tempDir('subzero-home-');
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', projectFile(bare));
-    expect(() => addStarterEntries(bare, spec)).toThrow(/is the general file/);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', projectFile(bare));
+    expect(() => addStarterEntries(bare, spec)).toThrow(/is the global file/);
     expect(existsSync(projectFile(bare))).toBe(false);
   });
 
   it('raises a load error naming the project file for an enabled that is not a boolean', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     for (const bad of ['"false"', '0']) {
       const root = projectWith(`enabled: ${bad}\n`);
       const err = errorOf(() => load(root));
@@ -636,17 +636,17 @@ endpoints:
     }
   });
 
-  it('refuses a removal entry in the general file, naming the file', () => {
-    const file = withGeneral(GENERAL_TIERS.replace('    small: { host: pi, model: local/s, thinking: off }', '    small:'));
+  it('refuses a removal entry in the global file, naming the file', () => {
+    const file = withGlobal(GLOBAL_TIERS.replace('    small: { host: pi, model: local/s, thinking: off }', '    small:'));
     const err = errorOf(() => load(projectWith(null)));
     expect(err.message).toContain(file);
     expect(err.message).toContain('"small"');
-    withGeneral(GENERAL_TIERS.replace('  local:\n    parallel: 2', '  local:'));
+    withGlobal(GLOBAL_TIERS.replace('  local:\n    parallel: 2', '  local:'));
     expect(errorOf(() => load(projectWith(null))).message).toContain('"local"');
   });
 
   it('removes an inherited tier with an empty entry, so an agent that names it fails', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     const removed = 'models:\n  tiers:\n    large:\n';
     expect([...load(projectWith(`${removed}agents:\n${GENERAL}${FALLBACK}`)).tiers.keys()]).toEqual(['small', 'medium']);
     const dependent = projectWith(`${removed}agents:\n${VALID.replace('skills: [alpha]', 'tier: large')}${GENERAL}${FALLBACK}`);
@@ -656,27 +656,27 @@ endpoints:
   });
 
   it('removes an inherited limit with an empty entry', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     expect(load(projectWith(`endpoints:\n  local:\nagents:\n${GENERAL}${FALLBACK}`)).limits.has('local')).toBe(false);
   });
 
   it('lets a project general agent replace the built-in one and keeps the other built-in', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     const own = load(projectWith('agents:\n  general:\n    tools: [read]\n    timeout: 33\n'));
     expect(own.entries.get('general')).toMatchObject({ tools: ['read'], timeout: 33 });
     expect(own.entries.get('fallback')).toMatchObject({ tools: ['read', 'grep'], timeout: 1200 });
     expect([...load(projectWith(`skills:\n  alpha: ./skills/alpha\nagents:\n${VALID}`)).entries.keys()].sort()).toEqual(['a', 'fallback', 'general']);
   });
 
-  it('merges routing by key: a project value replaces the general one, unnamed keys are inherited', () => {
-    withGeneral(`${GENERAL_TIERS}routing:\n  hook: true\n  generic_agents: [general-purpose]\n`);
+  it('merges routing by key: a project value replaces the global one, unnamed keys are inherited', () => {
+    withGlobal(`${GLOBAL_TIERS}routing:\n  hook: true\n  generic_agents: [general-purpose]\n`);
     expect(load(projectWith('routing:\n  hook: false\n')).routing).toEqual({ hook: false, genericAgents: ['general-purpose'] });
     expect(load(projectWith(null)).routing).toEqual({ hook: true, genericAgents: ['general-purpose'] });
     expect(load(projectWith('routing:\n  generic_agents: [other]\n')).routing).toEqual({ hook: true, genericAgents: ['other'] });
   });
 
   it('drops an inherited limit no merged model uses, but a project-written one still errors', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     const moved = 'models:\n  tiers:\n    small: { host: pi, model: far/s, thinking: off }\n    medium: { host: pi, model: far/m, thinking: low }\n';
     expect(load(projectWith(`${moved}agents:\n${GENERAL}${FALLBACK}`)).limits.has('local')).toBe(false);
     const own = projectWith(`${moved}endpoints:\n  local:\n    parallel: 1\nagents:\n${GENERAL}${FALLBACK}`);
@@ -686,7 +686,7 @@ endpoints:
   });
 
   it('checks a project agent tier against the merged tiers, naming the project file', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     expect(load(projectWith(`agents:\n${VALID.replace('skills: [alpha]', 'tier: small')}`)).entries.get('a')!.tier).toBe('small');
     const none = projectWith(`agents:\n${VALID.replace('skills: [alpha]', 'tier: huge')}`);
     const err = errorOf(() => load(none));
@@ -694,53 +694,53 @@ endpoints:
     expect(err.message).toContain(projectFile(none));
   });
 
-  it('names the general file for its malformed YAML and the project file for its own', () => {
-    const general = withGeneral('models: [unclosed');
-    expect(errorOf(() => load(projectWith(null))).message).toMatch(new RegExp(`malformed: ${general}`));
-    withGeneral(GENERAL_TIERS);
+  it('names the global file for its malformed YAML and the project file for its own', () => {
+    const global = withGlobal('models: [unclosed');
+    expect(errorOf(() => load(projectWith(null))).message).toMatch(new RegExp(`malformed: ${global}`));
+    withGlobal(GLOBAL_TIERS);
     const root = projectWith('agents: [unclosed');
     expect(errorOf(() => load(root)).message).toMatch(new RegExp(`malformed: ${projectFile(root)}`));
   });
 
-  it('names the general file when it cannot be read', () => {
-    const dir = tempDir('subzero-general-dir-');
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', dir);
+  it('names the global file when it cannot be read', () => {
+    const dir = tempDir('subzero-global-dir-');
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', dir);
     expect(errorOf(() => load(projectWith(null))).message).toMatch(new RegExp(`unreadable.*${dir}`));
   });
 
-  it('fails every project that is on when the general file is broken', () => {
-    const general = withGeneral('models: [unclosed');
-    expect(errorOf(() => load(projectWith(`${MEDIUM_TIERS}agents:\n${GENERAL}${FALLBACK}`))).message).toContain(general);
+  it('fails every project that is on when the global file is broken', () => {
+    const global = withGlobal('models: [unclosed');
+    expect(errorOf(() => load(projectWith(`${MEDIUM_TIERS}agents:\n${GENERAL}${FALLBACK}`))).message).toContain(global);
   });
 
-  it('finds the general file at SUBZERO_GENERAL_CONFIG, else in the home folder; empty counts as unset', () => {
-    const file = withGeneral(GENERAL_TIERS);
-    expect(generalFile()).toBe(file);
-    vi.stubEnv('SUBZERO_GENERAL_CONFIG', '');
+  it('finds the global file at SUBZERO_GLOBAL_CONFIG, else in the home folder; empty counts as unset', () => {
+    const file = withGlobal(GLOBAL_TIERS);
+    expect(globalFile()).toBe(file);
+    vi.stubEnv('SUBZERO_GLOBAL_CONFIG', '');
     const home = path.join(os.homedir(), '.agents', 'subzero.yaml');
-    expect(generalFile()).toBe(home);
-    expect(generalFile({ SUBZERO_GENERAL_CONFIG: '/x/y.yaml' })).toBe('/x/y.yaml');
-    expect(generalFile({})).toBe(home);
+    expect(globalFile()).toBe(home);
+    expect(globalFile({ SUBZERO_GLOBAL_CONFIG: '/x/y.yaml' })).toBe('/x/y.yaml');
+    expect(globalFile({})).toBe(home);
   });
 
-  it('treats a missing general file as no layer', () => {
+  it('treats a missing global file as no layer', () => {
     expect(load(projectWith(`${MEDIUM_TIERS}agents:\n${GENERAL}${FALLBACK}`)).tiers.size).toBe(4);
     expect(() => load(projectWith(null))).toThrow(MissingAgentFileError);
   });
 
   it('fails naming the host when the child driver offers no starter tools', () => {
-    withGeneral('models:\n  tiers:\n    medium: { host: claude, model: anthropic/x, thinking: low }\n');
+    withGlobal('models:\n  tiers:\n    medium: { host: claude, model: anthropic/x, thinking: low }\n');
     expect(() => load(projectWith(null))).toThrow(/"claude".*no starter tools/);
   });
 
   it('keeps the required-entry errors when no provider is given', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     expect(() => loadAgentFile(projectWith(null))).toThrow(/the general agent is required/);
     expect(() => loadAgentFile(projectWith(`agents:\n${GENERAL}`))).toThrow(/the fallback agent is required/);
   });
 
   it('lets the lookup functions fill the built-ins with a placeholder, so they never fail for a missing agent', () => {
-    withGeneral(GENERAL_TIERS);
+    withGlobal(GLOBAL_TIERS);
     const root = projectWith(null);
     expect(configuredTierNames(root)).toEqual(['small', 'medium', 'large']);
     expect(routableTiers(root).map((t) => t.tier)).toEqual(['small', 'medium', 'large']);
@@ -751,7 +751,7 @@ endpoints:
 
   it('builds a catalog from text with no file on disk', () => {
     const agentFile = '/nowhere/.agents/subzero.yaml';
-    const catalog = buildCatalog(GENERAL_TIERS, null, { agentFile, generalFile: '/nowhere/general.yaml', starterAgents: STARTER });
+    const catalog = buildCatalog(GLOBAL_TIERS, null, { agentFile, globalFile: '/nowhere/global.yaml', starterAgents: STARTER });
     expect(catalog.agentFile).toBe(agentFile);
     expect(catalog.tiers.size).toBe(3);
     const noMedium = 'models:\n  tiers:\n    small: { host: pi, model: a/b, thinking: off }\n';

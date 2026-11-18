@@ -31,7 +31,7 @@ describe('the /subzero:init skill', () => {
     const table = SKILL.split('| Guide step').slice(1).join('');
     expect(flat(table)).toMatch(/config preview --scope <scope> <changes>/);
     expect(flat(table)).toMatch(/config apply --scope <scope> --expect <fingerprint> <changes>/);
-    expect(flat(SKILL)).toMatch(/`<scope>` is `general` for every project or `project` for this one/);
+    expect(flat(SKILL)).toMatch(/`<scope>` is `global` for every project or `project` for this one/);
     const pins = front['allowed-tools'].map((tool) => /^Bash\((.*)\)$/s.exec(tool)![1]!);
     const matches = (pin: string, command: string) => (pin.endsWith(' *') ? command.startsWith(pin.slice(0, -1)) : command === pin);
     const named = [...SKILL.matchAll(/`(SUBZERO_PROJECT_DIR=[^`]*)`/g)].map((m) => m[1]!.replace(/<[^>]+>/g, 'x'));
@@ -49,13 +49,13 @@ describe('the /subzero:init skill', () => {
     expect(flat(SKILL)).toMatch(/AskUserQuestion tool, for every question/);
     expect(flat(SKILL)).toMatch(/timeout set to 180000 ms/);
     expect(flat(SKILL)).toMatch(/start a new Claude Code session/);
-    expect(flat(SKILL)).toMatch(/write of the general file also needs a new session in every other open project/);
+    expect(flat(SKILL)).toMatch(/write of the global file also needs a new session in every other open project/);
   });
 
   it('says the quick path writes the project file only', () => {
     const description = flat(SKILL.split('---')[1] ?? '');
     expect(description).toMatch(/\/subzero:init <model> for the quick starter entries, which write this project's file only/);
-    expect(flat(SKILL)).toMatch(/`init <model>` writes the project file \(`\.agents\/subzero\.yaml`\) only, never the general file/);
+    expect(flat(SKILL)).toMatch(/`init <model>` writes the project file \(`\.agents\/subzero\.yaml`\) only, never the global file/);
   });
 });
 
@@ -92,29 +92,29 @@ describe('the shared guided-init guide', () => {
     const models = guide.indexOf('### 4. Choose a model');
     expect(scope).toBeGreaterThan(show);
     expect(scope).toBeLessThan(models);
-    expect(guide).toMatch(/default is the general file when it exists and this project has no overrides, otherwise this project/);
+    expect(guide).toMatch(/default is the global file when it exists and this project has no overrides, otherwise this project/);
     expect(guide).toMatch(/Run \*\*preview\*\* with the scope and every change/);
     expect(guide).toMatch(/Run \*\*apply\*\* with the scope, the preview's fingerprint and the same changes/);
-    expect(guide).toMatch(/first-time general setup uses the general scope/i);
+    expect(guide).toMatch(/first-time global setup uses the global scope/i);
   });
 
-  it('reads out the overridden list of a general-scope preview before the confirm', () => {
-    expect(flat(GUIDE)).toMatch(/general scope[^.]*`overridden`[^.]*say[^.]*this project keeps its own[^.]*before you ask to confirm/i);
+  it('reads out the overridden list of a global-scope preview before the confirm', () => {
+    expect(flat(GUIDE)).toMatch(/global scope[^.]*`overridden`[^.]*say[^.]*this project keeps its own[^.]*before you ask to confirm/i);
   });
 
-  it('under the general scope, defaults come from the general file\'s own values, never from the project override', () => {
+  it('under the global scope, defaults come from the global file\'s own values, never from the project override', () => {
     const guide = flat(GUIDE);
-    expect(guide).toMatch(/When this project overrides a tier or limit that the general file also holds, \*\*show\*\* gives the general file's own value as `general` on that tier \(`host`, `model`, `thinking`\) or limit \(`parallel`\)/);
-    expect(guide).toMatch(/When the scope is general, the defaults are the tiers and limits marked `source: general` and the `general` value of each one marked `source: project` that has one/);
+    expect(guide).toMatch(/When this project overrides a tier or limit that the global file also holds, \*\*show\*\* gives the global file's own value as `global` on that tier \(`host`, `model`, `thinking`\) or limit \(`parallel`\)/);
+    expect(guide).toMatch(/When the scope is global, the defaults are the tiers and limits marked `source: global` and the `global` value of each one marked `source: project` that has one/);
     expect(guide).toMatch(/Never offer the project's own value as the default/);
-    expect(guide).toMatch(/marked `source: project` with no `general` value is not set in the general file: suggest a model as for an unset tier/);
-    expect(guide).toMatch(/Offer "remove" for a tier marked `source: general` or one with a `general` value/);
-    expect(guide).toMatch(/Under the general scope, a kept model keeps the level of its `general` value; a tier marked `source: project` with no `general` value counts as not set/);
-    expect(guide).toMatch(/Under the general scope, the default of a limit marked `source: project` is its `general` parallel; with no `general` value it counts as not set/);
+    expect(guide).toMatch(/marked `source: project` with no `global` value is not set in the global file: suggest a model as for an unset tier/);
+    expect(guide).toMatch(/Offer "remove" for a tier marked `source: global` or one with a `global` value/);
+    expect(guide).toMatch(/Under the global scope, a kept model keeps the level of its `global` value; a tier marked `source: project` with no `global` value counts as not set/);
+    expect(guide).toMatch(/Under the global scope, the default of a limit marked `source: project` is its `global` parallel; with no `global` value it counts as not set/);
     expect(guide).toMatch(/A tier that is already set defaults to its current model\. Suggest a different model only for a tier that is not set yet/);
   });
 
-  it('says before the confirm that a general-scope change is checked against this project only', () => {
+  it('says before the confirm that a global-scope change is checked against this project only', () => {
     const preview = flat(GUIDE.split('### 8. Preview and confirm')[1]?.split('### 9.')[0] ?? '');
     expect(preview).toMatch(/checked against this project only; another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
     expect(preview.indexOf('checked against this project only')).toBeLessThan(preview.indexOf('Write this to'));
@@ -122,7 +122,7 @@ describe('the shared guided-init guide', () => {
 
   it('tells the user a switched-off project cannot run guided setup', () => {
     const show = flat(GUIDE.split('### 1.')[1]?.split('### 2.')[0] ?? '');
-    expect(show).toMatch(/refused[^-]*When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the general file by hand/);
+    expect(show).toMatch(/refused[^-]*When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the global file by hand/);
   });
 
   it('no longer says a missing fallback agent is added on apply', () => {

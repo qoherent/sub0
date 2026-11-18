@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { AGENT_FILE, generalFile, getRouting, MissingAgentFileError, routableTiers, type RoutableTier } from '../config/agent-config.js';
+import { AGENT_FILE, globalFile, getRouting, MissingAgentFileError, routableTiers, type RoutableTier } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
 import { liveReadinessMarkers } from '../mcp/parent-session.js';
 import { withDenyLock } from './deny-lock.js';
@@ -105,8 +105,8 @@ export function routingContext(projectRoot: string | undefined, taskMode: boolea
     if (err instanceof MissingAgentFileError) return undefined;
     if ((err as { code?: unknown }).code === 'load_error') {
       const message = (err as Error).message;
-      const general = generalFile();
-      return buildWarning(message, message.includes(general) ? general : AGENT_FILE);
+      const global = globalFile();
+      return buildWarning(message, message.includes(global) ? global : AGENT_FILE);
     }
     return undefined;
   }

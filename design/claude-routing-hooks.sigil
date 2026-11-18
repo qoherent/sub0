@@ -1,7 +1,7 @@
 @design/agent-config.sigil from AgentConfig import {
   agent file, project root, load error, general agent, model tier,
   routable tier, medium tier, routing block,
-  tier word, merged configuration, general file, off error, enabled switch,
+  tier word, merged configuration, global file, off error, enabled switch,
 }
 @design/claude-mcp-server.sigil from ClaudeMcpServer import {
   readiness marker, plugin data folder, SessionStart hook, delegate tool,
@@ -26,7 +26,7 @@ component ClaudeRoutingHooks {
   state {
     The routing block that AgentConfig merges by key holds a *hook switch*,
     which is on unless it is set to false, and an optional *generic agent list*
-    of agent type names. The general file and the agent file may each hold
+    of agent type names. The global file and the agent file may each hold
     them, and the agent file wins by key. ClaudeRoutingHooks interprets the
     hook switch and the generic agent list from the routing block of the merged
     configuration that AgentConfig loads for it, and no other component reads
@@ -305,14 +305,14 @@ component ClaudeRoutingHooks {
 
     With no model tier configured, no routing text is added and every
     Agent spawn is allowed. In a project with no agent file and no medium tier
-    in the general file the SessionStart hook prints nothing and exits 0, and
+    in the global file the SessionStart hook prints nothing and exits 0, and
     with a malformed agent file it adds the one-line warning and every Agent
-    spawn is allowed. In a project with no agent file and a general file that
+    spawn is allowed. In a project with no agent file and a global file that
     holds a medium tier, the SessionStart hook adds the routing text of the
-    general file. With a malformed general file it adds the one-line warning
-    that names the general file, and every Agent spawn is allowed. In a project
+    global file. With a malformed global file it adds the one-line warning
+    that names the global file, and every Agent spawn is allowed. In a project
     whose agent file holds an enabled switch of false the SessionStart hook
-    prints nothing and every Agent spawn is allowed, whatever the general file
+    prints nothing and every Agent spawn is allowed, whatever the global file
     holds.
 
     With medium configured and a live readiness marker, a generic spawn with

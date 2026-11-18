@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/cli.js';
 import { loadCatalog, PLACEHOLDER_STARTER_AGENTS, resolveAgent } from '../../src/config/agent-config.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, fakePiEnv, makeProject, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, fakePiEnv, makeProject, piKernel, tempDir, useGlobalConfig } from '../helpers.js';
 
 const piModel = (provider: string, id: string) => ({
   id,
@@ -71,17 +71,17 @@ describe('subzero config', () => {
     expect(doc.state.tiers.map((t: { tier: string }) => t.tier)).toContain('medium');
   });
 
-  describe('with a general file', () => {
-    const general = (root: string) => cli(root);
+  describe('with a global file', () => {
+    const global = (root: string) => cli(root);
     const MEDIUM = ['--tier', 'medium=local/everywhere:low'];
 
     it('show prints each tier and limit with its source and the tiers this project overrides', async () => {
-      useGeneralConfig(GENERAL_MEDIUM_YAML.replace('medium: {', 'large: { host: pi, model: cloud/l, thinking: high }\n    medium: {'));
-      const { run, json } = general(makeProject());
+      useGlobalConfig(GLOBAL_MEDIUM_YAML.replace('medium: {', 'large: { host: pi, model: cloud/l, thinking: high }\n    medium: {'));
+      const { run, json } = global(makeProject());
       expect(await run('config', 'show')).toBe(0);
       const doc = json();
       expect(doc.state.tiers.map((t: { tier: string; source: string }) => [t.tier, t.source])).toEqual([
-        ['large', 'general'],
+        ['large', 'global'],
         ['medium', 'project'],
         ['small', 'project'],
         ['cloud', 'project'],
@@ -90,55 +90,55 @@ describe('subzero config', () => {
       expect(doc.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
     });
 
-    it('show prints the general file\'s own value of an overridden tier and limit as `general`', async () => {
-      useGeneralConfig(`endpoints:\n  local:\n    parallel: 3\n${GENERAL_MEDIUM_YAML}`);
-      const { run, json } = general(makeProject());
+    it('show prints the global file\'s own value of an overridden tier and limit as `global`', async () => {
+      useGlobalConfig(`endpoints:\n  local:\n    parallel: 3\n${GLOBAL_MEDIUM_YAML}`);
+      const { run, json } = global(makeProject());
       expect(await run('config', 'show')).toBe(0);
       const doc = json();
       const byTier = (name: string) => doc.state.tiers.find((t: { tier: string }) => t.tier === name);
-      expect(byTier('medium')).toMatchObject({ source: 'project', general: { host: 'pi', model: 'local/general-medium', thinking: 'low' } });
-      expect(byTier('small')).not.toHaveProperty('general');
-      expect(doc.state.limits).toEqual([expect.objectContaining({ endpoint: 'local', source: 'project', general: { parallel: 3 } })]);
+      expect(byTier('medium')).toMatchObject({ source: 'project', global: { host: 'pi', model: 'local/global-medium', thinking: 'low' } });
+      expect(byTier('small')).not.toHaveProperty('global');
+      expect(doc.state.limits).toEqual([expect.objectContaining({ endpoint: 'local', source: 'project', global: { parallel: 3 } })]);
     });
 
-    it('preview --scope general prints the overridden list for a project that overrides the tier', async () => {
-      const file = useGeneralConfig(GENERAL_MEDIUM_YAML);
-      const { run, json } = general(makeProject());
-      expect(await run('config', 'preview', '--scope', 'general', ...MEDIUM)).toBe(0);
+    it('preview --scope global prints the overridden list for a project that overrides the tier', async () => {
+      const file = useGlobalConfig(GLOBAL_MEDIUM_YAML);
+      const { run, json } = global(makeProject());
+      expect(await run('config', 'preview', '--scope', 'global', ...MEDIUM)).toBe(0);
       const doc = json();
-      expect(doc).toMatchObject({ ok: true, scope: 'general', agentFile: file, overridden: { tiers: ['medium'], limits: [] }, refusals: [] });
+      expect(doc).toMatchObject({ ok: true, scope: 'global', agentFile: file, overridden: { tiers: ['medium'], limits: [] }, refusals: [] });
       expect(doc.diff).toMatch(/\+.*local\/everywhere/);
-      expect(readFileSync(file, 'utf8')).toBe(GENERAL_MEDIUM_YAML);
+      expect(readFileSync(file, 'utf8')).toBe(GLOBAL_MEDIUM_YAML);
     });
 
-    it('apply --scope general writes the general file, creating it and its folder, and exits 0', async () => {
+    it('apply --scope global writes the global file, creating it and its folder, and exits 0', async () => {
       const file = path.join(tempDir(), 'home', '.agents', 'subzero.yaml');
-      useGeneralConfig('');
-      process.env.SUBZERO_GENERAL_CONFIG = file;
+      useGlobalConfig('');
+      process.env.SUBZERO_GLOBAL_CONFIG = file;
       const root = makeProject();
-      const { run, json } = general(root);
-      expect(await run('config', 'preview', '--scope', 'general', ...MEDIUM)).toBe(0);
+      const { run, json } = global(root);
+      expect(await run('config', 'preview', '--scope', 'global', ...MEDIUM)).toBe(0);
       const { fingerprint } = json();
-      expect(await run('config', 'apply', '--scope', 'general', '--expect', fingerprint, ...MEDIUM)).toBe(0);
-      expect(json()).toMatchObject({ ok: true, written: true, scope: 'general' });
+      expect(await run('config', 'apply', '--scope', 'global', '--expect', fingerprint, ...MEDIUM)).toBe(0);
+      expect(json()).toMatchObject({ ok: true, written: true, scope: 'global' });
       expect(readFileSync(file, 'utf8')).toBe('models:\n  tiers:\n    medium: { host: pi, model: local/everywhere, thinking: low }\n');
       expect(readFileSync(agentFile(root), 'utf8')).toBe(DEFAULT_YAML);
     });
 
-    it('apply --scope general with a project-scope fingerprint prints stale_preview and exits 1', async () => {
-      const file = useGeneralConfig(GENERAL_MEDIUM_YAML);
-      const { run, json } = general(makeProject());
+    it('apply --scope global with a project-scope fingerprint prints stale_preview and exits 1', async () => {
+      const file = useGlobalConfig(GLOBAL_MEDIUM_YAML);
+      const { run, json } = global(makeProject());
       expect(await run('config', 'preview', ...MEDIUM)).toBe(0);
       const { fingerprint } = json();
-      expect(await run('config', 'apply', '--scope', 'general', '--expect', fingerprint, ...MEDIUM)).toBe(1);
+      expect(await run('config', 'apply', '--scope', 'global', '--expect', fingerprint, ...MEDIUM)).toBe(1);
       expect(json()).toMatchObject({ ok: false, code: 'stale_preview' });
-      expect(readFileSync(file, 'utf8')).toBe(GENERAL_MEDIUM_YAML);
+      expect(readFileSync(file, 'utf8')).toBe(GLOBAL_MEDIUM_YAML);
     });
 
     it('--scope project is the default and writes the project file with the changed tier only', async () => {
-      useGeneralConfig(GENERAL_MEDIUM_YAML);
+      useGlobalConfig(GLOBAL_MEDIUM_YAML);
       const root = tempDir();
-      const { run, json } = general(root);
+      const { run, json } = global(root);
       const flags = ['--tier', 'small=local/s:low'];
       expect(await run('config', 'preview', '--scope', 'project', ...flags)).toBe(0);
       const { fingerprint } = json();
@@ -306,10 +306,10 @@ describe('subzero config', () => {
     [['preview', '--bogus', 'x']],
     [['preview', 'stray']],
     [['preview', '--scope', 'other']],
-    [['preview', '--scope', 'GENERAL']],
+    [['preview', '--scope', 'GLOBAL']],
     [['preview', '--scope']],
     [['apply', '--scope', 'other', '--expect', 'x']],
-    [['show', '--scope', 'general']],
+    [['show', '--scope', 'global']],
     [['apply', '--tier', 'small=local/q:low']],
     [['check']],
     [['check', 'local/qwen']],

@@ -8,7 +8,7 @@
   project root, SUBZERO_PROJECT_DIR, load error, general agent, model tier,
   medium tier, parallel limit, working directory, starter entries, change set,
   setup preview, preview fingerprint, refused change, fallback agent,
-  tier error, stale preview error, write error, setup scope, general file,
+  tier error, stale preview error, write error, setup scope, global file,
   off error, enabled switch,
 }
 @design/cli.sigil from Cli import { subzero init }
@@ -179,7 +179,7 @@ component PiExtension {
     project root of the session core, as subzero init does on the command line.
     Rebuild the description of the subagent tool from the agent file when it
     added any, and show which it added, which ends the flow. The init with a
-    model writes only the agent file, whether or not a general file exists.
+    model writes only the agent file, whether or not a global file exists.
 
     On the /subzero command with init and no model, refuse when pi has no user
     interface or the agent is running. Otherwise make the guided setup with the
@@ -246,11 +246,11 @@ component PiExtension {
     leak in from the shell that started pi.
 
     A pi project that is off, with no agent file and no medium tier in the
-    general file or with an enabled switch of false in its agent file, must be
+    global file or with an enabled switch of false in its agent file, must be
     refused with the off error that names its cause, and that says to run
     subzero init only when the cause is the missing medium tier, and PiExtension
     must never run a subagent on a model that no file names. A malformed agent
-    file or general file must still return its load error, and a name that no
+    file or global file must still return its load error, and a name that no
     agent entry holds must still run the fallback agent.
 
     PiExtension must reach the core only through the session core,
@@ -303,12 +303,12 @@ component PiExtension {
     model is cheapest capable starts a child on that local model and returns
     its task id at once.
 
-    In a project with no agent file and no medium tier in the general file, a
+    In a project with no agent file and no medium tier in the global file, a
     subagent tool call returns the off error that names the missing medium
     tier and says to run subzero init, and starts no child. With an enabled
     switch of false in the agent file, the same call returns the off error that
     names the enabled switch and does not say to run subzero init. With a
-    medium tier in the general file and no agent
+    medium tier in the global file and no agent
     file, the same call runs the general agent on the medium tier.
 
     With the medium tier configured, a subagent tool call with no model runs on
@@ -440,7 +440,7 @@ component PiExtension {
     model. The medium tier runs work that names no tier, so
     compound-engineering works
     in every project once subzero init has written the agent file or the
-    general file. The
+    global file. The
     session core
     lives for one pi session and is cancelled at its end, because the pi
     process
@@ -454,10 +454,10 @@ component PiExtension {
     idle.
 
     A project is refused until a medium tier exists in the agent file or the
-    general file, so that no subagent runs on a model that no file names. The
+    global file, so that no subagent runs on a model that no file names. The
     starter tools of the general agent, which may write files and run shell
     commands, are the ones that the child driver gives when no agent file names
-    its own. Installing the pi package and writing a general file with a medium
+    its own. Installing the pi package and writing a global file with a medium
     tier are the opt-in that accepts this in every project, and an enabled
     switch of false in a project is the way out of it. The init tools exist
     only for a guided init, and subzero_init_apply asks for the confirmation
