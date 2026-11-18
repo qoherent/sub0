@@ -3,8 +3,9 @@
 // pi's `/subzero init`: with a model it is the quick path that writes the starter
 // entries, as `subzero init <model>` does; with none it turns on six init tools for
 // one agent run and hands the agent the shared guide text. The tools are thin
-// wrappers over the setup service. Only the apply tool writes, and only after the
-// user confirms subzero's own diff in pi's dialog. The tools are off by default and
+// wrappers over the setup service; preview and apply take the scope the user chose
+// ("every project" is the general file, "only this one" the project file). Only the
+// apply tool writes, and only after the user confirms subzero's own diff in pi's dialog. The tools are off by default and
 // switch off again after a write, a declined confirmation, the end of the run, the
 // start of any run other than the kickoff's, or the end of the session, so an agent can
 // never reach them outside a user-started run.
@@ -12,7 +13,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { parseArgs } from 'node:util';
 import { Type } from 'typebox';
 import { addStarterEntries, LoadError, StarterHostConflictError, type ThinkingLevel } from '../config/agent-config.js';
-import { SetupConflictError, SetupRefusedError, type Change } from '../config/agent-setup.js';
+import { SetupConflictError, SetupRefusedError, type Change, type SetupScope } from '../config/agent-setup.js';
 import type { Kernel } from '../kernel/kernel.js';
 import { isSetupError, parseStarterOptions, SetupService, SetupServiceError, setupRefusalBody } from '../service/setup-service.js';
 import { formatStarterResult } from '../service/status-text.js';
@@ -39,12 +40,12 @@ The init tools are on only for this run, and they switch off when the run ends. 
 
 - **show**: \`subzero_init_show\`.
 - **models**: \`subzero_init_models\`.
-- **ask**: \`subzero_init_ask\` with \`question\` and, for a choice, \`options\`. It shows a pick list with an "${OTHER}" entry for a typed answer, or a text box when there are no options, and returns the user's answer.
+- **ask**: \`subzero_init_ask\` with \`question\` and, for a choice, \`options\`. Use it for the scope question, "every project or only this one", too. It shows a pick list with an "${OTHER}" entry for a typed answer, or a text box when there are no options, and returns the user's answer.
 - **check**: \`subzero_init_check\` with \`models\`, a list of \`{ model, thinking }\`.
-- **preview**: \`subzero_init_preview\` with \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", endpoint, parallel }\` and \`{ op: "clearLimit", endpoint }\`.
-- **apply**: \`subzero_init_apply\` with the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 7 show the preview, then call apply instead of asking "Write this?" with ask. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
+- **preview**: \`subzero_init_preview\` with the \`scope\` (\`general\` for every project, \`project\` for this one) and \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", endpoint, parallel }\` and \`{ op: "clearLimit", endpoint }\`.
+- **apply**: \`subzero_init_apply\` with the same \`scope\`, the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 8 show the preview, then call apply instead of asking "Write this?" with ask. For the general scope, read out the preview's \`overridden\` list before calling apply: this project keeps its own of each tier or limit on it, so the change does not apply here. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
 
-In step 8: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed.`;
+In step 9: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed.`;
 
 /** The user message `/subzero init` sends: the shared guide followed by the pi mapping. */
 const INIT_KICKOFF = `Run subzero's guided init for this project, following this guide.\n\n${GUIDE.trim()}\n\n${PI_MAPPING}\n`;
@@ -138,6 +139,9 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
     if (!isKickoff) turnOff();
   });
 
+  const scopeSchema = Type.Optional(Type.Union([Type.Literal('general'), Type.Literal('project')], {
+    description: 'general writes ~/.agents/subzero.yaml for every project; project (the default) writes this project\'s .agents/subzero.yaml',
+  }));
   const changeSchema = Type.Object({
     op: Type.String({ description: 'setTier, unsetTier, setLimit or clearLimit' }),
     tier: Type.Optional(Type.String()),
@@ -193,38 +197,39 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
   });
   pi.registerTool({
     ...tool, name: 'subzero_init_preview', label: 'subzero init: preview',
-    description: 'Guided subzero init: the diff and summary a change set would write, and the fingerprint apply needs. Writes nothing.',
-    parameters: Type.Object({ changes: Type.Array(changeSchema) }),
+    description: 'Guided subzero init: the diff and summary a change set would write to the file of the scope, what this project overrides for the general scope, and the fingerprint apply needs. Writes nothing.',
+    parameters: Type.Object({ changes: Type.Array(changeSchema), scope: scopeSchema }),
     async execute(_id, args) {
       return run(() => {
-        const { text: _text, ...preview } = service().preview(args.changes as Change[]);
+        const { text: _text, ...preview } = service().preview(args.changes as Change[], args.scope as SetupScope | undefined);
         return { ok: true, ...preview };
       });
     },
   });
   pi.registerTool({
     ...tool, name: 'subzero_init_apply', label: 'subzero init: apply',
-    description: "Guided subzero init: show the previewed diff to the user, and write it only when the user confirms. Pass the preview's fingerprint and the same changes.",
-    parameters: Type.Object({ changes: Type.Array(changeSchema), fingerprint: Type.String() }),
+    description: "Guided subzero init: show the previewed diff to the user, and write it only when the user confirms. Pass the preview's scope, fingerprint and the same changes.",
+    parameters: Type.Object({ changes: Type.Array(changeSchema), fingerprint: Type.String(), scope: scopeSchema }),
     async execute(_id, args, _signal, _update, ctx) {
       return run(async () => {
         const svc = service();
         if (!ctx.hasUI) throw new Error('apply needs pi\'s interactive UI to confirm the write; nothing was written');
         const changes = args.changes as Change[];
-        const preview = svc.preview(changes);
+        const scope = args.scope as SetupScope | undefined;
+        const preview = svc.preview(changes, scope);
         if (preview.fingerprint !== args.fingerprint) throw new SetupConflictError();
         if (preview.refusals.length) throw new SetupRefusedError(preview.refusals);
         if (preview.invalid !== undefined) throw new Error(`nothing was written: the result would not load: ${preview.invalid}`);
         if (preview.nothingToChange) return { ok: true, written: false, message: 'nothing to change; nothing was written' };
         const confirmed = await ctx.ui.confirm(
-          'Write .agents/subzero.yaml?',
+          preview.scope === 'general' ? `Write the general file ${preview.agentFile}, for every project?` : 'Write .agents/subzero.yaml?',
           [preview.diff.trimEnd(), '', ...preview.summary].join('\n'),
         );
         if (!confirmed) {
           turnOff();
           return 'the user declined; nothing was written. The init tools are now off; the user can run /subzero init again.';
         }
-        const { text: _text, diff: _diff, ...applied } = svc.apply(changes, args.fingerprint);
+        const { text: _text, diff: _diff, ...applied } = svc.apply(changes, args.fingerprint, scope);
         options.refreshTierText();
         turnOff();
         return { ok: true, ...applied, note: 'pi refreshed the subagent tier text; no new session is needed. The init tools are now off.' };

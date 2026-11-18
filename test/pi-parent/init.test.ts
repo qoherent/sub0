@@ -1,12 +1,12 @@
 import { chmodSync, cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import { runCli } from '../../src/cli/cli.js';
 import { INIT_TOOL_NAMES } from '../../src/pi-parent/init.js';
 import { registerPiExtension } from '../../src/pi-parent/extension.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import { fakePi } from './fake-pi-api.js';
-import { FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir } from '../helpers.js';
+import { FAKE_PI_COMMAND, GENERAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useGeneralConfig } from '../helpers.js';
 
 const agentFile = (root: string) => path.join(root, '.agents', 'subzero.yaml');
 const GUIDE_LINE = 'Ask about `medium` first, because it is required.';
@@ -78,6 +78,8 @@ describe('pi /subzero init', () => {
     expect(yaml).toMatch(/model: local\/qwen/);
     expect(yaml).toMatch(/thinking: low/);
     expect(yaml).toMatch(/timeout: 60/);
+    expect(yaml).toMatch(/^ {2}general:/m);
+    expect(yaml).toMatch(/^ {2}fallback:/m);
     expect(subagentText()).toMatch(/mid-tier \(medium\): pass model: "medium"/);
     await fake.command('subzero', 'init local/qwen');
     expect(fake.notifications.at(-1)).toBe(
@@ -279,6 +281,86 @@ describe('pi /subzero init', () => {
     const kickoff = String(fake.userMessages[0]);
     expect(kickoff).toMatch(/stale preview error[^.]*preview again/i);
     expect(kickoff).toMatch(/any other refusal[^.]*write error[^.]*load error[^.]*end/i);
+  });
+
+  /** Points the general file at a path in a fresh temp folder, where no file exists yet. */
+  function freshGeneralPath(): string {
+    const file = path.join(tempDir('subzero-general-'), 'subzero.yaml');
+    const previous = process.env.SUBZERO_GENERAL_CONFIG;
+    process.env.SUBZERO_GENERAL_CONFIG = file;
+    onTestFinished(() => {
+      if (previous === undefined) delete process.env.SUBZERO_GENERAL_CONFIG;
+      else process.env.SUBZERO_GENERAL_CONFIG = previous;
+    });
+    return file;
+  }
+
+  it('F1: an every-project answer previews and applies against the general file, then the tools switch off', async () => {
+    const general = freshGeneralPath();
+    const root = tempDir();
+    const { fake, tool, text, initActive } = await session(root);
+    await fake.command('subzero', 'init');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }];
+    const preview = JSON.parse(text(await tool('subzero_init_preview', { changes, scope: 'general' })));
+    expect(preview).toMatchObject({ ok: true, scope: 'general', agentFile: general, fileExists: false, overridden: { tiers: [], limits: [] } });
+    fake.answers.confirm.push(true);
+    const reply = await tool('subzero_init_apply', { changes, fingerprint: preview.fingerprint, scope: 'general' });
+    expect(reply.isError).toBeFalsy();
+    expect(JSON.parse(text(reply))).toMatchObject({ ok: true, written: true, scope: 'general' });
+    expect(readFileSync(general, 'utf8')).toMatch(/model: local\/q/);
+    expect(existsSync(agentFile(root))).toBe(false);
+    expect(fake.dialogs.find((d) => d.kind === 'confirm')!.title).toContain('general');
+    expect(initActive()).toEqual([]);
+  });
+
+  it('F2: a this-project answer previews a project write that adds only the changed tier', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = tempDir();
+    const { fake, tool, text } = await session(root);
+    await fake.command('subzero', 'init');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/project-q', thinking: 'high' }];
+    const preview = JSON.parse(text(await tool('subzero_init_preview', { changes, scope: 'project' })));
+    expect(preview).toMatchObject({ ok: true, scope: 'project', agentFile: agentFile(root) });
+    expect(preview.diff).toMatch(/local\/project-q/);
+    expect(preview.diff).not.toMatch(/agents:|general:|fallback:/);
+    fake.answers.confirm.push(true);
+    expect((await tool('subzero_init_apply', { changes, fingerprint: preview.fingerprint, scope: 'project' })).isError).toBeFalsy();
+    const written = readFileSync(agentFile(root), 'utf8');
+    expect(written).toMatch(/model: local\/project-q/);
+    expect(written).not.toMatch(/agents:/);
+  });
+
+  it('AE6: the general-scope preview returns what this project overrides, and the kickoff tells the model to say it', async () => {
+    useGeneralConfig(GENERAL_MEDIUM_YAML);
+    const root = makeProject();
+    const { fake, tool, text } = await session(root);
+    await fake.command('subzero', 'init');
+    const preview = JSON.parse(text(await tool('subzero_init_preview', {
+      changes: [{ op: 'setTier', tier: 'medium', model: 'local/everywhere', thinking: 'low' }],
+      scope: 'general',
+    })));
+    expect(preview.overridden.tiers).toEqual(['medium']);
+    const kickoff = String(fake.userMessages[0]);
+    expect(kickoff).toMatch(/every project or only this one/i);
+    expect(kickoff).toMatch(/overridden[^.]*this project keeps its own/i);
+    expect(kickoff).toMatch(/subzero_init_preview[^.]*`scope`/);
+    expect(kickoff).toMatch(/subzero_init_apply[^.]*`scope`/);
+  });
+
+  it('apply with a scope different from the preview\'s is a stale preview: nothing is written and the tools stay on', async () => {
+    const general = freshGeneralPath();
+    const root = tempDir();
+    const { fake, tool, text, initActive } = await session(root);
+    await fake.command('subzero', 'init');
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }];
+    const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes, scope: 'general' })));
+    const reply = await tool('subzero_init_apply', { changes, fingerprint });
+    expect(reply.isError).toBe(true);
+    expect(JSON.parse(text(reply))).toMatchObject({ ok: false, code: 'stale_preview' });
+    expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toEqual([]);
+    expect(existsSync(general)).toBe(false);
+    expect(existsSync(agentFile(root))).toBe(false);
+    expect(initActive()).toHaveLength(6);
   });
 
   it('refuses an init tool call before /subzero init', async () => {

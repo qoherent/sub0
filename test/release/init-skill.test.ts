@@ -27,6 +27,18 @@ describe('the /subzero:init skill', () => {
     expect(tools).toContain('Bash(cat "${CLAUDE_PLUGIN_ROOT}/skills/init/guided-init.md")');
   });
 
+  it('maps preview and apply with the scope flag, and every command it names matches a pin', () => {
+    const table = SKILL.split('| Guide step').slice(1).join('');
+    expect(flat(table)).toMatch(/config preview --scope <scope> <changes>/);
+    expect(flat(table)).toMatch(/config apply --scope <scope> --expect <fingerprint> <changes>/);
+    expect(flat(SKILL)).toMatch(/`<scope>` is `general` for every project or `project` for this one/);
+    const pins = front['allowed-tools'].map((tool) => /^Bash\((.*)\)$/s.exec(tool)![1]!);
+    const matches = (pin: string, command: string) => (pin.endsWith(' *') ? command.startsWith(pin.slice(0, -1)) : command === pin);
+    const named = [...SKILL.matchAll(/`(SUBZERO_PROJECT_DIR=[^`]*)`/g)].map((m) => m[1]!.replace(/<[^>]+>/g, 'x'));
+    expect(named.length).toBeGreaterThanOrEqual(5);
+    for (const command of named) expect(pins.some((pin) => matches(pin, command)), command).toBe(true);
+  });
+
   it('grants no file-writing tool', () => {
     for (const tool of front['allowed-tools']) expect(tool).not.toMatch(/^(Write|Edit|MultiEdit|NotebookEdit)\b/);
   });
@@ -64,5 +76,28 @@ describe('the shared guided-init guide', () => {
   it('takes the large warning from show instead of restating it', () => {
     expect(flat(GUIDE)).toMatch(/show the large warning from \*\*show\*\*/);
     expect(GUIDE).not.toContain(LARGE_TIER_WARNING);
+  });
+
+  it('asks the scope after show, and every later preview and apply carries it', () => {
+    const guide = flat(GUIDE);
+    const show = guide.indexOf('### 1. Show the current state');
+    const scope = guide.indexOf('every project or only this one');
+    const models = guide.indexOf('### 4. Choose a model');
+    expect(scope).toBeGreaterThan(show);
+    expect(scope).toBeLessThan(models);
+    expect(guide).toMatch(/default is the general file when it exists and this project has no overrides, otherwise this project/);
+    expect(guide).toMatch(/Run \*\*preview\*\* with the scope and every change/);
+    expect(guide).toMatch(/Run \*\*apply\*\* with the scope, the preview's fingerprint and the same changes/);
+    expect(guide).toMatch(/first-time general setup uses the general scope/i);
+  });
+
+  it('reads out the overridden list of a general-scope preview before the confirm', () => {
+    expect(flat(GUIDE)).toMatch(/general scope[^.]*`overridden`[^.]*say[^.]*this project keeps its own[^.]*before you ask to confirm/i);
+  });
+
+  it('no longer says a missing fallback agent is added on apply', () => {
+    expect(flat(GUIDE)).not.toMatch(/is added when you apply/);
+    expect(flat(GUIDE)).not.toMatch(/`repairable`: say what will be repaired, for example a missing `fallback` agent/);
+    expect(flat(GUIDE)).toMatch(/`repairable`:/);
   });
 });
