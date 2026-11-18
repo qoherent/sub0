@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, readdirSync, readFileSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, lstatSync, readdirSync, readFileSync, statSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { addStarterEntries, LoadError, loadCatalog, PLACEHOLDER_STARTER_AGENTS } from '../../src/config/agent-config.js';
@@ -699,6 +699,38 @@ models:
 const setMedium: Change = { op: 'setTier', tier: 'medium', model: 'local/new-medium', thinking: 'high' };
 
 describe('AgentSetup scopes', () => {
+  it('refuses a project-scope preview and apply when the project file is the general file, and still writes it at general scope', () => {
+    const root = tempDir('subzero-home-');
+    const shared = generalAt(fileOf(root));
+    mkdirSync(path.dirname(shared));
+    writeFileSync(shared, GENERAL_FULL);
+    const project = previewChanges(root, [setMedium], STARTER, 'project');
+    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the general file; run guided init with the every-project choice/) }]);
+    expect(project.nothingToChange).toBe(true);
+    expect(() => applyChanges(root, [setMedium], project.fingerprint, STARTER, 'project')).toThrow(SetupRefusedError);
+    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_FULL);
+
+    const general = previewChanges(root, [setMedium], STARTER, 'general');
+    expect(general.refusals).toEqual([]);
+    expect(applyChanges(root, [setMedium], general.fingerprint, STARTER, 'general').written).toBe(true);
+    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_FULL.replace('local/general-medium, thinking: low', 'local/new-medium, thinking: high'));
+  });
+
+  it('writes through a symlinked general file, leaving the link in place and the target holding the new text', () => {
+    const dir = tempDir('subzero-dotfiles-');
+    const target = path.join(dir, 'real.yaml');
+    writeFileSync(target, GENERAL_FULL);
+    const link = generalAt(path.join(tempDir('subzero-home-'), 'subzero.yaml'));
+    symlinkSync(target, link);
+    const root = makeProject(HAND_WRITTEN);
+    const preview = previewChanges(root, [setMedium], STARTER, 'general');
+    expect(applyChanges(root, [setMedium], preview.fingerprint, STARTER, 'general').written).toBe(true);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, 'utf8')).toBe(GENERAL_FULL.replace('local/general-medium, thinking: low', 'local/new-medium, thinking: high'));
+    expect(readdirSync(dir)).toEqual(['real.yaml']);
+    expect(readdirSync(path.dirname(link))).toEqual(['subzero.yaml']);
+  });
+
   it('covers AE6: a general-scope change to medium lists that this project keeps its own', () => {
     useGeneralConfig(GENERAL_MEDIUM_YAML);
     const root = makeProject(HAND_WRITTEN);

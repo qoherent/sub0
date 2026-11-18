@@ -376,14 +376,21 @@ Run init with no model for guided setup: `/subzero:init` in Claude Code, or
 - It offers to check that each chosen model answers a one-turn prompt.
 - It shows the change as a diff and writes it only after you confirm. For an
   every-project write it first reads out what this project keeps its own, so
-  you know the change does not apply here.
+  you know the change does not apply here. It also says the change is checked
+  against this project only: another project whose agents use a tier you remove,
+  or whose own limit uses an endpoint you move away from, may fail to load until
+  it is fixed.
+- When you answer "every project", the defaults it offers are the tiers and
+  limits that come from the general file. A tier or limit this project
+  overrides is asked as if it were not set in the general file.
 - It writes tiers and limits only, never agents. The built-in agents cover
   `general` and `fallback`.
 
 After a write that creates a file or adds or removes a tier, start a new
-Claude Code session so the routing text names the new tiers. pi refreshes its
-`subagent` tier text in place. A change to the general file applies to the next
-delegation at once.
+Claude Code session so the routing text names the new tiers. A write of the
+general file also needs a new session in every other open project. pi refreshes
+its `subagent` tier text in place in the session that wrote. A change to the
+general file applies to the next delegation at once.
 
 In Claude Code the init skill does its work through `subzero config` commands
 (`models`, `show`, `check`, `preview` and `apply`), which print one JSON
@@ -406,7 +413,7 @@ a terminal `subzero init <model>` with the same options as in Claude Code.
 `subzero init` with no model in a terminal is a usage error, because guided
 setup needs an agent to run it.
 
-`init <model>` is unchanged by the general file. It writes the project file: it
+`init <model>` is unchanged by the general file. It writes the project file only, never the general file: it
 adds a `medium` tier (with that host, model and thinking), a `general` agent
 with the full tool list and a read-only `fallback` agent, each only when the
 file lacks it. It preserves existing entries and lines, except

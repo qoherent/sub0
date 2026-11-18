@@ -49,6 +49,13 @@ describe('the /subzero:init skill', () => {
     expect(flat(SKILL)).toMatch(/AskUserQuestion tool, for every question/);
     expect(flat(SKILL)).toMatch(/timeout set to 180000 ms/);
     expect(flat(SKILL)).toMatch(/start a new Claude Code session/);
+    expect(flat(SKILL)).toMatch(/write of the general file also needs a new session in every other open project/);
+  });
+
+  it('says the quick path writes the project file only', () => {
+    const description = flat(SKILL.split('---')[1] ?? '');
+    expect(description).toMatch(/\/subzero:init <model> for the quick starter entries, which write this project's file only/);
+    expect(flat(SKILL)).toMatch(/`init <model>` writes the project file \(`\.agents\/subzero\.yaml`\) only, never the general file/);
   });
 });
 
@@ -93,6 +100,27 @@ describe('the shared guided-init guide', () => {
 
   it('reads out the overridden list of a general-scope preview before the confirm', () => {
     expect(flat(GUIDE)).toMatch(/general scope[^.]*`overridden`[^.]*say[^.]*this project keeps its own[^.]*before you ask to confirm/i);
+  });
+
+  it('under the general scope, defaults are only the source general tiers and limits, and a project override counts as unset', () => {
+    const guide = flat(GUIDE);
+    expect(guide).toMatch(/When the scope is general, the defaults are only the tiers and limits marked `source: general`/);
+    expect(guide).toMatch(/a tier marked `source: project` as if it were not set for the general file: suggest a model as for an unset tier, and do not offer the project's override as the default/);
+    expect(guide).toMatch(/Offer "remove" only for tiers marked `source: general`/);
+    expect(guide).toMatch(/Under the general scope, a tier marked `source: project` counts as not set/);
+    expect(guide).toMatch(/Under the general scope, a limit marked `source: project` counts as not set/);
+    expect(guide).toMatch(/A tier that is already set defaults to its current model\. Suggest a different model only for a tier that is not set yet/);
+  });
+
+  it('says before the confirm that a general-scope change is checked against this project only', () => {
+    const preview = flat(GUIDE.split('### 8. Preview and confirm')[1]?.split('### 9.')[0] ?? '');
+    expect(preview).toMatch(/checked against this project only; another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
+    expect(preview.indexOf('checked against this project only')).toBeLessThan(preview.indexOf('Write this to'));
+  });
+
+  it('tells the user a switched-off project cannot run guided setup', () => {
+    const show = flat(GUIDE.split('### 1.')[1]?.split('### 2.')[0] ?? '');
+    expect(show).toMatch(/refused[^-]*When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the general file by hand/);
   });
 
   it('no longer says a missing fallback agent is added on apply', () => {

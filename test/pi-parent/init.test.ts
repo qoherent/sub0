@@ -43,6 +43,23 @@ describe('pi /subzero init', () => {
     expect(kickoff).toContain(GUIDE_LINE);
     for (const name of SIX) expect(kickoff).toContain(name);
     expect(kickoff).toMatch(/no new session/i);
+    expect(kickoff).toMatch(/write of the general file also needs a new session in other open projects/);
+    expect(kickoff).toMatch(/checked against this project only/);
+  });
+
+  it('describes show as the merged state with source marks and the overridden list, without a scope', async () => {
+    const { fake } = await session(tempDir());
+    const description = String((fake.tools.get('subzero_init_show') as any).description);
+    expect(description).toMatch(/merged current state/);
+    expect(description).toMatch(/marked by `source`/);
+    expect(description).toMatch(/`overridden` list/);
+    expect(description).toMatch(/takes no scope/);
+  });
+
+  it('says in the quick-path usage that init <model> writes the project file only', async () => {
+    const { fake } = await session(tempDir());
+    await fake.command('subzero', 'init local/qwen extra');
+    expect(fake.notifications.at(-1)).toMatch(/init <model> writes this project's file only/);
   });
 
   it('refuses guided init without a UI, naming the quick path, and activates nothing', async () => {

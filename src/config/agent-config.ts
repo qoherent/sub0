@@ -233,6 +233,21 @@ export function generalFile(env: NodeJS.ProcessEnv = process.env): string {
   return fromEnv !== undefined && fromEnv !== '' ? fromEnv : path.join(os.homedir(), '.agents', 'subzero.yaml');
 }
 
+/**
+ * Whether two paths name one file: by real path when both exist, else by resolved path.
+ * In a project rooted at the home folder, the project file is the general file.
+ */
+export function isSameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b);
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
+
+/** Why a project-scope write is refused when the project file is the general file. */
+export const PROJECT_IS_GENERAL = "this project's file is the general file; run guided init with the every-project choice, or open the tool in a project folder";
+
 /** The starter tools of a child host, or undefined when its driver offers none. */
 export type StarterAgents = (host: string) => StarterTools | undefined;
 
@@ -251,7 +266,9 @@ export interface LoadOptions {
 export function loadCatalog(projectRoot: string, options: LoadOptions = {}): AgentCatalog {
   const agentFile = path.join(projectRoot, AGENT_FILE);
   const general = generalFile();
-  return build(() => readGeneralText(general), readTextOrNull(agentFile), { ...options, agentFile, generalFile: general });
+  // A project rooted at the home folder: the one file is the general layer, and the project has no file of its own.
+  const projectText = isSameFile(agentFile, general) ? null : readTextOrNull(agentFile);
+  return build(() => readGeneralText(general), projectText, { ...options, agentFile, generalFile: general });
 }
 
 /** Read and validate the agent file. One invalid entry fails the whole load. */
@@ -472,6 +489,11 @@ function parseLayer(text: string, file: string, kind: 'general' | 'project', opt
       if (general) throw removal(`endpoint "${endpoint}"`);
       limits.set(endpoint, null);
       continue;
+    }
+    if (general && isRecord(entry)) {
+      for (const key of Object.keys(entry)) {
+        if (key !== 'parallel') throw new LoadError(`the general file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file}`);
+      }
     }
     const parallel = isRecord(entry) ? entry.parallel : undefined;
     if (typeof parallel !== 'number' || !Number.isInteger(parallel) || parallel < 1) {
@@ -706,6 +728,7 @@ export interface StarterResult {
  */
 export function addStarterEntries(projectRoot: string, spec: StarterSpec): StarterResult {
   const agentFile = path.join(projectRoot, AGENT_FILE);
+  if (isSameFile(agentFile, generalFile())) throw new LoadError(PROJECT_IS_GENERAL);
   const text = readTextOrNull(agentFile);
 
   // Parsed as the layer it is, so a file guided init wrote (a lone tier, a null removal) is never refused by a single-file rule.

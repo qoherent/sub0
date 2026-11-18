@@ -9,7 +9,7 @@
 // validated with the load rules delegation uses and written atomically, because
 // running delegations re-read the files on every call.
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, fchmodSync, mkdirSync, openSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, fchmodSync, mkdirSync, openSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { isMap, isScalar, parse as parseYaml, type Document, type Pair } from 'yaml';
 import {
@@ -21,9 +21,11 @@ import {
   flowYaml,
   generalFile,
   isRecord,
+  isSameFile,
   isThinkingLevel,
   LoadError,
   modelEndpoint,
+  PROJECT_IS_GENERAL,
   ProjectDisabledError,
   readGeneralText,
   readTextOrNull,
@@ -222,7 +224,9 @@ interface Layers {
 function readLayers(projectRoot: string): Layers {
   const agentFile = path.join(projectRoot, AGENT_FILE);
   const generalPath = generalFile();
-  return { agentFile, generalPath, generalText: readGeneralText(generalPath), projectText: readTextOrNull(agentFile) };
+  // A project rooted at the home folder: the one file is the general layer, and the project has no file of its own.
+  const projectText = isSameFile(agentFile, generalPath) ? null : readTextOrNull(agentFile);
+  return { agentFile, generalPath, generalText: readGeneralText(generalPath), projectText };
 }
 
 const targetPath = (l: Layers, scope: SetupScope) => (scope === 'general' ? l.generalPath : l.agentFile);
@@ -519,6 +523,23 @@ function sameTier(a: ModelTier, b: ModelTier): boolean {
 function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupStarterSpec): SetupPreview {
   const agentFile = targetPath(l, scope);
   const text = targetText(l, scope);
+  if (scope === 'project' && isSameFile(l.agentFile, l.generalPath)) {
+    // Writing the project file would put project-only keys into the general file.
+    return {
+      agentFile,
+      scope,
+      fileExists: l.generalText !== null,
+      changes,
+      refusals: [{ change: null, message: PROJECT_IS_GENERAL }],
+      droppedLimits: [],
+      overridden: { tiers: [], limits: [] },
+      text: l.generalText ?? '',
+      diff: '',
+      summary: [],
+      nothingToChange: true,
+      fingerprint: sha256(JSON.stringify({ file: l.generalText, changes, scope, host: starter.host, shared: true })),
+    };
+  }
   const other = scope === 'general' ? l.projectText : l.generalText;
   const view = viewOf(l, scope, l.generalText, l.projectText);
   const own = namedIn(text);
@@ -902,11 +923,18 @@ function unifiedDiff(before: string | null, after: string, label: string, contex
 }
 
 /**
- * Write the agent file through a temp file next to it, created exclusively so an
+ * Write the agent file (the real file behind a link) through a temp file next to it, created exclusively so an
  * existing path or symlink is never followed, then renamed into place. The temp
  * file is removed on any failure; the original is untouched until the rename.
  */
-function writeAtomic(file: string, text: string): void {
+function writeAtomic(requested: string, text: string): void {
+  // An existing file may be a link (a dotfiles repo): the temp file goes next to the real file, and the rename replaces it, not the link.
+  let file = requested;
+  try {
+    file = realpathSync(requested);
+  } catch {
+    // A new file is created where it is asked for.
+  }
   const dir = path.dirname(file);
   mkdirSync(dir, { recursive: true });
   const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${randomBytes(12).toString('hex')}.tmp`);

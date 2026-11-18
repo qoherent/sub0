@@ -22,10 +22,10 @@ These hold for the whole run.
 
 Run **show**.
 
-- `refused`: show the error unchanged. Tell the user to fix the file by hand or move it aside, then stop.
+- `refused`: show the error unchanged. Tell the user to fix the file by hand or move it aside, then stop. When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the general file by hand.
 - `repairable`: say what `problem` names and that the apply repairs it.
 - `no-file`: this project has no file of its own.
-- `ok`: the current tiers and limits, each marked as coming from the general file or from this project, are the defaults for every question below.
+- `ok`: the current tiers and limits, each marked as coming from the general file or from this project, are the defaults for every question below, with one exception once the scope is known: see "Defaults under the general scope" in step 4.
 
 ### 2. Ask where the models apply
 
@@ -45,6 +45,7 @@ Print the full list as compact text, grouped by endpoint (the part of the name b
 
 Ask about `medium` first, because it is required. Then ask about `small` and `large`.
 
+- **Defaults under the general scope.** **show** takes no scope and returns the merged state, so a tier or limit marked `source: project` is this project's own override, not a value of the general file. When the scope is general, the defaults are only the tiers and limits marked `source: general`. Ask a tier marked `source: project` as if it were not set for the general file: suggest a model as for an unset tier, and do not offer the project's override as the default. Offer "remove" only for tiers marked `source: general`. Steps 5 and 6 follow the same rule.
 - **Defaults.** A tier that is already set defaults to its current model. Suggest a different model only for a tier that is not set yet. Give each suggestion one line of reason:
   - `small` is the cheapest capable model;
   - `medium` is a mid-tier model;
@@ -62,13 +63,13 @@ Ask about `medium` first, because it is required. Then ask about `small` and `la
 
 ### 5. Choose a thinking level for each new or changed tier
 
-Offer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level.
+Offer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level. Under the general scope, a tier marked `source: project` counts as not set, so ask its level like a new tier.
 
 ### 6. Ask a parallel limit for each endpoint in use
 
 For each endpoint the chosen tiers use, ask one question that names the tiers and models on it: "How many children may run at once on `local`, used by small (local/qwen3-4b) and medium (local/qwen3-coder-30b)?"
 
-- Answers are a whole number of 1 or more, or "no limit". The current limit is the default.
+- Answers are a whole number of 1 or more, or "no limit". The current limit is the default. Under the general scope, a limit marked `source: project` counts as not set, so do not offer it as the default.
 - A single-GPU local server usually wants 1.
 - Skip endpoints that only an agent's tier override uses. Their limits stay as they are.
 - Two pi providers that point at the same server still count as two endpoints.
@@ -86,6 +87,7 @@ Run **preview** with the scope and every change: tiers set or removed, and limit
 - If it lists refusals or reports the result as invalid, explain them and go back to the step that needs a different answer.
 - If there is nothing to change, say so and stop.
 - For the general scope, read out the preview's `overridden` list: for each tier or limit on it, say that this project keeps its own, so the change does not apply here, before you ask to confirm.
+- For the general scope, also say that the change is checked against this project only: "this is checked against this project only; another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed."
 
 Otherwise show the diff and the summary unchanged, then ask: "Write this to `<file>`?", naming the general file or `.agents/subzero.yaml` as the scope says. Offer three options: write it, change something, or cancel.
 

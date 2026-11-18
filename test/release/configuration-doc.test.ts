@@ -288,6 +288,10 @@ describe('docs/configuration.md', () => {
     expect(init).toMatch(/`config show` marks each tier and limit as coming from the general file or from the project/);
     expect(init).toMatch(/`init <model>` is unchanged by the general file. It writes the project file/);
     expect(init).toMatch(/add `small` or `large` afterwards, run guided init/i);
+    expect(init).toMatch(/checked against this project only: another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
+    expect(init).toMatch(/defaults it offers are the tiers and limits that come from the general file/);
+    expect(init).toMatch(/A write of the general file also needs a new session in every other open project/);
+    expect(init).toMatch(/It writes the project file only, never the general file/);
   });
 
   it('tells the README and the CHANGELOG about the one-time setup and the behavior change', () => {

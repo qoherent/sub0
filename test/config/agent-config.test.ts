@@ -573,6 +573,69 @@ endpoints:
     expect(err.message).toContain('"models.extra"');
   });
 
+  it('refuses an endpoint key other than parallel in the general file, naming the file and the key, but ignores it in a project file', () => {
+    const file = withGeneral(GENERAL_TIERS.replace('    parallel: 2', '    parallel: 2\n    colour: red'));
+    const err = errorOf(() => load(projectWith(null)));
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toContain(file);
+    expect(err.message).toContain('endpoints.local.colour');
+    withGeneral(GENERAL_TIERS);
+    const root = projectWith(`endpoints:\n  local:\n    parallel: 3\n    colour: red\nagents:\n${GENERAL}${FALLBACK}`);
+    expect(load(root).limits.get('local')).toBe(3);
+  });
+
+  it('loads a file that is both the project file and the general file once, as the general layer only', () => {
+    const root = tempDir('subzero-home-');
+    const shared = projectFile(root);
+    mkdirSync(path.dirname(shared));
+    writeFileSync(shared, GENERAL_TIERS);
+    vi.stubEnv('SUBZERO_GENERAL_CONFIG', shared);
+    const catalog = load(root);
+    expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low' });
+    expect(catalog.limits.get('local')).toBe(2);
+    expect(catalog.entries.get('general')).toMatchObject({ timeout: 1200, skills: [] });
+    // Reached through a link, it is still the same file.
+    const link = path.join(tempDir('subzero-link-'), 'general.yaml');
+    symlinkSync(shared, link);
+    vi.stubEnv('SUBZERO_GENERAL_CONFIG', link);
+    expect(load(root).tiers.size).toBe(3);
+    // A limit no model uses is dropped as an inherited one, where a project file's own would be an error.
+    writeFileSync(shared, `${GENERAL_TIERS}  unused:\n    parallel: 1\n`);
+    expect(load(root).limits.has('unused')).toBe(false);
+    // Agents in that one file are refused as the general layer refuses them, not read as a project layer.
+    writeFileSync(shared, `${GENERAL_TIERS}agents:\n${GENERAL}${FALLBACK}`);
+    expect(errorOf(() => load(root)).message).toMatch(/the general file holds only models.tiers, endpoints and routing, not "agents"/);
+  });
+
+  it('refuses to add starter entries to a project file that is the general file, writing nothing', () => {
+    const root = tempDir('subzero-home-');
+    const shared = projectFile(root);
+    mkdirSync(path.dirname(shared));
+    writeFileSync(shared, GENERAL_TIERS);
+    vi.stubEnv('SUBZERO_GENERAL_CONFIG', shared);
+    const spec: StarterSpec = { host: 'pi', model: 'local/new', thinking: 'low', timeout: 30, generalTools: ['read'], fallbackTools: ['read'] };
+    const err = errorOf(() => addStarterEntries(root, spec));
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toMatch(/this project's file is the general file; run guided init with the every-project choice, or open the tool in a project folder/);
+    expect(readFileSync(shared, 'utf8')).toBe(GENERAL_TIERS);
+    // The same refusal when the file does not exist yet.
+    const bare = tempDir('subzero-home-');
+    vi.stubEnv('SUBZERO_GENERAL_CONFIG', projectFile(bare));
+    expect(() => addStarterEntries(bare, spec)).toThrow(/is the general file/);
+    expect(existsSync(projectFile(bare))).toBe(false);
+  });
+
+  it('raises a load error naming the project file for an enabled that is not a boolean', () => {
+    withGeneral(GENERAL_TIERS);
+    for (const bad of ['"false"', '0']) {
+      const root = projectWith(`enabled: ${bad}\n`);
+      const err = errorOf(() => load(root));
+      expect(err).toBeInstanceOf(LoadError);
+      expect(err.message).toMatch(/enabled must be true or false/);
+      expect(err.message).toContain(projectFile(root));
+    }
+  });
+
   it('refuses a removal entry in the general file, naming the file', () => {
     const file = withGeneral(GENERAL_TIERS.replace('    small: { host: pi, model: local/s, thinking: off }', '    small:'));
     const err = errorOf(() => load(projectWith(null)));
