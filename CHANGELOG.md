@@ -24,3 +24,7 @@
   and `apply` take `--scope global|project`, and `config show` marks where each
   tier and limit comes from. `init <model>` is unchanged.
 - Load errors name the file they come from, the global file or the project file.
+- Global file key `pi.extensions`: a list of pi extension files (absolute or
+  `~/` paths) that every pi process of subzero loads with `-e` next to `-ne`:
+  child runs, `subzero config models` and `subzero config check`. A project file
+  with a `pi` key is a load error.

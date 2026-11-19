@@ -27302,6 +27302,19 @@ function loadCatalog(projectRoot, options = {}) {
   const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
   return build(() => readGlobalText(global), projectText, { ...options, agentFile, globalFile: global });
 }
+function loadPiExtensions(projectRoot) {
+  const agentFile = path.join(projectRoot, AGENT_FILE);
+  const global = globalFile();
+  const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
+  const globalText = readGlobalText(global);
+  const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true };
+  try {
+    return buildCatalog(globalText, projectText, options).piExtensions;
+  } catch (err) {
+    if (!(err instanceof ProjectDisabledError)) throw err;
+    return buildCatalog(globalText, null, options).piExtensions;
+  }
+}
 function loadAgentFile(projectRoot, options = {}) {
   return loadCatalog(projectRoot, options);
 }
@@ -27334,7 +27347,8 @@ function readGlobalText(file2) {
 function buildCatalog(globalText, projectText, options) {
   return build(() => globalText, projectText, options);
 }
-var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing"];
+var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "pi"];
+var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and pi.extensions";
 function inFile(file2, step) {
   try {
     return step();
@@ -27401,7 +27415,8 @@ function build(readGlobal, projectText, options) {
     entries,
     tiers,
     routing: { hook: routing.hook ?? true, ...routing.genericAgents !== void 0 ? { genericAgents: routing.genericAgents } : {} },
-    limits
+    limits,
+    piExtensions: [...new Set(global?.piExtensions ?? [])]
   };
 }
 function fillBuiltInAgents(entries, host, starterAgents) {
@@ -27430,9 +27445,12 @@ function parseLayer(text, file2, kind, options) {
   if (global) {
     for (const key of Object.keys(doc)) {
       if (!GLOBAL_LAYER_KEYS.includes(key)) {
-        throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "${key}": ${file2}`);
+        throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "${key}": ${file2}`);
       }
     }
+  }
+  if (!global && "pi" in doc) {
+    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file2}`);
   }
   if (doc.enabled !== void 0 && typeof doc.enabled !== "boolean") throw new LoadError("enabled must be true or false");
   const agentsMap = doc.agents ?? {};
@@ -27445,7 +27463,7 @@ function parseLayer(text, file2, kind, options) {
   const modelsMap = doc.models ?? {};
   if (global) {
     for (const key of Object.keys(modelsMap)) {
-      if (key !== "tiers") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "models.${key}": ${file2}`);
+      if (key !== "tiers") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "models.${key}": ${file2}`);
     }
   }
   if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
@@ -27467,7 +27485,7 @@ function parseLayer(text, file2, kind, options) {
     }
     if (global && isRecord(entry)) {
       for (const key of Object.keys(entry)) {
-        if (key !== "parallel") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file2}`);
+        if (key !== "parallel") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "endpoints.${endpoint}.${key}": ${file2}`);
       }
     }
     const parallel = isRecord(entry) ? entry.parallel : void 0;
@@ -27485,7 +27503,15 @@ function parseLayer(text, file2, kind, options) {
       tiers.set(name, validateTier(name, raw));
     }
   }
-  return { enabled: doc.enabled !== false, tiers, limits, routing: validateRouting(doc.routing), skillFolders, agents: agentsMap };
+  return {
+    enabled: doc.enabled !== false,
+    tiers,
+    limits,
+    routing: validateRouting(doc.routing),
+    skillFolders,
+    agents: agentsMap,
+    piExtensions: global ? validatePiExtensions(doc.pi, file2) : []
+  };
 }
 function validateTier(name, raw) {
   if (!isRecord(raw)) throw new LoadError(`tier "${name}": must be a map of host, model and thinking`);
@@ -27578,6 +27604,31 @@ function validateAgent(name, raw, skillFolders, tiers) {
     ...def.tier !== void 0 ? { tier: def.tier } : {},
     overrides
   };
+}
+function validatePiExtensions(raw, file2) {
+  if (raw === void 0) return [];
+  const bad = (detail) => new LoadError(`pi: ${detail}: ${file2}`);
+  if (!isRecord(raw)) throw bad("must be a map holding extensions, a list of paths");
+  for (const key of Object.keys(raw)) {
+    if (key !== "extensions") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file2}`);
+  }
+  if (raw.extensions === void 0) return [];
+  if (!Array.isArray(raw.extensions)) throw bad("extensions must be a list of paths");
+  return raw.extensions.map((entry, i) => {
+    if (typeof entry !== "string" || entry.trim() === "") throw bad(`extensions[${i}] must be a non-empty path`);
+    const resolved = entry === "~" ? "" : entry.startsWith("~/") ? path.join(os.homedir(), entry.slice(2)) : entry;
+    if (resolved === "" || !path.isAbsolute(resolved)) {
+      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
+    }
+    let isFile = false;
+    try {
+      isFile = statSync(resolved).isFile();
+    } catch {
+      throw bad(`extension "${entry}" does not exist (${resolved})`);
+    }
+    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
+    return path.normalize(resolved);
+  });
 }
 function validateRouting(raw) {
   if (raw === void 0 || raw === null) return {};
@@ -27818,7 +27869,7 @@ function unavailableUsage(reason) {
 
 // src/pi/launch.ts
 var CHILD_ENV = { PI_OFFLINE: "1", PI_TELEMETRY: "0" };
-function childRpcArgs() {
+function childRpcArgs(piExtensions = []) {
   return [
     "--mode",
     "rpc",
@@ -27828,12 +27879,13 @@ function childRpcArgs() {
     "-nc",
     "-np",
     "--no-themes",
-    "-ns"
+    "-ns",
+    ...piExtensions.flatMap((file2) => ["-e", file2])
   ];
 }
-function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }) {
+function launchArgs({ taskId, agent, overlaySkills, sessionsFolder, piExtensions = [] }) {
   return [
-    ...childRpcArgs(),
+    ...childRpcArgs(piExtensions),
     ...overlaySkills.flatMap((folder) => ["--skill", folder]),
     "--model",
     agent.model,
@@ -28087,7 +28139,7 @@ var PiDriver = class {
    */
   listModels = async (options = {}) => {
     const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
-    const probe = this.probe([...childRpcArgs(), "--no-session"], options.projectRoot, { strict: true });
+    const probe = this.probe([...childRpcArgs(options.piExtensions), "--no-session"], options.projectRoot, { strict: true });
     const timer = deadline(timeoutMs);
     try {
       const answer = await Promise.race([
@@ -28116,14 +28168,14 @@ var PiDriver = class {
    * or failed with a kind and a one-line reason; aborting kills pi.
    */
   checkModel = async (request) => {
-    const { model, thinking, projectRoot, signal } = request;
+    const { model, thinking, projectRoot, signal, piExtensions } = request;
     if (signal?.aborted) return checkFailed("cancelled", "the check was cancelled");
     const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
     let lastAssistant = null;
     let markSettled;
     const settled = new Promise((resolve) => markSettled = () => resolve("settled"));
     const probe = this.probe(
-      [...childRpcArgs(), "--model", model, "--thinking", thinking, "--no-tools", "--no-session"],
+      [...childRpcArgs(piExtensions), "--model", model, "--thinking", thinking, "--no-tools", "--no-session"],
       projectRoot,
       {
         strict: false,
@@ -28399,7 +28451,7 @@ var PiChildRun = class {
     this.signalTree("SIGKILL");
   }
   async main() {
-    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
+    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder, piExtensions } = this.request;
     const missing = missingSkills(agent.skills);
     if (missing.length > 0) {
       return failed("skill_mismatch", `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(", ")}`);
@@ -28416,7 +28468,7 @@ var PiChildRun = class {
     }
     const command = [
       ...this.driver.piCommand,
-      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder })
+      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...piExtensions !== void 0 ? { piExtensions } : {} })
     ];
     const launchSpec = {
       command,
@@ -28862,10 +28914,11 @@ function newTaskId() {
 
 // src/core/task-core.ts
 var Task = class {
-  constructor(core, taskId, agent, brief, port, createdAt) {
+  constructor(core, taskId, agent, brief, port, createdAt, piExtensions = []) {
     this.core = core;
     this.brief = brief;
     this.port = port;
+    this.piExtensions = piExtensions;
     this.taskId = taskId;
     this.agent = agent;
     this.createdAt = createdAt;
@@ -28874,6 +28927,7 @@ var Task = class {
   core;
   brief;
   port;
+  piExtensions;
   taskId;
   agent;
   createdAt;
@@ -28933,7 +28987,8 @@ var Task = class {
           brief: this.brief,
           projectRoot: this.core.projectRoot,
           sessionsFolder: this.core.store.sessionsFolder,
-          driverFilesFolder: this.core.store.driverFilesFolder(this.taskId)
+          driverFilesFolder: this.core.store.driverFilesFolder(this.taskId),
+          ...this.piExtensions.length > 0 ? { piExtensions: [...this.piExtensions] } : {}
         },
         (event) => this.handleEvent(event)
       );
@@ -29044,7 +29099,7 @@ var TaskCore = class {
       endpoint: agent.endpoint,
       createdAt
     });
-    return new Task(this, taskId, agent, request.brief, request.port, createdAt);
+    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.piExtensions);
   }
 };
 
@@ -29541,11 +29596,12 @@ var DelegationService = class {
   async delegate(delegation, options) {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === "") throw new EmptyBriefError();
-    const { agent, notice, tier } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier, piExtensions } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
     const task = core.start({
       agent,
       port,
+      piExtensions,
       brief: renderBrief(delegation),
       ...delegation.parentSessionId !== void 0 ? { parentSessionId: delegation.parentSessionId } : {}
     });
@@ -29589,12 +29645,17 @@ var DelegationService = class {
     const options = { supportedHosts, ...tier !== void 0 && tier !== "" ? { tier } : {} };
     const named = delegation.agent;
     if (named === void 0 || named === GENERAL_AGENT || catalog.entries.has(named)) {
-      return { agent: resolveAgent(catalog, named, options), tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER };
+      return {
+        agent: resolveAgent(catalog, named, options),
+        tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER,
+        piExtensions: catalog.piExtensions
+      };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
     return {
       agent: resolveAgent(catalog, FALLBACK_AGENT, options),
       tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
+      piExtensions: catalog.piExtensions,
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(", ")}`
     };
   }
@@ -29875,7 +29936,7 @@ function viewOf(l, scope, global, project) {
   return { tiers: own2.tiers, limits, project: merged, projectNamed: merged === null ? namedIn(null) : namedIn(project) };
 }
 function emptyCatalog(agentFile) {
-  return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map() };
+  return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map(), piExtensions: [] };
 }
 function dependentsOf(catalog, tier) {
   return [...catalog.entries.values()].filter((e) => e.tier === tier || e.overrides.has(tier)).map((e) => e.name);
@@ -30553,9 +30614,10 @@ var SetupService = class {
     if (checkModel === void 0) {
       throw new SetupServiceError("no_model_check", `the child driver of the host "${host}" cannot check a model`);
     }
+    const piExtensions = this.piExtensions();
     const results = [];
     for (const { model, thinking } of models) {
-      const result2 = await checkModel({ model, thinking, projectRoot: this.projectRoot, ...signal ? { signal } : {} });
+      const result2 = await checkModel({ model, thinking, projectRoot: this.projectRoot, piExtensions, ...signal ? { signal } : {} });
       results.push({ model, thinking, ...result2 });
     }
     return { host, results };
@@ -30575,10 +30637,20 @@ var SetupService = class {
     if (listModels === void 0) {
       throw new SetupServiceError("no_model_listing", `the child driver of the host "${host}" cannot list its models`);
     }
+    const piExtensions = this.piExtensions();
     try {
-      return await listModels({ projectRoot: this.projectRoot });
+      return await listModels({ projectRoot: this.projectRoot, piExtensions });
     } catch (err) {
       throw new SetupServiceError("listing_failed", err instanceof Error ? err.message : String(err));
+    }
+  }
+  /** The pi extensions of the merged config for the project: the one place the listing and the check read them. */
+  piExtensions() {
+    try {
+      return loadPiExtensions(this.projectRoot);
+    } catch (err) {
+      if (err instanceof LoadError) throw new SetupServiceError("invalid_config", err.message);
+      throw err;
     }
   }
   /** Guided setup writes tiers and limits only, so the host is all it needs. */
