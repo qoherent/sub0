@@ -27251,7 +27251,8 @@ function readGlobalText(file2) {
     throw new LoadError(`global file is unreadable: ${file2} (${code ?? String(err)})`);
   }
 }
-var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing"];
+var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "pi"];
+var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and pi.extensions";
 function inFile(file2, step) {
   try {
     return step();
@@ -27318,7 +27319,8 @@ function build(readGlobal, projectText, options) {
     entries,
     tiers,
     routing: { hook: routing.hook ?? true, ...routing.genericAgents !== void 0 ? { genericAgents: routing.genericAgents } : {} },
-    limits
+    limits,
+    piExtensions: [...new Set(global?.piExtensions ?? [])]
   };
 }
 function fillBuiltInAgents(entries, host, starterAgents) {
@@ -27347,9 +27349,12 @@ function parseLayer(text, file2, kind, options) {
   if (global) {
     for (const key of Object.keys(doc)) {
       if (!GLOBAL_LAYER_KEYS.includes(key)) {
-        throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "${key}": ${file2}`);
+        throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "${key}": ${file2}`);
       }
     }
+  }
+  if (!global && "pi" in doc) {
+    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file2}`);
   }
   if (doc.enabled !== void 0 && typeof doc.enabled !== "boolean") throw new LoadError("enabled must be true or false");
   const agentsMap = doc.agents ?? {};
@@ -27362,7 +27367,7 @@ function parseLayer(text, file2, kind, options) {
   const modelsMap = doc.models ?? {};
   if (global) {
     for (const key of Object.keys(modelsMap)) {
-      if (key !== "tiers") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "models.${key}": ${file2}`);
+      if (key !== "tiers") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "models.${key}": ${file2}`);
     }
   }
   if (modelsMap.tiers !== void 0 && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
@@ -27384,7 +27389,7 @@ function parseLayer(text, file2, kind, options) {
     }
     if (global && isRecord(entry)) {
       for (const key of Object.keys(entry)) {
-        if (key !== "parallel") throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file2}`);
+        if (key !== "parallel") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "endpoints.${endpoint}.${key}": ${file2}`);
       }
     }
     const parallel = isRecord(entry) ? entry.parallel : void 0;
@@ -27402,7 +27407,15 @@ function parseLayer(text, file2, kind, options) {
       tiers.set(name, validateTier(name, raw));
     }
   }
-  return { enabled: doc.enabled !== false, tiers, limits, routing: validateRouting(doc.routing), skillFolders, agents: agentsMap };
+  return {
+    enabled: doc.enabled !== false,
+    tiers,
+    limits,
+    routing: validateRouting(doc.routing),
+    skillFolders,
+    agents: agentsMap,
+    piExtensions: global ? validatePiExtensions(doc.pi, file2) : []
+  };
 }
 function validateTier(name, raw) {
   if (!isRecord(raw)) throw new LoadError(`tier "${name}": must be a map of host, model and thinking`);
@@ -27495,6 +27508,31 @@ function validateAgent(name, raw, skillFolders, tiers) {
     ...def.tier !== void 0 ? { tier: def.tier } : {},
     overrides
   };
+}
+function validatePiExtensions(raw, file2) {
+  if (raw === void 0) return [];
+  const bad = (detail) => new LoadError(`pi: ${detail}: ${file2}`);
+  if (!isRecord(raw)) throw bad("must be a map holding extensions, a list of paths");
+  for (const key of Object.keys(raw)) {
+    if (key !== "extensions") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file2}`);
+  }
+  if (raw.extensions === void 0) return [];
+  if (!Array.isArray(raw.extensions)) throw bad("extensions must be a list of paths");
+  return raw.extensions.map((entry, i) => {
+    if (typeof entry !== "string" || entry.trim() === "") throw bad(`extensions[${i}] must be a non-empty path`);
+    const resolved = entry === "~" ? "" : entry.startsWith("~/") ? path2.join(os.homedir(), entry.slice(2)) : entry;
+    if (resolved === "" || !path2.isAbsolute(resolved)) {
+      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
+    }
+    let isFile = false;
+    try {
+      isFile = statSync2(resolved).isFile();
+    } catch {
+      throw bad(`extension "${entry}" does not exist (${resolved})`);
+    }
+    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
+    return path2.normalize(resolved);
+  });
 }
 function validateRouting(raw) {
   if (raw === void 0 || raw === null) return {};
