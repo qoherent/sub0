@@ -10,21 +10,25 @@ export interface LaunchInputs {
   agent: AgentDefinition;
   overlaySkills: string[];
   sessionsFolder: string;
+  /** Extension files named in the global file; each loads with -e. */
+  piExtensions?: readonly string[];
 }
 
 /**
  * The flags every pi run of subzero starts with: RPC mode, offline, and the
  * resource isolation of a child (no project trust, extensions, context files,
  * prompt templates, themes or discovered skills). Child runs, the model listing
- * and the model check all take them from here.
+ * and the model check all take them from here. -ne keeps every extension out except the
+ * files named in the global file, which load with -e right after the isolation flags.
  */
-export function childRpcArgs(): string[] {
+export function childRpcArgs(piExtensions: readonly string[] = []): string[] {
   return [
     '--mode', 'rpc',
     '--offline',
     '-na', '-ne', '-nc', '-np',
     '--no-themes',
     '-ns',
+    ...piExtensions.flatMap((file) => ['-e', file]),
   ];
 }
 
@@ -32,9 +36,9 @@ export function childRpcArgs(): string[] {
  * The exact flag set of a child run. --session is never added: pi 0.87 exits when
  * it is combined with --session-id.
  */
-export function launchArgs({ taskId, agent, overlaySkills, sessionsFolder }: LaunchInputs): string[] {
+export function launchArgs({ taskId, agent, overlaySkills, sessionsFolder, piExtensions = [] }: LaunchInputs): string[] {
   return [
-    ...childRpcArgs(),
+    ...childRpcArgs(piExtensions),
     ...overlaySkills.flatMap((folder) => ['--skill', folder]),
     '--model', agent.model,
     '--thinking', agent.thinking,

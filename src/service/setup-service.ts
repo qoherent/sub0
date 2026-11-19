@@ -6,7 +6,7 @@
 // driver of the host; the conversation itself lives in the shared guide text. Every
 // operation acts on the project root the service was made with, never the process's
 // working directory, and every result is plain JSON.
-import { isThinkingLevel, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
+import { isThinkingLevel, LoadError, loadPiExtensions, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
 import {
   applyChanges,
   ChangeSetError,
@@ -42,6 +42,7 @@ export type SetupServiceErrorCode =
   | 'prerequisites_missing'
   | 'no_model_listing'
   | 'listing_failed'
+  | 'invalid_config'
   | 'no_model_check'
   | 'invalid_check';
 
@@ -193,9 +194,10 @@ export class SetupService {
     if (checkModel === undefined) {
       throw new SetupServiceError('no_model_check', `the child driver of the host "${host}" cannot check a model`);
     }
+    const piExtensions = this.piExtensions();
     const results: ModelCheckEntry[] = [];
     for (const { model, thinking } of models) {
-      const result = await checkModel({ model, thinking, projectRoot: this.projectRoot, ...(signal ? { signal } : {}) });
+      const result = await checkModel({ model, thinking, projectRoot: this.projectRoot, piExtensions, ...(signal ? { signal } : {}) });
       results.push({ model, thinking, ...result });
     }
     return { host, results };
@@ -218,10 +220,21 @@ export class SetupService {
     if (listModels === undefined) {
       throw new SetupServiceError('no_model_listing', `the child driver of the host "${host}" cannot list its models`);
     }
+    const piExtensions = this.piExtensions();
     try {
-      return await listModels({ projectRoot: this.projectRoot });
+      return await listModels({ projectRoot: this.projectRoot, piExtensions });
     } catch (err) {
       throw new SetupServiceError('listing_failed', err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** The pi extensions of the merged config for the project: the one place the listing and the check read them. */
+  private piExtensions(): string[] {
+    try {
+      return loadPiExtensions(this.projectRoot);
+    } catch (err) {
+      if (err instanceof LoadError) throw new SetupServiceError('invalid_config', err.message);
+      throw err;
     }
   }
 

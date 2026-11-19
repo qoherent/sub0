@@ -87,6 +87,11 @@ export interface AgentCatalog {
   tiers: Map<string, ModelTier>;
   routing: RoutingSettings;
   limits: Map<string, number>;
+  /**
+   * The pi extensions every pi process of subzero loads, from `pi.extensions` of the
+   * global file: absolute paths in file order, no duplicates. Only the pi driver reads it.
+   */
+  piExtensions: string[];
 }
 
 /** What the callers that check hosts pass in; none means no host is checked. */
@@ -271,6 +276,25 @@ export function loadCatalog(projectRoot: string, options: LoadOptions = {}): Age
   return build(() => readGlobalText(global), projectText, { ...options, agentFile, globalFile: global });
 }
 
+/**
+ * The pi extensions of the merged config for a project root, read with the lenient rules of
+ * guided setup: a missing medium tier, general or fallback is no error, and a project that
+ * is switched off still has the global list. A refusal in either file is a load error.
+ */
+export function loadPiExtensions(projectRoot: string): string[] {
+  const agentFile = path.join(projectRoot, AGENT_FILE);
+  const global = globalFile();
+  const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
+  const globalText = readGlobalText(global);
+  const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true };
+  try {
+    return buildCatalog(globalText, projectText, options).piExtensions;
+  } catch (err) {
+    if (!(err instanceof ProjectDisabledError)) throw err;
+    return buildCatalog(globalText, null, options).piExtensions;
+  }
+}
+
 /** Read and validate the agent file. One invalid entry fails the whole load. */
 export function loadAgentFile(projectRoot: string, options: LoadOptions = {}): AgentCatalog {
   return loadCatalog(projectRoot, options);
@@ -343,9 +367,12 @@ interface Layer {
   routing: Partial<RoutingSettings>;
   skillFolders: Map<string, string>;
   agents: Record<string, unknown>;
+  /** The global file's `pi.extensions`, resolved; always empty in a project layer. */
+  piExtensions: string[];
 }
 
-const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing'];
+const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing', 'pi'];
+const GLOBAL_KEYS_TEXT = 'models.tiers, endpoints, routing and pi.extensions';
 
 /** Run a step on one file's content; a load error that does not name the file gets it. */
 function inFile<T>(file: string, step: () => T): T {
@@ -421,6 +448,7 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
     tiers,
     routing: { hook: routing.hook ?? true, ...(routing.genericAgents !== undefined ? { genericAgents: routing.genericAgents } : {}) },
     limits,
+    piExtensions: [...new Set(global?.piExtensions ?? [])],
   };
 }
 
@@ -453,9 +481,12 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
   if (global) {
     for (const key of Object.keys(doc)) {
       if (!GLOBAL_LAYER_KEYS.includes(key)) {
-        throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "${key}": ${file}`);
+        throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "${key}": ${file}`);
       }
     }
+  }
+  if (!global && 'pi' in doc) {
+    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file}`);
   }
   if (doc.enabled !== undefined && typeof doc.enabled !== 'boolean') throw new LoadError('enabled must be true or false');
   const agentsMap = doc.agents ?? {};
@@ -468,7 +499,7 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
   const modelsMap = (doc.models ?? {}) as Record<string, unknown>;
   if (global) {
     for (const key of Object.keys(modelsMap)) {
-      if (key !== 'tiers') throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "models.${key}": ${file}`);
+      if (key !== 'tiers') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "models.${key}": ${file}`);
     }
   }
   if (modelsMap.tiers !== undefined && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
@@ -492,7 +523,7 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     }
     if (global && isRecord(entry)) {
       for (const key of Object.keys(entry)) {
-        if (key !== 'parallel') throw new LoadError(`the global file holds only models.tiers, endpoints and routing, not "endpoints.${endpoint}.${key}": ${file}`);
+        if (key !== 'parallel') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "endpoints.${endpoint}.${key}": ${file}`);
       }
     }
     const parallel = isRecord(entry) ? entry.parallel : undefined;
@@ -512,7 +543,15 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     }
   }
 
-  return { enabled: doc.enabled !== false, tiers, limits, routing: validateRouting(doc.routing), skillFolders, agents: agentsMap };
+  return {
+    enabled: doc.enabled !== false,
+    tiers,
+    limits,
+    routing: validateRouting(doc.routing),
+    skillFolders,
+    agents: agentsMap,
+    piExtensions: global ? validatePiExtensions(doc.pi, file) : [],
+  };
 }
 
 function validateTier(name: string, raw: unknown): ModelTier {
@@ -620,6 +659,36 @@ function validateAgent(
     ...(def.tier !== undefined ? { tier: def.tier } : {}),
     overrides,
   };
+}
+
+/**
+ * The global file's `pi.extensions`: a list of non-empty paths, each absolute or starting
+ * with `~/`, each naming an existing file. Resolved to absolute paths, in file order.
+ */
+function validatePiExtensions(raw: unknown, file: string): string[] {
+  if (raw === undefined) return [];
+  const bad = (detail: string) => new LoadError(`pi: ${detail}: ${file}`);
+  if (!isRecord(raw)) throw bad('must be a map holding extensions, a list of paths');
+  for (const key of Object.keys(raw)) {
+    if (key !== 'extensions') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file}`);
+  }
+  if (raw.extensions === undefined) return [];
+  if (!Array.isArray(raw.extensions)) throw bad('extensions must be a list of paths');
+  return raw.extensions.map((entry, i) => {
+    if (typeof entry !== 'string' || entry.trim() === '') throw bad(`extensions[${i}] must be a non-empty path`);
+    const resolved = entry === '~' ? '' : entry.startsWith('~/') ? path.join(os.homedir(), entry.slice(2)) : entry;
+    if (resolved === '' || !path.isAbsolute(resolved)) {
+      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
+    }
+    let isFile = false;
+    try {
+      isFile = statSync(resolved).isFile();
+    } catch {
+      throw bad(`extension "${entry}" does not exist (${resolved})`);
+    }
+    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
+    return path.normalize(resolved);
+  });
 }
 
 function validateRouting(raw: unknown): Partial<RoutingSettings> {

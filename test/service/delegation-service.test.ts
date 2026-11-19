@@ -255,6 +255,43 @@ describe('DelegationService', () => {
     });
   });
 
+  it('hands the child port the extensions of the merged config, none when the global file names none', async () => {
+    const root = makeProject();
+    const requests: any[] = [];
+    const port: ChildPort = {
+      start(r) {
+        requests.push(r);
+        return { outcome: Promise.resolve({ lastAssistantText: 'ok', status: 'completed', usage: unavailableUsage('n/a') }), cancel() {} };
+      },
+    };
+    await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    expect(requests[0].piExtensions ?? []).toEqual([]);
+    const ext = path.join(tempDir(), 'ext.ts');
+    writeFileSync(ext, '');
+    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    expect(requests[1].piExtensions).toEqual([ext]);
+  });
+
+  it('records the extensions in the launch spec of the task record on the fake pi', async () => {
+    const root = makeProject();
+    const ext = path.join(tempDir(), 'ext.ts');
+    writeFileSync(ext, '');
+    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    const fake = fakePiEnv();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: piKernel({ piCommand: FAKE_PI_COMMAND, env: fake.env, piAgentDir: tempDir() }).kernel,
+    });
+    const reply = await svc.delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    if (reply.kind !== 'result') throw new Error('expected a result');
+    const command: string[] = svc.store.readTask(reply.result.taskId)!.task!.launchSpec!.command;
+    expect(command.slice(command.indexOf('-ne'), command.indexOf('-ne') + 3)).toEqual(['-ne', '-nc', '-np']);
+    expect(command.slice(command.indexOf('-e'), command.indexOf('-e') + 2)).toEqual(['-e', ext]);
+    expect(fake.log()[0].argv).toContain(ext);
+  });
+
   it('refuses a host with no registered driver, naming the host and the supported hosts, and makes no task', async () => {
     const root = makeProject();
     const kernel = new Kernel();

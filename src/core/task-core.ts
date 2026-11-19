@@ -23,6 +23,8 @@ export interface TaskRequest {
   brief: string;
   /** The child port of the host of the agent definition. */
   port: ChildPort;
+  /** Extension files the global file names for pi children, handed to the child port on start. */
+  piExtensions?: string[];
   parentSessionId?: string;
 }
 
@@ -56,6 +58,7 @@ export class Task {
     private readonly brief: string,
     private readonly port: ChildPort,
     createdAt: string,
+    private readonly piExtensions: readonly string[] = [],
   ) {
     this.taskId = taskId;
     this.agent = agent;
@@ -119,6 +122,7 @@ export class Task {
           projectRoot: this.core.projectRoot,
           sessionsFolder: this.core.store.sessionsFolder,
           driverFilesFolder: this.core.store.driverFilesFolder(this.taskId),
+          ...(this.piExtensions.length > 0 ? { piExtensions: [...this.piExtensions] } : {}),
         },
         (event) => this.handleEvent(event),
       );
@@ -240,6 +244,6 @@ export class TaskCore {
       endpoint: agent.endpoint,
       createdAt,
     });
-    return new Task(this, taskId, agent, request.brief, request.port, createdAt);
+    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.piExtensions);
   }
 }

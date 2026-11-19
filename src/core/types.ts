@@ -108,6 +108,8 @@ export interface ChildRunRequest {
   sessionsFolder: string;
   /** Where the driver keeps its own files of the task, beside the task record. */
   driverFilesFolder: string;
+  /** Extension files the global file names for pi children; other hosts ignore it. Absent means none. */
+  piExtensions?: string[];
 }
 
 export interface ChildRun {
@@ -166,7 +168,7 @@ export interface HostModel {
  * The models a child of the host can use. Rejects with a one-line reason, and
  * never resolves to an empty list.
  */
-export type ListModels = (options?: { projectRoot?: string }) => Promise<HostModel[]>;
+export type ListModels = (options?: { projectRoot?: string; piExtensions?: string[] }) => Promise<HostModel[]>;
 
 export interface ModelCheckRequest {
   /** The model as a tier names it: `provider/id`. */
@@ -174,6 +176,8 @@ export interface ModelCheckRequest {
   thinking: ThinkingLevel;
   /** Where the check runs, as a child would; defaults to the current folder. */
   projectRoot?: string;
+  /** Extension files the global file names for pi; loaded as a child loads them. Other hosts ignore it. */
+  piExtensions?: string[];
   /** Aborting ends the check and stops its process. */
   signal?: AbortSignal;
 }

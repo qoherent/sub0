@@ -276,13 +276,51 @@ inherits the limit of `local`.
 - **Path.** `~/.agents/subzero.yaml`, or the full file path in
   `SUBZERO_GLOBAL_CONFIG` (an empty value counts as unset). A missing file
   means there is no global layer.
-- **Allowed keys.** Only `models.tiers`, `endpoints.<endpoint>.parallel` and
-  `routing`. Any other key, such as `agents`, `skills` or `enabled`, is a load
-  error that names the file and the key. Agents and skills stay in the project,
-  so a file in your home folder cannot give every repository tool access or
-  skill folders.
+- **Allowed keys.** Only `models.tiers`, `endpoints.<endpoint>.parallel`,
+  `routing` and `pi.extensions` (next section). Any other key, such as `agents`,
+  `skills` or `enabled`, is a load error that names the file and the key. Agents
+  and skills stay in the project, so a file in your home folder cannot give
+  every repository tool access or skill folders.
 - **Read on every delegation.** Like the project file, it is read again each
   time. An edit applies to the next task, with the session-start exception below.
+
+### `pi.extensions`: pi extensions your children load
+
+Every pi process subzero starts runs with `-ne`, which keeps all pi extensions
+out so a child cannot be changed by whatever you have installed. Some setups
+need one extension, for example a pi package that registers the model provider
+of your office gateway when it loads. Name it in the global file and subzero
+adds `-e <path>` for it, and only for the files you name:
+
+```yaml
+# ~/.agents/subzero.yaml
+pi:
+  extensions:
+    - ~/.pi/reggiellm-pi/index.ts
+```
+
+- **Every pi process loads it.** Child runs, the model listing of guided init
+  (`subzero config models`) and the model check (`subzero config check`) all
+  start pi with the listed extensions, so the models the extension registers
+  appear in the listing, pass the check and run children. The task record of a
+  child shows the `-e` flags in its launch spec, and `subzero attach` reopens
+  the session with them.
+- **Paths.** Each entry is a non-empty path that is absolute or starts with
+  `~/` (your home folder). A relative path is a load error, because there is no
+  folder it could be relative to. The file must exist when the config loads,
+  or the load error names the global file and the path. Duplicates are dropped,
+  and the order of the file is kept.
+- **Global file only.** A project file that holds a `pi` key is a load error that
+  names the project file. The project file is committed to repositories, and a
+  repository must not be able to load code into your children. Any other key
+  under `pi` is a load error too.
+- **Only pi.** The list is read for the host `pi` and ignored for any other host.
+- **No questions at load.** An extension loads when the child starts. A
+  background child cannot answer a question, and an extension dialog blocks in
+  RPC mode, so an extension that asks you something while it loads leaves the
+  child waiting until its timeout. Name only extensions that load without a
+  prompt, for example by reading a key from pi's `auth.json` or from an
+  environment variable.
 
 ### How the two files merge
 
@@ -300,7 +338,8 @@ inherits the limit of `local`.
   the project's tiers (or of an agent's `tiers:` overrides) uses is ignored in
   that project. A limit the project writes itself that no model uses is still a
   load error.
-- **Agents and skills** come from the project file only.
+- **Agents and skills** come from the project file only, and so does nothing
+  under `pi`: `pi.extensions` comes from the global file only.
 
 ### When subzero is on in a project
 

@@ -243,12 +243,13 @@ export class DelegationService {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === '') throw new EmptyBriefError();
     // The host of the definition comes from its tier; the registry's hosts are the only ones that run.
-    const { agent, notice, tier } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier, piExtensions } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
 
     const task = core.start({
       agent,
       port,
+      piExtensions,
       brief: renderBrief(delegation),
       ...(delegation.parentSessionId !== undefined ? { parentSessionId: delegation.parentSessionId } : {}),
     });
@@ -288,19 +289,27 @@ export class DelegationService {
    * for none or for `general`, or `fallback` for a name the agents map does not hold
    * (with a notice that says so). `general` never falls back.
    */
-  private chooseAgent(projectRoot: string, delegation: Delegation): { agent: AgentDefinition; tier: string; notice?: string } {
+  private chooseAgent(
+    projectRoot: string,
+    delegation: Delegation,
+  ): { agent: AgentDefinition; tier: string; piExtensions: string[]; notice?: string } {
     const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, '').trim();
     const options = { supportedHosts, ...(tier !== undefined && tier !== '' ? { tier } : {}) };
     const named = delegation.agent;
     if (named === undefined || named === GENERAL_AGENT || catalog.entries.has(named)) {
-      return { agent: resolveAgent(catalog, named, options), tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER };
+      return {
+        agent: resolveAgent(catalog, named, options),
+        tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER,
+        piExtensions: catalog.piExtensions,
+      };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
     return {
       agent: resolveAgent(catalog, FALLBACK_AGENT, options),
       tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
+      piExtensions: catalog.piExtensions,
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(', ')}`,
     };
   }

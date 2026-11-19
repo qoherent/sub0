@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   BUILT_IN_TIMEOUT,
   LoadError,
@@ -93,7 +94,8 @@ describe('docs/configuration.md', () => {
   });
 
   describe('the global file', () => {
-    const [globalYaml, projectYaml, disabledYaml] = yamlBlocks(GLOBAL_SECTION);
+    const [globalYaml, projectYaml] = yamlBlocks(GLOBAL_SECTION);
+    const disabledYaml = yamlBlocks(GLOBAL_SECTION).find((block) => block.startsWith('enabled:'));
 
     it('has an example pair that merges as the page says', () => {
       useGlobalConfig(globalYaml!);
@@ -139,8 +141,8 @@ describe('docs/configuration.md', () => {
       expect(() => loadCatalog(projectWith('endpoints: {}\n'), { starterAgents: STARTER })).toThrow(LoadError);
     });
 
-    it('holds only models.tiers, endpoints and routing, and an error names the file and the key', () => {
-      for (const key of ['models.tiers', 'endpoints', 'routing']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
+    it('holds only models.tiers, endpoints, routing and pi.extensions, and an error names the file and the key', () => {
+      for (const key of ['models.tiers', 'endpoints', 'routing', 'pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
       const file = useGlobalConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
       expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`not "agents": ${file}`);
       for (const [yaml, fragment] of [
@@ -153,6 +155,35 @@ describe('docs/configuration.md', () => {
         expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`${fragment}: ${where}`);
       }
       expect(DOC).toMatch(/Any other key, such as `agents`, `skills` or `enabled`, is a load error that names the file and the key/);
+    });
+
+    it('documents pi.extensions with an example that loads, and the global-only rule, the dialog warning and where it loads', () => {
+      const text = flat(sectionOfDoc(GLOBAL_SECTION));
+      const example = yamlBlocks(GLOBAL_SECTION).find((block) => block.includes('extensions:'))!;
+      expect(example).toBe('# ~/.agents/subzero.yaml\npi:\n  extensions:\n    - ~/.pi/reggiellm-pi/index.ts\n');
+      // The example loads once the file it names exists, and the path is expanded from the home folder.
+      const home = tempDir('subzero-confighome-');
+      mkdirSync(path.join(home, '.pi', 'reggiellm-pi'), { recursive: true });
+      writeFileSync(path.join(home, '.pi', 'reggiellm-pi', 'index.ts'), '');
+      const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+      try {
+        useGlobalConfig(`${globalYaml!}${example}`);
+        const catalog = loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER });
+        expect(catalog.piExtensions).toEqual([path.join(home, '.pi', 'reggiellm-pi', 'index.ts')]);
+      } finally {
+        homedir.mockRestore();
+      }
+      // A project file may not hold it.
+      useGlobalConfig(globalYaml!);
+      expect(() => loadCatalog(projectWith(`pi:\n  extensions: []\n${MINIMAL}`), { starterAgents: STARTER })).toThrow(/global file only/);
+      expect(text).toMatch(/A project file that holds a `pi` key is a load error that names the project file/);
+      expect(text).toMatch(/a repository must not be able to load code into your children/);
+      expect(text).toMatch(/an extension dialog blocks in RPC mode/);
+      expect(text).toMatch(/Child runs, the model listing of guided init \(`subzero config models`\) and the model check \(`subzero config check`\)/);
+      expect(text).toMatch(/absolute or starts with `~\/`/);
+      expect(DOC).toMatch(/Only `models.tiers`, `endpoints.<endpoint>.parallel`, `routing` and `pi.extensions`/);
+      expect(CHANGELOG).toContain('`pi.extensions`');
+      expect(flat(read('docs/target-claude-pi.md'))).toContain('`pi.extensions` of the global file');
     });
 
     it('merges limits by endpoint, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {

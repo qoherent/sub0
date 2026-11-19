@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SetupConflictError } from '../../src/config/agent-setup.js';
@@ -102,6 +102,66 @@ describe('SetupService.models', () => {
   it('passes the listing failure on as one line', async () => {
     const { service } = fakePiService(makeProject(), { refuseModels: 'no catalog' });
     await expect(service.models()).rejects.toMatchObject({ code: 'listing_failed', message: expect.stringContaining('no catalog') });
+  });
+});
+
+describe('SetupService pi extensions', () => {
+  const extension = () => {
+    const file = path.join(tempDir(), 'ext.ts');
+    writeFileSync(file, '');
+    return file;
+  };
+
+  it('lists models with the extensions of the merged config for the project root, none when no file names one', async () => {
+    const seen: unknown[] = [];
+    const listModels = async (options?: unknown) => (seen.push(options), []);
+    const root = tempDir();
+    await new SetupService({ kernel: kernelWith({ listModels }), projectRoot: root }).models();
+    expect(seen[0]).toMatchObject({ projectRoot: root });
+    expect((seen[0] as any).piExtensions ?? []).toEqual([]);
+    const ext = extension();
+    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    await new SetupService({ kernel: kernelWith({ listModels }), projectRoot: root }).models();
+    expect(seen[1]).toEqual({ projectRoot: root, piExtensions: [ext] });
+  });
+
+  it('checks each model with the same extensions', async () => {
+    const seen: ModelCheckRequest[] = [];
+    const checkModel = async (request: ModelCheckRequest): Promise<ModelCheckResult> => (seen.push(request), { ok: true });
+    const ext = extension();
+    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    const root = tempDir();
+    await new SetupService({ kernel: kernelWith({ checkModel }), projectRoot: root }).check([
+      { model: 'a/one', thinking: 'high' },
+      { model: 'b/two', thinking: 'low' },
+    ]);
+    expect(seen.map((r) => r.piExtensions)).toEqual([[ext], [ext]]);
+  });
+
+  it('refuses in one line, without calling the driver, when the global file names a missing extension or the project names pi', async () => {
+    const listModels = vi.fn(async () => []);
+    const checkModel = vi.fn(async (): Promise<ModelCheckResult> => ({ ok: true }));
+    const gone = path.join(tempDir(), 'gone.ts');
+    const file = useGlobalConfig(`pi:\n  extensions:\n    - ${gone}\n`);
+    const service = new SetupService({ kernel: kernelWith({ listModels, checkModel }), projectRoot: tempDir() });
+    await expect(service.models()).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringContaining(file) });
+    await expect(service.check([{ model: 'a/one', thinking: 'high' }])).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringContaining(gone) });
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const root = makeProject('pi:\n  extensions: []\n' + DEFAULT_YAML);
+    const project = new SetupService({ kernel: kernelWith({ listModels, checkModel }), projectRoot: root });
+    await expect(project.models()).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringMatching(/global file only/) });
+    expect(listModels).not.toHaveBeenCalled();
+    expect(checkModel).not.toHaveBeenCalled();
+  });
+
+  it('lists through the fake pi with -e after the isolation flags', async () => {
+    const ext = extension();
+    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    const { fake, service } = fakePiService(tempDir(), { models: [piModel('reggiellm', 'office')] });
+    expect((await service.models()).models.map((m) => m.name)).toEqual(['reggiellm/office']);
+    const argv: string[] = fake.log()[0].argv;
+    expect(argv).toContain('-ne');
+    expect(argv.slice(argv.indexOf('-e'), argv.indexOf('-e') + 2)).toEqual(['-e', ext]);
   });
 });
 

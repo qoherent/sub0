@@ -63,6 +63,23 @@ describe('PiDriver', () => {
     expect(argv.env).toEqual({ PI_OFFLINE: '1', PI_TELEMETRY: '0' });
   });
 
+  it('starts the child with the requested extensions after the isolation flags and records them in the launch spec', async () => {
+    const { driver, agent, root, events, fake } = setup();
+    await driver.start({ ...request(root, agent, 'the brief'), piExtensions: ['/e/one.ts'] }, (e) => events.push(e)).outcome;
+    const argv: string[] = fake.log()[0].argv;
+    expect(argv.slice(0, childRpcArgs().length + 2)).toEqual([...childRpcArgs(), '-e', '/e/one.ts']);
+    const spec = (events[0] as Extract<DomainEvent, { kind: 'run_started' }>).launchSpec;
+    expect(spec.command.slice(FAKE_PI_COMMAND.length)).toEqual(argv);
+    expect(spec.command).toContain('/e/one.ts');
+  });
+
+  it('adds no -e when the request names no extensions', async () => {
+    const { start, events, fake } = setup();
+    await start().outcome;
+    expect(fake.log()[0].argv).not.toContain('-e');
+    expect((events[0] as Extract<DomainEvent, { kind: 'run_started' }>).launchSpec.command).not.toContain('-e');
+  });
+
   const exits = (events: DomainEvent[]) => events.filter((e) => e.kind === 'run_exited');
 
   it('emits run_exited exactly once, after turn_settled, on a settled run', async () => {
@@ -461,9 +478,18 @@ describe('PiDriver model listing', () => {
     await driver.listModels();
     const [start] = fake.log();
     expect(start.argv).toEqual([...childRpcArgs(), '--no-session']);
+    expect(start.argv).not.toContain('-e');
     expect(start.env).toEqual({ PI_OFFLINE: '1', PI_TELEMETRY: '0' });
     expect(commandsSent(fake.log())).toEqual(['get_available_models']);
     await until(() => !isAlive(start.pid));
+  });
+
+  it('loads the named extensions with -e after the isolation flags, and keeps -ne', async () => {
+    const { driver, fake } = modelDriver({ models: MODELS });
+    await driver.listModels({ piExtensions: ['/e/one.ts', '/e/two.ts'] });
+    const [start] = fake.log();
+    expect(start.argv).toEqual([...childRpcArgs(), '-e', '/e/one.ts', '-e', '/e/two.ts', '--no-session']);
+    expect(start.argv).toContain('-ne');
   });
 
   it('fails with a timeout error, not a hang, when pi never answers, and leaves no pi running', async () => {
@@ -582,6 +608,15 @@ describe('PiDriver model check', () => {
     controller.abort();
     expect(await driver.checkModel({ model: 'local/qwen', thinking: 'off', signal: controller.signal })).toMatchObject({ ok: false, kind: 'cancelled' });
     expect(fake.log()).toEqual([]);
+  });
+
+  it('loads the named extensions with -e after the isolation flags, and adds none when the list is empty', async () => {
+    const { driver, fake } = modelDriver();
+    await driver.checkModel({ model: 'local/qwen', thinking: 'high', piExtensions: ['/e/one.ts'] });
+    expect(fake.log()[0].argv).toEqual([...childRpcArgs(), '-e', '/e/one.ts', '--model', 'local/qwen', '--thinking', 'high', '--no-tools', '--no-session']);
+    const empty = modelDriver();
+    await empty.driver.checkModel({ model: 'local/qwen', thinking: 'high', piExtensions: [] });
+    expect(empty.fake.log()[0].argv).not.toContain('-e');
   });
 
   it('runs in the given project root', async () => {

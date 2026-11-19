@@ -25,6 +25,26 @@ describe('launch spec', () => {
     expect(args.slice(0, childRpcArgs().length)).toEqual(childRpcArgs());
   });
 
+  it('adds -e <path> for each extension right after the isolation flags, keeping -ne, and nothing when there are none', () => {
+    expect(childRpcArgs([])).toEqual(childRpcArgs());
+    expect(childRpcArgs(['/e/one.ts', '/e/two.ts'])).toEqual([
+      '--mode', 'rpc', '--offline', '-na', '-ne', '-nc', '-np', '--no-themes', '-ns',
+      '-e', '/e/one.ts', '-e', '/e/two.ts',
+    ]);
+    const root = makeProject();
+    const args = launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: ['/o/alpha'], sessionsFolder: '/s', piExtensions: ['/e/one.ts'] });
+    expect(args.slice(0, 11)).toEqual([...childRpcArgs(), '-e', '/e/one.ts']);
+    expect(args.slice(11, 13)).toEqual(['--skill', '/o/alpha']);
+    expect(args).toContain('-ne');
+    expect(launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: [], sessionsFolder: '/s' })).not.toContain('-e');
+  });
+
+  it('keeps the -e flags in the attach command, which reopens the child with the same extensions', () => {
+    const command = ['pi', '--mode', 'rpc', '--offline', '-ne', '-e', '/e/one.ts', '--session-dir', '/s', '--session-id', 'sz-abcdef'];
+    const attach = attachCommand({ command, cwd: '/p', envNames: [], version: '0.87.0', skillFolders: [], thinkingLevel: 'high' });
+    expect(attach).toEqual(['pi', '--offline', '-ne', '-e', '/e/one.ts', '--session-dir', '/s', '--session-id', 'sz-abcdef']);
+  });
+
   it('builds the attach command without --mode rpc and without --session', () => {
     const command = ['pi', '--mode', 'rpc', '--offline', '--session-dir', '/s', '--session-id', 'sz-abcdef', '--session', '/x'];
     const attach = attachCommand({ command, cwd: '/p', envNames: [], version: '0.87.0', skillFolders: [], thinkingLevel: 'high' });

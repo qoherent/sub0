@@ -337,7 +337,7 @@ function viewOf(l: Layers, scope: SetupScope, global: string | null, project: st
 }
 
 function emptyCatalog(agentFile: string): AgentCatalog {
-  return { agentFile, entries: new Map(), tiers: new Map(), routing: { hook: true }, limits: new Map() };
+  return { agentFile, entries: new Map(), tiers: new Map(), routing: { hook: true }, limits: new Map(), piExtensions: [] };
 }
 
 function dependentsOf(catalog: AgentCatalog, tier: string): string[] {
