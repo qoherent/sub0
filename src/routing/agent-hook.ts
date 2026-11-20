@@ -1,4 +1,4 @@
-// @sigil implements design/routing-hooks.sigil RoutingHooks (PreToolUse hook)
+// @sigil implements design/claude-routing-hooks.sigil ClaudeRoutingHooks (PreToolUse hook)
 //
 // Thin entry of the PreToolUse hook on the Agent tool: reads the hook input, asks the
 // routing logic and prints a deny decision. Any error, missing input or malformed

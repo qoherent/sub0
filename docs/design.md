@@ -11,22 +11,33 @@ Status: draft · 2026-10-30 · builds on [problem.md](problem.md); integration f
 > unknown-agent errors; the project root resolved once; and an owner-only store folder that ignores itself.
 > Decisions made while writing them are listed at the end of [decisions.md](decisions.md).
 
+> **Update 2026-11-12.** pi becomes a second *parent host* (§5.5), and the Claude Code parent behaves the same
+> way where Claude Code allows. The naming is fixed: a **parent host** is where you work (Claude Code, pi), a
+> **child host** is what subzero starts (pi today); the bare word "host" is retired, and the agent-file key
+> `host:` names the child host. The agent file changes: the model tier named `medium` is the default tier
+> (there is no special `default` tier), and the file must hold `medium`, `general` and `fallback` or it does not load.
+> There is no session-model fallback: a pi project with no agent file is refused with an error that says to run
+> `subzero init`. The contracts `design/*.sigil` win where they differ; the new ones are
+> `design/pi-extension.sigil` and `design/claude-plugin-commands.sigil`, and the former `mcp-server` and
+> `routing-hooks` contracts are now `design/claude-mcp-server.sigil` and `design/claude-routing-hooks.sigil`.
+
 ## 1. Ubiquitous language
 
 | Term | Meaning |
 |---|---|
-| **Parent** | The coding agent the user is talking to (Claude Code, Codex, pi). It delegates. |
+| **Parent host** | The coding agent the user works in and delegates from (Claude Code, Codex, pi). |
+| **Parent model** | The model that works inside a parent host: it writes requests and reads notices and results. |
 | **Child** | A coding-agent process that subzero starts to do one delegation. |
-| **Host** | The kind of agent runtime: `claude`, `codex`, `pi`, `acp:<name>`. Parents and children both have a host. |
-| **Agent definition** | An agent entry of `agents:` resolved at one model tier: the tier a call names, else the entry's own `tier:`, else `default`, with the entry's `tiers:` override applied field by field. It has the entry's description, skills, tools and timeout and the host, model and thinking level of that tier, and is named `<entry>` or `<entry>:<tier>`. Like a compose *service*. |
+| **Child host** | The kind of agent runtime that subzero starts as a child: `claude`, `codex`, `pi`, `acp:<name>`. The agent-file key `host:` names it. The same program can be a parent host in one process and a child host in another, and the two names never mean each other. |
+| **Agent definition** | An agent entry of `agents:` resolved at one model tier: the tier a call names, else the entry's own `tier:`, else the `medium` tier, with the entry's `tiers:` override applied field by field. It has the entry's description, skills, tools and timeout and the child host, model and thinking level of that tier, and is named `<entry>` or `<entry>:<tier>`. Like a compose *service*. |
 | **Skill** | An Agent Skills folder (`SKILL.md` plus resources). Referred to by name; resolved from a **skill source**. |
-| **General agent** | The `general` entry of `agents:`, with no description and, like every agent, no host, model or thinking of its own. It takes a delegation that names no agent (or names `general`) with its full tools, on the `default` tier, or on the tier a call names (`general:<tier>`). |
-| **Fallback agent** | The `fallback` entry of `agents:`, with no description. It runs a delegation whose agent name is not configured, and the reply says so. `subzero init` writes its tool list read-only. Without it an unknown name is an error. |
-| **Model tier** | A name under `models.tiers` (`default`, which is required, and others such as `small`, `medium`, `large`) that gives a host, a model and a thinking level. An agent runs on the tier a call names, else its own `tier:`, else `default`, and its `tiers:` block overrides fields of a tier for it alone. A tier is *routable* when its host, after the general agent's override, has a registered child driver and the agents map holds a `general`; the Claude Code hook routes only tiers that a CE tier word maps to (`small`, `medium`, `large`). |
-| **Kernel** | The small core component where child drivers (by host) and parent adapters (by name) register. Core services reach drivers only through it and never name one. |
+| **General agent** | The `general` entry of `agents:`, with no description and, like every agent, no host, model or thinking of its own. It takes a delegation that names no agent (or names `general`) with its full tools, on the `medium` tier, or on the tier a call names (`general:<tier>`). |
+| **Fallback agent** | The `fallback` entry of `agents:`, with no description. It runs a delegation whose agent name is not configured, and the reply says so. `subzero init` writes its tool list read-only. It is required: a file without it does not load. |
+| **Model tier** | A name under `models.tiers` (`medium`, which is required and is the default tier, and others such as `small`, `large`) that gives a child host, a model and a thinking level. An agent runs on the tier a call names, else its own `tier:`, else `medium`, and its `tiers:` block overrides fields of a tier for it alone. A tier is *routable* when its host, after the general agent's override, has a registered child driver; the Claude Code hook routes only tiers that a CE tier word maps to (`small`, `medium`, `large`). |
+| **Kernel** | The small core component where child drivers (by child host) and parent adapters (by name) register. Core services reach drivers only through it and never name one. |
 | **Child driver / Parent adapter** | The extension for one child host, or for one kind of parent. Each is registered with the Kernel by its process's **entry point**, which is the only code that names it. A child driver also offers its **starter tools**, the full and the read-only tool list that `subzero init` writes. |
 | **Pass-back** | A Claude Code Agent spawn whose short description begins with `passback`. Claude uses it to hand a subagent back to its own Agent tool when `delegate` is refused or errors with no task. |
-| **Resolved agent** | An agent definition with every reference resolved: skill folders pinned (content hash), model mapped to the host, defaults applied. Immutable. Like a compose *image*. |
+| **Resolved agent** | An agent definition with every reference resolved: skill folders pinned (content hash), model mapped to the child host, defaults applied. Immutable. Like a compose *image*. |
 | **Delegation** | One request from a parent: *agent + brief*. It creates one **task**. |
 | **Brief** | The self-contained task text plus optional context (file paths, constraints, expected output) that the parent sends. The child sees nothing else from the parent. |
 | **Task** | The unit the parent holds. It has a stable **task id** (`sz-7f3k2q`) and is tied to exactly **one child session** for its whole life. It is continued, asked about, forked and rerun by that id. Like a compose *container*, which survives restarts. |
@@ -42,6 +53,8 @@ Status: draft · 2026-10-30 · builds on [problem.md](problem.md); integration f
 | **Owner process** | The process that created a task and runs its child, recorded by pid and start time on the task's first index line. |
 | **Start-up sweep** | Marks a task `abandoned` when its latest index line says running and its owner process is gone or has another start time. It signals no process. |
 | **Parallel limit** | An optional cap, per model endpoint, on how many children one process runs at once. Waiting delegations stay `Pending`. |
+| **Session cancel** | Cancels every Pending and live task of one parent session in this process and reports how many. A completed task is not touched. |
+| **Completion notice** | The text that tells the parent model that a background task settled: which task, its status, how to collect the result through the front end's collect tool, the tasks of that session still running, and to wait for them. It carries no result text. A **stop notice** says that a task was stopped and that no action is needed; a session cancel gives one for each task it stopped. |
 | **Delegation service** | The one entry every front end goes through. It resolves the project root, runs the start-up sweep, looks up the agent, holds the live task registry and connects the core to the child port and the task store. |
 | **Event log** | The full normalized event stream of a task across all its runs, stored on disk. It is never sent to the parent. |
 
@@ -365,18 +378,17 @@ endpoints:                   # named model endpoints, defined once and reused. A
 
 models:
   tiers:                     # the only place that says what runs a child: host, model and thinking
-    default: { host: pi, model: local/qwen3-coder-30b, thinking: medium }   # required when agents: has entries
+    medium: { host: pi, model: local/qwen3-coder-30b, thinking: medium }   # required: the default tier (`host:` names the child host)
     small:   { host: pi, model: local/qwen3-4b,         thinking: off }
-    medium:  { host: pi, model: local/qwen3-coder-30b, thinking: low }
-    large:   { host: claude, model: anthropic/claude-opus-5-5, thinking: high }   # host: claude | codex | pi | acp:<agent-id> | native | inline
+    large:   { host: claude, model: anthropic/claude-opus-5-5, thinking: high }   # child host: claude | codex | pi | acp:<agent-id> | native | inline
 
-routing:                     # Claude Code routing by model tier (§5.2); both keys optional
+routing:                     # Claude Code routing by model tier (§5.2), read by the hook processes alone; both keys optional
   hook: true                 # false: keep the session-start text but let every Agent spawn through
   generic_agents: [general-purpose, claude]   # agent types the hook treats as generic; replaces the default list
 
 agents:
   general:                   # work that names no agent, and tiered work. No description: never chosen or offered by description
-                             # runs on `default`, or on the tier a call names (general:small, general:medium, general:large)
+                             # runs on `medium`, or on the tier a call names (general:small, general:medium, general:large)
     tools: [read, bash, edit, write, grep, find, ls]   # full tools, so compound-engineering reviewers keep full fidelity
     timeout: 1200
     skills: []
@@ -388,7 +400,7 @@ agents:
     description: >           # REQUIRED - this is all the parent sees when routing
       Builds a semantic model of a module. Use for "what does X mean / how is Y modelled".
     skills: [skill-a, skill-b]
-    tier: medium             # its own tier when a call names none (else `default`)
+    tier: medium             # its own tier when a call names none (else `medium`)
     timeout: 1200            # required on every agent
     tiers:                   # per-agent override of a tier's host, model or thinking, like a compose override
       medium: { thinking: high }
@@ -425,8 +437,12 @@ An agent definition can come from two kinds of places, which are merged in layer
        sessions/           # pi child sessions, gitignored
    ```
 
-   The user-level file is `~/.agents/subzero.yaml`, mirroring `~/.agents/skills`. It holds model
-   endpoints, keys, tiers and policy. `subzero init` writes the `.gitignore` entries.
+   The user-level file is `~/.agents/subzero.yaml`, mirroring `~/.agents/skills`. **Built** (see
+   [configuration.md](configuration.md#the-global-file-one-setup-for-every-project)): the file holds
+   only `models.tiers`, endpoint `parallel` limits and `routing`, and the workspace file is merged over
+   it by name, a workspace entry replacing the user entry whole, with `enabled: false` in the
+   workspace file as the opt-out. Agents and skills stay out of it. **Not built**: endpoint keys and
+   addresses, `subzero.local.yaml`, `subzero.lock` and skill manifests.
 2. **Skill manifest.** A skill can ship its own recommended agent definition in
    `<skill>/agents/subzero.yaml`. Codex already uses `agents/openai.yaml` inside a skill folder the same
    way. This is how a skill author says "this skill should run as a sub-agent, set up like this".
@@ -444,7 +460,9 @@ agent:
 ```
 
 **Precedence, lowest first:** skill manifest, then user config, then `.agents/subzero.yaml`, then
-`.agents/subzero.local.yaml`. Agents are merged by name, field by field, as compose does. The workspace can
+`.agents/subzero.local.yaml`. Built today: user config under `.agents/subzero.yaml`, merged by name as
+above. Not built: the skill manifest and `.agents/subzero.local.yaml` layers, and field-by-field
+agent merging. Agents are merged by name, field by field, as compose does. The workspace can
 override or turn off a skill-provided agent:
 
 ```yaml
@@ -480,23 +498,19 @@ directly. That skips subzero and brings back the context pollution. So:
 
 - **Load and lookup.** The agent file is read again on each delegation. A missing, unreadable or malformed
   file, or any invalid agent or endpoint entry, is a **load error** that fails the whole load and makes no
-  task. An unknown agent name runs the `fallback` agent when the file has one, and otherwise returns an
-  error that names every configured agent, with no task made.
+  task. The file must hold the `medium` tier, a `general` agent and a `fallback` agent, or it does not load, and the load error names the missing one. An unknown agent name runs the `fallback` agent, which the load guarantees.
 - **General and fallback agents.** Two entries of `agents:` named `general` and `fallback`, with no description and, like every agent, no host, model or thinking (a
   description on either fails the load), so a name lookup, a tier or an explicit request finds them like any agent
   and no agent name is reserved. They are never chosen by description and are left out of the routed catalog and the
-  proxy skills. `general` takes work that names no agent and tiered work (`general` on `default`, `general:<tier>` on a named
-  tier), and runs with its full tool list. `fallback` takes the work of an agent name that is not configured: its reply says the named agent is not
+  proxy skills. Both are required. `general` takes work that names no agent and tiered work (`general` on `medium`, `general:<tier>` on a named tier), and runs with its full tool list. `fallback` takes the work of an agent name that is not configured: its reply says the named agent is not
   configured, its task records the agent as `fallback`, and its tool list is read-only by what `subzero init`
   writes (the load cannot enforce it, because only the host knows which tool names only read). A call that names
-  `fallback` itself runs it with no such notice. With no `general` entry, a delegation that names no agent, or names `general`, returns the unknown agent error and never runs `fallback`.
-- **Model tiers and routing.** `models.tiers` gives each tier a host, a model and a thinking level, and `default` is
-  required when `agents:` has entries. Agents never set host, model or thinking directly. An agent runs on the tier a
-  call names, else on its own `tier:`, else on `default`, and its `tiers.<name>` block overrides fields of that tier for
+  `fallback` itself runs it with no such notice.
+- **Model tiers and routing.** `models.tiers` gives each tier a host, a model and a thinking level, and `medium` is required, and is the default tier. Agents never set host, model or thinking directly. An agent runs on the tier a
+  call names, else on its own `tier:`, else on `medium`, and its `tiers.<name>` block overrides fields of that tier for
   it alone, as a compose override does; it is recorded as `<agent>:<tier>` when the call names a tier. A tier is
   routable when its host has a registered child driver; a tier whose host has none still loads and fails only when
-  used, with a tier error that names the tier, the configured tiers and, when the host is the cause, the host and the supported hosts. Routable tiers are only a listing, for the tool description and the hook, and exist only while `agents:` holds a `general`; the host of the resolved definition decides whether any agent runs. `routing.hook` (on unless set to false) and
-  `routing.generic_agents` are read from the same file by the server and the hooks. An endpoint entry must be used by the model of at least one tier or override, or the load fails.
+  used, with a tier error that names the tier, the configured tiers and, when the host is the cause, the host and the supported hosts. Routable tiers are only a listing, for the tool description and the hook; the child host of the resolved definition decides whether any agent runs. `routing.hook` (on unless set to false) and `routing.generic_agents` are read from the same file by the Claude Code hook processes alone: they belong to the hooks, not to the agent configuration. An unmatched `tier` value is ignored on pi (the reply says the value was not used) and returned as a tier error with a pass-back on Claude Code. An endpoint entry must be used by the model of at least one tier or override, or the load fails.
 - **`subzero run`.** The agent is the named option `--agent`, which may be left out: with none, the delegation names no agent and runs `general`, and a lone argument is always the brief.
 - **Host check.** The host of an agent's resolved definition must have a registered child driver. A request that
   resolves to a tier whose host has none returns a tier error (not a load error) that names the tier, every configured
@@ -506,11 +520,10 @@ directly. That skips subzero and brings back the context pollution. So:
 - **`subzero init`.** Takes a model and the named options `--host` (it may be left out when exactly one is registered; with
   none registered `init` refuses), `--timeout` (default 1200 seconds, the length of CE's reviewer budget) and `--thinking`
   (default `medium`; the schema requires one). It
-  adds a `default` tier (host, model, thinking) and a `general` and a read-only `fallback` entry under `agents:`, each only when the map lacks it, using the
+  adds a `medium` tier (child host, model, thinking) and a `general` and a read-only `fallback` entry under `agents:`, each only when the map lacks it, using the
   starter tools that the host's child driver offers (for pi, `read, bash, edit, write, grep, find, ls` and
   `read, grep, find, ls`) and no skills, under the project root that the Delegation service resolved. It changes
-  no existing line and writes nothing when the file exists and does not load, except that it adds a missing
-  `default` tier to a file that already holds agents. It refuses, naming both hosts, when the file has a `default` tier on another host; it also refuses when the host is missing and several are registered, when the host is not supported, and when the host's child driver offers no starter tools.
+  no existing line and writes nothing when the file exists and does not load, except that it adds any missing starter entry (`medium`, `general` or `fallback`) to a file that already holds agents. It refuses, naming both child hosts, when the file has a `medium` tier on another child host; it also refuses when the host is missing and several are registered, when the host is not supported, and when the host's child driver offers no starter tools.
 - **Endpoints.** An endpoint is defined once under `endpoints:` and reused by every agent definition whose model starts
   with its name, so they share its `parallel` limit. In the spike an entry holds only `parallel`; its
   `base_url`, `api` and `api_key` join it in v0.2, replacing the former `models:` endpoint entries.
@@ -518,7 +531,7 @@ directly. That skips subzero and brings back the context pollution. So:
   `Starting` or `Live`. Past the limit a delegation stays `Pending` and is released first come first served
   when one ends, whether it settles, fails or is cancelled. A second process or window is not counted, and
   nothing is locked or signalled across processes.
-- **Project root.** Resolved once per process: `SUBZERO_PROJECT_DIR` (empty counts as unset), then the
+- **Project root.** Resolved once for each Delegation service (one per process on Claude Code, one per pi session on pi): `SUBZERO_PROJECT_DIR` (empty counts as unset), then the
   first root the parent reports, then the CLI's working directory; never the server's own. It is absolute
   with symbolic links resolved. When none resolves, every call returns an error that names
   `SUBZERO_PROJECT_DIR` until one does.
@@ -542,7 +555,7 @@ Six tools. None returns a transcript, and none cuts a result: an `await` reply t
 | `ask` | `task`, `question` | The answer, whole | Probe task (read-only fork); the main session is untouched |
 | `tasks` | `task?`, `scope?: conversation \| all`, `detail?: list \| report \| turn:<n>` | Task list (id, agent, status, creation time; at most 50, running first, with a notice of how many were left out) or one task's report | None |
 | `await` | `tasks[]`, `timeout_s` | `Result[]` for finished turns | None |
-| `cancel` | `task` | Final status | Aborts the running turn; the task stays continuable |
+| `cancel` | `task?` | Final status, or the count cancelled when no task is given | Aborts the running turn; the task stays continuable. With no `task` it runs a session cancel for the current parent session. |
 
 The agent catalog comes from the proxy skills (§5.2) and the server instructions, not from tool
 descriptions. **The server instructions must tell the parent to write a self-contained brief.**
@@ -579,7 +592,7 @@ so and changes nothing. If the parent cannot hold a long call open (Codex `tool_
   `delegate` with that tier. When `delegate` is refused or returns a tool error with no task, Claude passes
   the subagent back to its own Agent tool by re-spawning the same prompt with a short description that begins
   with `passback`; the hook allows that spawn only when it had denied that prompt earlier. A task that
-  `delegate` already accepted is never passed back. See `design/routing-hooks.sigil`.
+  `delegate` already accepted is never passed back. See `design/claude-routing-hooks.sigil`.
 - Agents whose tier has `host: inline` are not delegated at all: the real skill is installed for the parent. Use
   this for small skills where delegation costs more than it saves (see target-claude-pi.md §4).
 - Agents whose tier has `host: native` run as the parent host's own subagent (Claude Code `.claude/agents/`),
@@ -591,24 +604,23 @@ so and changes nothing. If the parent cannot hold a long call open (Codex `tool_
 
 | Parent | Packaging | Mechanism |
 |---|---|---|
-| Claude Code | Plugin (`.claude-plugin/plugin.json`) bundling `.mcp.json` (`node ${CLAUDE_PLUGIN_ROOT}/dist/server.js`), a SessionStart hook and a PreToolUse hook on `Agent|Task` (§5.4), one static usage skill. Proxies are generated into the project's `.claude/skills/`. | MCP stdio; `delegate` and `await` always loaded, other tools deferred via tool search; progress every ≤30s; auto-background after 120s. Detail: [target-claude-pi.md](target-claude-pi.md) |
+| Claude Code | Plugin (`.claude-plugin/plugin.json`) with an MCP server launched through `bin/subzero`, SessionStart and PreToolUse routing hooks, an async Stop hook, and `init`, `tasks` and `cancel` skills. | MCP stdio; `delegate` and `await` always loaded; progress every ≤30s; optional MCP tasks and an async wake fallback; `/subzero:cancel`. Detail: [target-claude-pi.md](target-claude-pi.md) and §5.4 |
 | Codex | Codex plugin (skill + MCP server + hooks), or just `[mcp_servers.subzero]` with `tool_timeout_sec` raised | MCP stdio; proxy skills in `.agents/skills` |
-| pi | Native TS extension that imports the core library directly (`pi.registerTool`), no MCP needed | In-process. Can use `ctx.ui` for progress and permission questions. |
+| pi | A pi package installed from a git branch (`pi install git:<repo>@<branch>`) that holds a native TS extension importing the core library directly (`pi.registerTool`), no MCP needed: the `subagent` tool, `subzero_await`, `subzero_tasks` and `subzero_cancel`, and a `/subzero` command. | In-process; background by default; a session widget through `ctx.ui`. Detail: §5.5 and `design/pi-extension.sigil`. |
 
-Each adapter is a **parent adapter** that its process's entry point registers with the Kernel by name (the Claude Code hook processes are the exception: they run no Kernel and reach the core only through the agent configuration). It reaches
-the core only through the Delegation service (delegate, collect, cancel and list) and through the agent configuration for what it
-shows or decides, and through the Kernel only to list the supported hosts it passes to the agent configuration, and it is never given a child driver. The Kernel keeps the names only to refuse a second
+Each adapter is a **parent adapter**, one for each parent host, that its process's entry point registers with the Kernel by name (the Claude Code hook processes are the exception: they run no Kernel and reach the core only through the agent configuration). It reaches the core only through the Delegation service (delegate, collect, cancel, session cancel, the completion notice and list) and through the agent configuration for what it
+shows or decides, and through the Kernel only to list the supported child hosts it passes to the agent configuration, and it is never given a child driver. The Kernel keeps the names only to refuse a second
 adapter with the same name; a use for the list beyond that waits for a second parent.
 
 ### 5.4 Claude Code routing in practice
 
 The routing of §5.2 for Claude Code, as built and checked live with Claude Code 2.1.318 (the R17 run and
-its probes, [spike-results.md](spike-results.md)). The contract is `design/routing-hooks.sigil`.
+its probes, [spike-results.md](spike-results.md)). The contract is `design/claude-routing-hooks.sigil`.
 
 - **Session start.** The SessionStart hook records the session id and prints the routing text, built
   from the current agent file: each compound-engineering tier word (`small`, `medium`, `large`) whose tier
   is configured goes to `delegate` with that tier; the others stay on the Agent tool. The text also gives
-  the batch pattern (`delegate` with `wait: false` in one message, then `await` up to 600 seconds), says a
+  the batch pattern (`delegate` in one message without asking to wait, so that each call is a background task when Claude Code supports MCP tasks, and otherwise with `wait: false` and then `await` up to 600 seconds; the text uses mode-neutral wording while no task mode is known), says a
   queued task has not launched, keeps fork and worktree spawns on the Agent tool, and explains the
   pass-back. No routable tier word means no text; an agent file that fails to load gives a one-line warning.
 - **The redirect hook.** A PreToolUse hook on `Agent|Task` denies a generic spawn (no agent type,
@@ -629,6 +641,20 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/routi
 - **Session id per session.** The SessionStart hook writes one entry per session id with its ancestor
   processes, and the server takes the newest entry whose ancestors include its own parent process, so two
   Claude sessions in one project never mix their listings.
+- **Background and completion.** An interactive client can select an MCP task on a `delegate` call; its
+  completed task carries the whole result and a completion notice listing the session's still-running tasks.
+  The server records the most recently observed task mode in its readiness marker for routing. Claude Code
+  2.1.322 did not select MCP tasks in the platform probe. For ordinary `wait: false` calls, an `asyncRewake`
+  Stop hook watches per-session completion markers and wakes Claude with the result. It renews its watch
+  for long-running work. A result already collected, or a cancelled task, does not produce a wake. Calls
+  wait by default without MCP tasks. Non-interactive and unidentifiable parent processes always wait, as
+  does the fallback when the session ID is unknown. This conservative check also makes terminal-less IDE
+  and SDK sessions wait. The full live checks remain to be run.
+- **Cancel.** Escape does not stop a background task in Claude Code. The `/subzero:cancel` plugin skill (a
+  command only the user can invoke) and the `cancel` tool with no task id run a session cancel, which ends
+  every Pending and live task of the current session; a session change such as `/clear` cancels the old
+  session's tasks. A stopped task gets a stop notice that says it was stopped and that no action is needed;
+  it does not say who stopped it.
 - **Status and results.** A task waiting for endpoint capacity is reported as queued, not launched yet,
   with its endpoint, place and wait; a running one shows its start time. That wording belongs to the
   Delegation service and is shared by the MCP server and the CLI. Results are never cut (decision 24):
@@ -636,6 +662,41 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/routi
   lists the rest for `tasks(<id>)`, and each brief tells the child to keep its reply under 48,000 characters.
 - **Open limits.** The hook does not read the session's `permission_mode`, so a generic spawn in plan mode
   is still redirected to a child with write and shell tools.
+
+### 5.5 pi as a parent host
+
+pi is the second parent host. The contract is `design/pi-extension.sigil`; the plan is
+[plans/2026-11-11-1012-feat-pi-parent-extension-plan.md](plans/2026-11-11-1012-feat-pi-parent-extension-plan.md).
+
+- **Shape.** One pi package, installed from a git branch, holds the extension. The extension factory (pi calls it
+  on every load and reload) creates a Kernel, registers the pi child driver and registers the parent adapter
+  `pi`; at the start of each pi session it builds one Delegation service, the **session core**, with the
+  session id as the parent session id and the working directory as the project root. `SUBZERO_PROJECT_DIR` is
+  never read, because it may leak in from the shell that started pi.
+- **Tools.** The `subagent` tool (brief, optional agent, `model` as the tier text, `async`, files, expected
+  output) takes the name compound-engineering asks for, so subzero replaces pi-subagents for CE and warns when
+  pi-subagents is still loaded. `subzero_await` (30 s default wait, 600 s cap), `subzero_tasks` and
+  `subzero_cancel` mean what `await`, `tasks` and `cancel` mean on Claude; `/subzero` lists, attaches and
+  cancels. Worktree and fork requests are refused with a clear error. Several `subagent` calls in one message
+  start together, up to each endpoint's parallel limit.
+- **Models.** There is no session-model fallback. A subagent call with no `model` runs the agent on its own
+  tier or on `medium`; the CE tier words map as on Claude (`cheapest capable` → `small`, `mid-tier` →
+  `medium`, `session model` → `large`). An unmatched `model` value is ignored and the reply says it was not
+  used. A project with no agent file is refused with an error that says to run `subzero init`, which writes
+  `medium`, `general` and `fallback`.
+- **Background.** Background is the default. When a background task settles, its completion notice is sent as a
+  steering message with a turn trigger, so it starts a turn when pi is idle and joins the running turn
+  otherwise; it lists the tasks still running and says to wait for them. A task that was stopped does not wake
+  the model: the user sees a stop notice and the model gets one on its next turn for each stopped task. In a
+  print or json run (no UI) every call waits, because a child left in the background would die when pi exits.
+- **Cancel.** Aborting a turn (Escape) cancels every child of the session; while pi is idle `/subzero cancel`
+  does it, because pi gives an extension no event for Escape then. The end of a pi session for any reason (new
+  session, resume, fork, reload) runs a session cancel, shuts the session core down and shows how many tasks
+  were cancelled; no notice crosses into the next session.
+- **Approval boundary.** A child of a project that has an agent file gets the tools its agent entry lists; the
+  starter `general` entry that `subzero init` writes can write files and run shell commands, and children run
+  isolated from pi's own extensions, so the developer's safety extensions do not apply to them. Installing the
+  package is the opt-in. Capping a child to the parent's active tools is left for a later change.
 
 ## 6. Child runtime
 

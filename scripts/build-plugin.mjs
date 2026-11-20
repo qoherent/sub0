@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repositoryUrl } from './repository.mjs';
 
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
 
 // Named paths only: a new file never ships by accident.
 const ALLOWLIST = [
@@ -21,6 +21,7 @@ const ALLOWLIST = [
   '.mcp.json',
   'hooks/hooks.json',
   'skills/init',
+  'skills/cancel',
   'skills/tasks',
   'bin/subzero',
   ...BUNDLES.map((name) => `dist/${name}.js`),

@@ -10,7 +10,7 @@ import {
   wordTiers,
 } from '../../src/routing/routing.js';
 import { routableTiers } from '../../src/config/agent-config.js';
-import { tempDir } from '../helpers.js';
+import { GLOBAL_MEDIUM_YAML, tempDir, useGlobalConfig } from '../helpers.js';
 
 function project(yaml?: string): string {
   const root = tempDir();
@@ -22,7 +22,7 @@ function project(yaml?: string): string {
 }
 
 const tier = (name: string, model: string) => `    ${name}: { host: pi, model: ${model}, thinking: low }\n`;
-const GENERAL = 'agents:\n  general:\n    tools: [read, bash]\n    timeout: 60\n';
+const GENERAL = 'agents:\n  general:\n    tools: [read, bash]\n    timeout: 60\n  fallback:\n    tools: [read]\n    timeout: 60\n';
 const config = (...names: string[]) =>
   `models:\n  tiers:\n${tier('default', 'local/d')}${names.map((n) => tier(n, `local/${n}`)).join('')}${GENERAL}`;
 
@@ -55,6 +55,22 @@ describe('generic spawn test', () => {
 
 describe('routing text', () => {
   const textFor = (root: string) => buildRoutingText(wordTiers(routableTiers(root)));
+
+  it('omits the await choreography when task mode is on', () => {
+    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), true);
+    expect(text).toMatch(/completed tasks deliver their results/i);
+    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
+    expect(text).toMatch(/one message/);
+    expect(text).toMatch(/every completion notice/);
+    expect(text).toMatch(/await reply[^\n]*not show[^\n]*tasks/i);
+  });
+
+  it('uses mode-neutral instructions when no readiness marker is known', () => {
+    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), null);
+    expect(text).toMatch(/if it returns a task id, collect it/i);
+    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
+    expect(text).toMatch(/one message/);
+  });
 
   it('AE1: with only medium configured, sends mid-tier to delegate and keeps the other tier words on Claude', () => {
     const text = textFor(project(config('medium')));
@@ -116,11 +132,50 @@ describe('routingContext', () => {
     expect(routingContext(project())).toBeUndefined();
   });
 
-  it('AE3: returns nothing with no tiers, with no agents, with a default tier only and without a general entry', () => {
-    expect(routingContext(project('endpoints: {}\n'))).toBeUndefined();
-    expect(routingContext(project(config()))).toBeUndefined();
-    expect(routingContext(project(`models:\n  tiers:\n${tier('default', 'local/d')}`))).toBeUndefined();
-    expect(routingContext(project(`models:\n  tiers:\n${tier('default', 'local/d')}${tier('medium', 'local/m')}agents:\n  helper:\n    description: x\n    tools: [read]\n    timeout: 5\n`))).toBeUndefined();
+  it('warns when the medium tier is missing from a file that exists', () => {
+    expect(routingContext(project('endpoints: {}\n'))).toMatch(/routing is off/);
+    expect(routingContext(project(config()))).toMatch(/medium/);
+    expect(routingContext(project(`models:\n  tiers:\n${tier('default', 'local/d')}`))).toMatch(/medium/);
+  });
+
+  it('routes a project with a medium tier and no general entry, because the built-in general fills it', () => {
+    const helper = 'agents:\n  helper:\n    description: x\n    tools: [read]\n    timeout: 5\n';
+    expect(routingContext(project(`models:\n  tiers:\n${tier('medium', 'local/m')}${helper}`))).toContain('tier: "medium"');
+  });
+
+  it('covers AE2: a global medium and no project file returns the routing text with the global tiers', () => {
+    useGlobalConfig(`models:\n  tiers:\n${tier('medium', 'local/gm')}${tier('large', 'local/gl')}`);
+    const text = routingContext(project());
+    expect(text).toContain('tier: "medium"');
+    expect(text).toContain('model local/gm');
+    expect(text).toContain('model local/gl');
+  });
+
+  it('returns nothing with no project file and no global medium', () => {
+    useGlobalConfig(`models:\n  tiers:\n${tier('large', 'local/gl')}`);
+    expect(routingContext(project())).toBeUndefined();
+  });
+
+  it('covers AE4: enabled false returns nothing, with a global medium and with a broken global file', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    expect(routingContext(project('enabled: false\n'))).toBeUndefined();
+    const global = useGlobalConfig('agents: [oops\n');
+    expect(routingContext(project('enabled: false\n'))).toBeUndefined();
+    expect(routingContext(project(config('medium')))).toContain(global);
+  });
+
+  it('warns naming the global file when it is broken, and the project file when that one is', () => {
+    const global = useGlobalConfig('agents: [oops\n');
+    const text = routingContext(project());
+    expect(text).toMatch(/routing is off/);
+    expect(text).toContain(global);
+    expect(text).not.toContain('\n');
+    const forbidden = useGlobalConfig('agents:\n  general:\n    tools: [read]\n    timeout: 5\n');
+    expect(routingContext(project(config('medium')))).toContain(forbidden);
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const named = routingContext(project('agents: [oops\n'));
+    expect(named).toContain('.agents/subzero.yaml');
+    expect(named).not.toContain('global');
   });
 
   it('returns a one-line warning for a file that exists and fails to load', () => {

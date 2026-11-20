@@ -1,0 +1,530 @@
+@design/delegation-service.sigil from DelegationService import {
+  delegation, brief text, queue place, queued task, status line, result text,     reply budget, session cancel, completion notice, stop notice, collect tool,
+}
+@design/kernel.sigil from Kernel import {
+  parent adapter, supported child host, entry point, parent host,
+}
+@design/task-core.sigil from TaskCore import {
+  task, task id, child run, result, domain event, transcript, tool output, skill content, enqueue time,
+    start time, child driver,
+}
+@design/agent-config.sigil from AgentConfig import {
+  agent definition, project root, unknown agent error, load error,
+  unresolved root error, model endpoint, model tier, routable tier,
+      tier error, agent entry, general agent, agent file, off error,
+  global file, enabled switch, merged configuration,
+    parallel limit, SUBZERO_PROJECT_DIR,
+  fallback agent, tier text, unmatched tier text, agent alias,
+}
+@design/task-store.sigil from TaskStore import {
+  parent session id, event log, task status,
+}
+@design/claude-routing-hooks.sigil from ClaudeRoutingHooks import {
+  Agent tool, CLAUDE_PROJECT_DIR, pass-back, wake marker,
+}
+
+component ClaudeMcpServer {
+  goal {
+    Let a Claude Code session or subagent make a delegation through the
+    plugin's
+    MCP server, with progress while it waits, a way to collect it later, a way
+    to cancel it, and an honest report of whether its child has started.
+  }
+
+  state {
+    A wake marker holds the task id and, after a background delegation
+    finishes, its result text and completion notice.
+
+    The server knows the parent session id of the current conversation. The
+    *SessionStart hook* of the plugin records it, so that listing can be
+    limited to
+    this conversation even after /clear. The hook records one entry for each
+    session id together with its own ancestor processes, and the server takes
+    the
+    newest entry whose ancestors include the Claude Code process that started
+    the
+    server, so two sessions in one project never take each other's id, and a
+    session of another process is never matched. When the server does not yet
+    know
+    it, or no entry names its own parent process, a delegation carries none.
+
+    A *progress notification* carries a counter that rises with each
+    notification
+    and one *message line*, and no total. The message line names the agent, the
+    kind
+    of the latest domain event, the tool name with its target path for tool
+    activity, and the elapsed time. While the child run is Pending it says that
+    the
+    run is waiting, and once the child run is released it no longer says so.
+
+    ClaudeMcpServer is the parent adapter of the Claude Code parent host: the
+    entry point of its
+    process registers it with Kernel as a parent adapter, and it reaches the
+    core
+    only through DelegationService, for the delegation, the collect, the
+    cancel,
+    the session cancel, the completion notice and
+    the listing, and through AgentConfig, and through Kernel only to list the
+    supported child hosts that it gives AgentConfig, and reports each
+    queued task
+    that
+    DelegationService derives,
+    never as started.
+
+    Each reply about a task that has no result gives its status line and each
+    reply about a settled task gives its result text, worded by
+    DelegationService, so that a queued task of this process names the
+    model endpoint, the queue place and the time waited, a queued task of
+    another
+    process names the model endpoint and the time waited with no queue place,
+    and
+    a task whose child run has a start time gives that start time. An await
+    reply may give a deferred line instead of a result text. ClaudeMcpServer
+    adds
+    only what is its own: the tool result limit, the deferred line, the
+    reply budget it gives each delegation, the listing cap and the
+    progress notification.
+
+    The *tool result limit* is Claude Code's inline limit for an MCP tool
+    result, 50,000 characters. Claude Code does not truncate a longer text
+    result: it saves it to a file in the session's tool-results folder and
+    gives Claude its path. The reply budget that the server gives each
+    delegation is the tool result limit less a reserve for the first line, the
+    notice and the usage line of a result text, 48,000 characters.
+
+    A *deferred line* stands in an await reply for the result of a settled
+    task that did not fit: one line with the task id, the agent and the
+    task status, saying that the result is not shown here for the reply's size
+    and that the tasks tool with that task id reads it whole.
+
+    The *plugin data folder* is the folder that Claude Code gives the plugin
+    for
+    its own files. It holds the recorded parent session id of each session of
+    each project.
+  }
+
+  logic {
+    When the server receives the resolved project root, it writes a
+    *readiness marker*
+    named by its own process id in the folder of that project under the
+    plugin data folder, holding its process id and the process id of its
+    parent, the Claude Code process that started it. On exit it removes the
+    readiness marker, which ends that flow.
+
+    On each tool listing, read the agent file again, giving AgentConfig each
+    supported child host that Kernel lists, and build the description of
+    the delegate tool with each routable tier and the child host and model it
+    runs,
+    which
+    ends that flow. When the load fails, the description falls back to the
+    static text, and the tools are still listed.
+
+    In a non-interactive Claude Code session, every delegate call waits for the
+    result even when it asks not to wait. A session whose mode cannot be
+    identified is treated as non-interactive to avoid losing its result.
+    When the wake marker fallback is in use and the parent session id is
+    unknown, a delegate call also waits, because no wake marker can reach its
+    conversation.
+
+    On a delegate call that waits, make a delegation with the mapped agent name
+    and model tier, the parent session id of the caller and the reply budget.
+    When
+    the request carries a progress token,
+    send a progress notification to the caller for each domain event, at most
+    once a second with the latest message line, and after every 30 seconds of
+    silence, including while the child run is Pending. A silent heartbeat
+    repeats the latest message line with the new elapsed time. Sending the
+    progress notification ends that branch. Return the result when the task
+    settles, which ends the flow.
+
+    On a delegate call that does not wait, make the delegation the same way and
+    return the task id at once with its status line, which ends that flow. A
+    later await call waits up to its *await timeout* and then answers for each
+    task id
+    in the order asked: the status line of a task that has not settled, and for
+    a settled task its result text whole while the joined reply stays within
+    the
+    tool result limit, the first section always, or else its deferred line. The
+    flow ends there.
+
+    When the *task mode* is on, a delegate call that does not set wait to true
+    is answered with an *MCP task* instead of a task id. The server keeps a
+    *MCP task store* backed by DelegationService: creating the MCP task makes the
+    delegation without waiting, a status request answers working until the task
+    settles, and the completed MCP task gives the whole result text and the
+    completion notice, which names the await tool as its collect tool, or the
+    stop notice for a task that was stopped. A status update to cancelled from
+    Claude Code cancels that one task through DelegationService, which ends the
+    flow. Each MCP task is kept until its parent session id changes or the
+    server
+    exits.
+
+    When the client does not select MCP tasks, the wake marker for a
+    background delegation records its parent session id and task id in the
+    plugin data folder. When that child finishes, the server records its
+    result text and completion notice in the wake marker. Collecting the result
+    removes its wake marker, so it cannot also wake Claude for an already
+    collected result.
+    A cancelled child removes its wake marker without waking Claude.
+
+    When Claude Code cancels a waited delegate call or a waited await call
+    within
+    120 seconds of the call, run a session cancel for the current
+    parent session id, which ends the flow. A cancel that arrives later, when
+    Claude Code has moved the call to the background and only a stop from its
+    task list or a timeout can end it, cancels only the task of a
+    waited
+    delegate
+    call and nothing for an await call, which ends the flow.
+
+    On each call, and every 5 seconds while a task of this server is Pending or
+    live, read the newest recorded parent session id of its own Claude Code
+    process. When it differs from the one the server last read, run a
+    session cancel for the one it last read, which ends the flow.
+
+    On a delegate call, map its tier text and its agent name through
+    AgentConfig:
+    an agent alias names the general agent, an empty tier text keeps the
+    agent's
+    own tier or the medium tier, and an unmatched tier text or a model tier
+    that
+    is not configured is returned as the tier error with the pass-back, which
+    ends the flow.
+  }
+
+  constraints {
+    The server must expose four tools, the delegate tool, the *tasks tool*, the
+    await tool and the *cancel tool*, under
+    names of the form mcp__plugin_subzero_subzero__ followed by the tool, and
+    only
+    the delegate tool, which starts a delegation, and the await tool must be
+    always loaded, and no other tool may be.
+
+    The *server instructions* must carry only the delegation rules. They must
+    tell
+    the parent model to write a self-contained brief text, because the child
+    cannot
+    see
+    the conversation, and they must not say that a delegation needs a
+    configured
+    agent definition, because the general agent runs work that names none.
+
+    No tool may cut a result or return a transcript. The delegate tool, the
+    tasks tool and the cancel tool return a result text whole, whatever its
+    length.
+
+    An await reply must give each result whole or as a deferred line, and
+    never a part of one. Its first section is always whole, even when alone it
+    is over the tool result limit, and every later result text is whole only
+    while the joined reply stays within the tool result limit.
+
+    No reply of the delegate tool, the tasks tool or the await tool may call a
+    queued task started or
+    running, and every reply about a task whose child run has a start time and
+    no result must give its status line with that start time.
+
+    A progress notification must not carry agent message text, tool output,
+    tool
+    arguments other than a path, the stderr tail or skill content of the
+    child run,
+    because the event log must never reach the parent model.
+
+    The server must pass the roots that Claude Code reports to the delegation
+    service and must never use the working directory of its own process as the
+    project root. The plugin sets SUBZERO_PROJECT_DIR from CLAUDE_PROJECT_DIR
+    for
+    it.
+
+    A name other than general that no agent entry of the merged configuration
+    holds must return the
+    unknown agent error as a
+    *tool error* that names every configured agent entry. When a
+    fallback agent is configured, a delegation that names a name other than
+    general
+    that no agent entry of the merged configuration holds runs the fallback
+    agent, and the reply
+    must
+    say that
+    the named agent is not configured. A load error of a malformed
+    agent file must be returned as a tool error as well, with no task made and
+    with no pass-back, while the off error, which a project returns when its
+    agent file is missing and the global file holds no medium tier or when the
+    enabled switch of its agent file is false, is returned as a tool error with
+    the pass-back. A project whose agent file is missing and whose global file
+    holds a medium tier delegates like any other.
+
+    An error of the driver registry for a child host with no registered
+    child driver is
+    returned like a tier error, and a tier error must be returned as a
+    tool error
+    that carries the tier error unchanged, with the tier it names, every
+    configured
+    model tier and, when the
+    child host is the cause, that child host and every supported child host,
+    and
+    says to dispatch
+    that subagent through the Agent tool
+    instead, as a pass-back whose short description begins with passback, with
+    no
+    task made.
+
+    The unresolved root error must be returned as a tool error that names
+    SUBZERO_PROJECT_DIR and says that the configuration must be fixed by the
+    user, so that a calling subagent does not retry the call.
+
+    When the server does not know its parent session id, the tasks tool with no
+    argument must list every task and say that the conversation could not be
+    identified.
+
+    The task mode must be on only while Claude Code advertises MCP task support
+    for the call and the session is interactive, because a background result is
+    lost when a non-interactive Claude Code exits. The server must write the
+    task mode into its readiness marker, so that the routing text and the
+    deny reason say how to dispatch for the mode in use. A delegate call that
+    sets wait to true must wait in either task mode.
+
+    The cancel tool must accept a call with no task id that runs a
+    session cancel
+    for the current parent session id, and it must still end a task named by
+    its
+    task id as cancelled. The result of a task that a session cancel ended must
+    be its stop notice, so that Claude is not set working again by it.
+
+    A session cancel run by the server must reach only the tasks of this
+    server,
+    and a cancel of a task that another process owns must report that and
+    change
+    nothing.
+
+    A listing from the tasks tool must hold at most 50 tasks, the tasks with a
+    start time and no result first, then each queued task, then the rest newest
+    first, and it must end with a notice that names how many tasks it left out
+    and says that a task can still be read by its task id. This cap is fixed
+    and applies whether or not the conversation is known.
+
+    Closing the stdin of the server while a child run is live must leave no
+    process
+    of that child run behind.
+
+    The server must write its readiness marker only after its project root
+    resolves and must remove it on exit, and a readiness marker whose process
+    is
+    no longer alive must count as absent.
+
+    A plugin cannot ship an *allow rule*. ClaudeMcpServer assumes that the user
+    or
+    project supplies an allow rule for mcp__plugin_subzero_subzero__* before a
+    delegation from a subagent. Without it, the delegation raises an approval
+    prompt in the main session, and under dontAsk it is denied and the subagent
+    sees the denial.
+
+    ClaudeMcpServer depends on DelegationService for the delegation, the
+    queue place, the status line and the result text, and on AgentConfig for
+    the unknown agent error, the tier error and the routable tier names, and on
+    Kernel to list the supported child hosts, and
+    on ClaudeRoutingHooks for what the SessionStart hook adds to Claude's
+    context
+    after
+    it records the parent session id, and it must not depend on any particular
+    child driver.
+  }
+
+  cases {
+    In every case here the agent file also holds the medium tier and a
+    general agent.
+
+    A delegate call with wait false returns its task id at once, and await with
+    a
+    short await timeout returns no result for that task while its child run is
+    still
+    live, only its status line.
+
+    Three delegate calls with wait false on a model endpoint whose
+    parallel limit is 1 return the first as running with its start time and
+    the second and third as a queued task at place 1 and 2. The tasks tool on
+    the second returns its queued status line and never says that its child run
+    is running or has started, and after
+    the first settles, await on the second returns it running with a
+    start time later than its enqueue time.
+
+    A queued task of another process is listed as queued with its time waited
+    counted from its enqueue time and no queue place.
+
+    Listing with no argument returns only each task recorded for the current
+    parent session id, and returns every task with a notice when the server
+    does
+    not know it.
+
+    A listing of 60 tasks returns 50, with every task that has a start time and
+    no result among them, and a notice that 10 tasks were left out and that
+    each can be read by its task id.
+
+    A delegate call with an unknown agent name and no model tier, when no
+    fallback agent is configured, returns a tool error that names every
+    configured
+    agent entry and makes no task. With a fallback agent configured, the same
+    call
+    runs the fallback agent and its reply says that the named agent is not
+    configured.
+
+    A delegate call with a model tier that is not configured returns a
+    tool error that lists every configured model tier and names the Agent tool,
+    and makes no task.
+
+    A tool listing with the model tier medium on r9700/Qwen3.8 shows medium and
+    r9700/Qwen3.8 in the delegate description. After the agent file changes,
+    the
+    next listing shows the new routable tier set, and with a broken agent file
+    the tools are still listed with the static description.
+
+    A delegate call that waits for a final message of 20,000 characters
+    returns it whole, and the tasks tool and the await tool return it whole.
+
+    An await over six settled tasks whose result texts are about 9,000
+    characters each returns the first five whole and a deferred line for the
+    sixth, with no cut anywhere, within the tool result limit. An await whose
+    first result alone is over the tool result limit returns it whole and gives
+    a deferred line for the next settled task.
+
+    The brief of a delegation from the server ends with its reply budget.
+
+    With the model tier small configured, a delegate call with the tier text
+    cheapest capable and the agent alias delegate runs the general agent on
+    small. In a project with no agent file and no medium tier in the global
+    file, a delegate call returns the off error with the pass-back and makes no
+    task, and in a project whose agent file holds an enabled switch of false it
+    does the same. A delegate call in a project with no agent file and a medium
+    tier in the global file runs the general agent on that medium tier, and a
+    delegate call with
+    no
+    tier text runs the general agent on its medium tier even when large is
+    configured.
+
+    With the task mode on, two delegate calls that set no wait each return an
+    MCP task. When the first settles, its completed MCP task gives the
+    completion notice, which names the second task as still running and says to
+    wait for it.
+
+    With one waited call of the await tool and two background tasks running, a
+    cancel of that call within 120 seconds runs a session cancel that ends both
+    tasks as cancelled, and a cancel of the same call after 120 seconds ends
+    neither.
+
+    The cancel tool with no task id, with two running tasks of this
+    parent session id, ends both and reports 2, and each of their results is
+    the
+    stop notice.
+
+    When the newest recorded parent session id of the server's Claude Code
+    process changes from A to B, after /clear, the task of A that was still
+    running ends as cancelled.
+
+    In a non-interactive Claude Code session, a delegate call waits and returns
+    the result even when it sets wait false or advertises MCP task support.
+  }
+
+  interface {
+    Let the *delegate tool*, mcp__plugin_subzero_subzero__delegate, accept a
+    call with an optional agent name, an optional model tier written as medium
+    or tier:medium, a brief text, optional files, an optional expected output
+    and an optional wait that defaults to true while the task mode is off and
+    to
+    false while the task mode is on. In a non-interactive or unknown mode it
+    waits even when wait is false. Return the result with the task id first.
+
+    Record the parent session id of each conversation through the
+    SessionStart hook at each session start.
+
+    Describe the delegate tool with each routable tier and the child host and
+    model
+    it
+    runs,
+    read again from the agent file at each tool listing.
+
+    Let the tasks tool list every task of the current parent session id, or
+    return
+    one task by its task id. Bound a listing to 50 tasks and say how many it
+    left
+    out.
+
+    Let the *await tool* collect the result of tasks started without waiting,
+    each whole or as a deferred line, and let the cancel tool end a task as
+    cancelled.
+
+    Give each delegation of the delegate tool the reply budget, so that the
+    child knows the size its final reply should stay under.
+
+    Report each task that has no result by its status line in the replies of
+    delegate, tasks and await, so that a queued task is never reported as
+    started.
+
+    Keep a readiness marker in the plugin data folder for each project while
+    the
+    server runs, holding its process id and the process id of its parent.
+
+    Be registered with Kernel as the parent adapter of the Claude Code
+    parent host by the
+    entry point of its process, which is outside ClaudeMcpServer and which also
+    imports
+    and registers the child drivers that process needs.
+
+    Answer a delegate call that does not set wait to true with an MCP task
+    while
+    the
+    task mode is on, and give its completed MCP task the whole result text and
+    the completion notice.
+
+    Let the cancel tool run a session cancel for the current parent session id
+    when it names no task id.
+
+    Accept each tier word, tier name and agent alias that AgentConfig maps, in
+    the delegate tool.
+
+    Assume an allow rule from the user or project for a delegation from a
+    subagent,
+    because the plugin cannot ship one.
+
+    Send a progress notification to a caller that asked for progress, at least
+    once
+    every 30 seconds while a delegation is running.
+  }
+
+  decisions {
+    If the client does not select MCP tasks, the wake marker gives the
+    ClaudeRoutingHooks wake hook a way to report completion without reading the
+    task store.
+
+    Only delegate and await are always loaded, so that a parent model can
+    dispatch
+    a
+    batch and collect it with no tool search hop, while the other tools stay
+    out
+    of the parent model context. Progress
+    carries one line from the latest event so that the parent model sees real
+    activity
+    without receiving the event log. The allow rule stays an assumption in the
+    spike because a plugin cannot ship one: the README and the allow-list of
+    each
+    delegating experiment arm supply it, and a setup command is left to a later
+    version.
+
+    A queued task is reported as not launched yet because compound-engineering
+    starts each reviewer's 20-minute clock at its launch, and a reviewer late
+    in
+    the queue of a one-GPU model endpoint would otherwise time out before it
+    ran. Queued is derived and not stored because the start-up sweep, the
+    listing and the command line all key on the task status running. The
+    status line says this session's queue because the queue place is counted
+    per process.
+
+    A result is never cut, because a cut result made whether the parent model
+    got a
+    whole answer depend on how long the child wrote, and cut JSON did not
+    parse. Claude Code saves a reply over its inline limit to a file instead of
+    truncating it, so the first section of an await reply is always whole and
+    the rest are deferred, not cut. The tool result limit is that inline limit
+    and the reply budget sits under it, so a child that keeps to it is shown
+    inline. This replaces the equal share of a smaller limit that each task in
+    an await reply once had.
+  }
+}

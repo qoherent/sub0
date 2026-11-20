@@ -1,23 +1,30 @@
 @design/task-core.sigil from TaskCore import {
   task, task id, brief, child run, result, domain event, child port,
-  child run state, enqueue time, start time, child driver,
+  child run state, enqueue time, start time, child driver, transcript, attach command,
+  launch spec, model listing, model check, prerequisites check, starter tools,
 }
+@design/cli.sigil from Cli import { subzero init }
 @design/agent-config.sigil from AgentConfig import {
-  agent definition, project root, unknown agent error, load error, tool list,
+  agent definition, project root, load error, tool list,
   unresolved root error, model endpoint, parallel limit, general agent,
-    model tier, tier error, agent file, timeout, agents map,
-  fallback agent,
+  model tier, tier error, agent file, timeout, fallback agent,
+  working directory, medium tier, setup state, change set, setup preview,
+  preview fingerprint, change set error, stale preview error, write error,
+  refused change, setup scope, merged configuration, off error, global file,
+  enabled switch, built-in agent, child host options,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
 }
 @design/kernel.sigil from Kernel import {
-  driver registry, parent adapter, supported host, host,
+  driver registry, parent adapter, supported child host, child host, parent host,
+  parent model,
 }
 
 component DelegationService {
   goal {
-    Give every *front end* one entry that is ready to delegate: it turns a named
+    Give every *front end* one entry that is ready to delegate: it turns a
+    named
     agent, a model tier or neither, and a brief into a task, finds a live task
     by its task id later, and starts clean after an earlier process has died.
   }
@@ -26,15 +33,43 @@ component DelegationService {
     A *delegation* is the request of a front end. It holds an optional agent
     name, an optional model tier, a *brief text*, optional files, an optional
     expected output, an optional *reply budget* and an optional
-    parent session id. The reply budget is the number of characters that the
-    child's final reply should stay under. Only a front end that knows how its
-    parent receives a result gives one, and DelegationService holds no size of
-    its own.
+    parent session id.
+    The reply budget is the number of characters that the child's final reply
+    should stay under. Only a front end that knows how its parent host receives
+    a
+    result gives one, and DelegationService holds no size of its own.
 
     The *live task registry* holds the tasks that this process has started, by
-    their task id.
+    their task id and by the parent session id of their delegation.
 
-    A *queued task* is a task whose child run is Pending in this process, or a task
+    A *session cancel* cancels every Pending and live task of one
+    parent session id in the live task registry, and reports their task ids and
+    how many there were.
+
+    A *collect tool* is the tool of a front end that returns the result of a
+    task that its caller did not wait for.
+
+    A *completion notice* tells a parent model that one of its tasks settled:
+    it
+    names
+    the task by its task id with its status, tells the parent model to collect
+    the
+    result through the collect tool that the front end names, lists the tasks
+    of
+    the same parent session id that are still Pending or live with their
+    status line, and tells the parent model to wait for them before it uses the
+    results
+    together. It carries no result text, and it names no running tasks and
+    gives
+    no instruction to wait when none are running. A *stop notice* is the text
+    for
+    one task that was stopped, through a session cancel or a cancel, and it
+    says that the task was stopped and that no action is needed. A
+    session cancel
+    gives one stop notice for each task it stopped.
+
+    A *queued task* is a task whose child run is Pending in this process, or a
+    task
     of another process whose task status is running and that has no start time.
     Queued is a view that DelegationService derives on each reply from the live
     task and the task record, and it is never a stored task status.
@@ -48,7 +83,8 @@ component DelegationService {
     waited since the enqueue time, and for a queued task of another process it
     gives the model endpoint and the time waited with no queue place:
     ```text
-    queued, not launched yet: no child is running; it starts when endpoint <e> has room (place <n> in this session's queue, waiting <elapsed>)
+    queued, not launched yet: no child is running; it starts when endpoint <e>
+    has room (place <n> in this session's queue, waiting <elapsed>)
     ```
     For a task whose child run has a start time the status line gives that
     start time and how long ago it was:
@@ -56,54 +92,97 @@ component DelegationService {
     running, started <iso> (<elapsed> ago)
     ```
 
-    The *result text* of a settled task starts with a line that holds the task
-    id first, then the agent, the task status and the failure kind when there is
+    The *result text* of a settled task starts with a line that holds the
+    task id
+    first, then the agent, the task status and the failure kind when there is
     one. Lines follow for the message when there is one, the summary, with
     (empty) for an empty summary, and the usage with the duration when
     the result holds usage. A notice goes on the line after the first one, so
     the task id still comes first.
+
+    The *guided setup* is the part of DelegationService that a front end
+    reaches during an init that a person starts. It is made with Kernel, the
+    project root that a DelegationService resolved and an optional child host,
+    and it offers five *setup operations*, which list the models, show the
+    setup state, check models, preview a change set and apply it. Its
+    child host is the one named, or else the one supported child host when the
+    driver registry lists exactly one. Otherwise it refuses with a message that
+    names the supported child hosts, or that no child host is registered when
+    the driver registry lists none.
+
+    The *guide text* is the one conversation, its steps, questions,
+    suggestions and warnings, that every parent adapter follows over the
+    setup operations during an init that a person starts. After it shows the
+    setup state it asks whether the chosen models are for every project or
+    only this one, which gives the setup scope of its preview and apply, and
+    before the confirmation it says which model tier or limit of the change
+    set this project overrides when the setup scope is the global file. After the
+    stale preview error of an apply it previews the change set again, and
+    after any other setup refusal of an apply it ends the init, writing
+    nothing.
   }
 
   logic {
-    On start-up, resolve the project root through AgentConfig from the roots or
-    the fallback working directory that the front end gives. When no
+    On start-up, ask AgentConfig for the project root from the roots or the
+    fallback working directory that the front end gives. When no
     project root resolves, the start-up waits, and each later call resolves it
     again and returns the unresolved root error to its caller, with no task
-    made, until one resolves. Once a project root resolves, keep it for the
-    process, run the start-up sweep with it, and connect TaskCore to the
+    made, until one resolves. A front end may ask for the project root to be
+    resolved from the roots it reports alone, as a parent host does that
+    reports
+    one working directory as its only root. Once a project root resolves,
+    keep it for
+    the service, run the start-up sweep with it, and connect TaskCore to the
     task record, given that project root. The start-up ends when the sweep has
     finished and TaskCore is connected.
 
-    On a delegation, load the agent entries again, giving AgentConfig each
-    supported host that the driver registry lists. When the load fails,
-    return the load error to the caller and end the flow with no task made.
-    First choose the agent. When the delegation names no agent or names the agent
-    general, take the general agent, and when no general agent is configured return
-    the unknown agent error to the caller and end the flow with no task made. When
-    it names another agent, look up that name in the agents map. A name that finds
-    the fallback agent in that lookup runs it and reports nothing about a name not
-    configured. When the name is unknown, take the fallback agent and report in the
-    reply that the named agent is not configured, and when no fallback agent is
-    configured return the unknown agent error to the caller and end the flow with
-    no task made. Then choose the model tier: when the delegation names one, drop a
-    leading tier: from it, and ask AgentConfig for the agent definition of the
-    chosen agent at that model tier, or else at the agent's own tier or the default
-    tier. When AgentConfig returns the tier error for that agent at that
-    model tier, return it to the caller and end the flow with no task made. The
-    task records its agent as the
-    name of the chosen agent, followed by :<tier> when the delegation names a
+    On a delegation, load the merged configuration again, giving AgentConfig
+    each supported child host that the driver registry lists and the starter
+    tools of the child driver of the child host of the medium tier, which
+    fill each built-in agent. When the load fails, return the load error to
+    the caller, or the off error when the project is off, and end the flow
+    with no task made. First choose the agent. When the delegation names no agent
+    or
+    names the agent
+    general, take the general agent. When it names another agent, look up that
+    name among the agent entries of the merged configuration, a built-in
+    agent included. A name that finds the fallback agent in that lookup
+    runs it and reports nothing about a name not configured. When the name is
+    unknown, take the fallback agent and report in the reply that the named
+    agent
+    is not configured. Then choose the model tier: when the delegation names
+    one,
+    drop a leading tier: from it, and ask AgentConfig for the agent definition
+    of
+    the chosen agent at that model tier, or else at the agent's own tier or the
+    medium tier. When AgentConfig returns the tier error for that agent, return
+    it
+    to the caller and end the flow with no task made. Take the child host
+    options for the child host of that agent definition from the same load.
+    The task records its
+    agent as
+    the name of the chosen agent, followed by :<tier> when the delegation names
+    a
     model tier.
 
-    With the agent definition found, ask the driver registry for the child port of
-    its host, and when no child driver is registered for that host, return the
-    error of the driver registry to the caller and end the flow with no task made.
-    A driver registry that lists no supported host gives AgentConfig an empty list
-    of supported hosts, so a request that resolves to any tier gives the tier
-    error that names the host and lists no supported host, before the driver
-    registry is asked, and no task is made.
+    With the agent definition found, ask the driver registry for the child port
+    of
+    its child host, and when no child driver is registered for that child host,
+    return the
+    error of the driver registry to the caller and end the flow with no task
+    made.
+    A driver registry that lists no supported child host gives AgentConfig an
+    empty
+    list
+    of supported child hosts, so a request that resolves to any tier gives the
+    tier error that names the child host and lists no supported child host,
+    before
+    the
+    driver registry is asked, and no task is made.
     Otherwise render the files, the expected output and the reply budget after
     the brief text into one brief, start the task in TaskCore with that
-    agent definition, that brief, that child port and the parent session id,
+    agent definition, that brief, that child port, those child host options
+    and the parent session id,
     and add the task to the live task registry, which a later collect or
     cancel reads. When the child runs of its model endpoint in this process
     that are Starting or Live have reached its parallel limit, keep the
@@ -135,43 +214,103 @@ component DelegationService {
     belongs to another process, which ends the flow. A cancel of such a task
     reports that it belongs to another process and cannot be cancelled here,
     and changes nothing, which ends the flow.
+
+    On a session cancel for a parent session id, cancel each Pending and live
+    task of that parent session id in the live task registry the way a cancel
+    does, and return their task ids and count, which ends the flow. A
+    session cancel with no parent session id cancels nothing and returns that
+    the session is unknown, which ends the flow.
+
+    When a task that its caller did not wait for settles, build its
+    completion notice from the task id and status of the task, the name of the
+    collect tool of the front end, and the status line of each task of
+    the same parent session id that is still Pending or live, and offer it to
+    the
+    front end that made the delegation, which ends that flow. A task that a
+    session cancel or a cancel ended gets the stop notice instead.
+
+    On a listing of the models in the guided setup, run the
+    prerequisites check of the child driver of its child host when it offers
+    one, and return its message as the error when it gives one. Then take the
+    child host options for that child host
+    from AgentConfig, also when the project is off, and return the load error as
+    the error of the whole listing when that read fails. Otherwise return
+    the model listing of that child driver for them, or an error when it offers
+    none or
+    the listing fails, which ends the flow. On a show, read the setup state
+    from AgentConfig, marking each model tier listed or not from the
+    model listing when the listing succeeds and otherwise giving the reason it
+    failed, and return it with the warning of what configuring the model tier
+    large moves off the parent host, which ends the flow. On a check, take the
+    child host options for that child host from AgentConfig
+    in the same way, and return the load error as the error of the whole check
+    when that read fails. Otherwise run the
+    model check of that child driver, given them, for
+    each model, one after another, and
+    return one result for each model in the order asked, which ends the flow.
+    On a preview or an apply, hand the change set and, for an apply, the
+    preview fingerprint to AgentConfig, with that child host and the setup
+    scope that the caller gives, which is the agent file when it gives none,
+    and return the setup preview, which ends the flow.
+
+    On shutdown, cancel every task in the live task registry, wait up to a
+    deadline for their child runs to end, and record each task whose child run
+    was then still running as cancelled, so that no task record stays running
+    while its owner process lives on, which ends the flow.
   }
 
   constraints {
-    DelegationService must create no task or task record when no child driver is
-    registered for the host of the agent definition, when the agent name is
-    unknown and no fallback agent is configured, when no agent is named or the
-    agent general is named and no general agent is configured, AgentConfig returns
-    the tier error, or the agent entries fail to load, and it must load the agent
-    entries again on each delegation.
+    DelegationService must create no task or task record when no child driver
+    is
+    registered for the child host of the agent definition, when AgentConfig
+    returns
+    the tier error, or when any agent entry fails to load, and it must load
+    each agent entry again on each delegation.
 
-    A delegation that names an agent other than general must find that agent in the
-    agents map and run it at the model tier that the delegation names, else at its
-    own tier or the default tier,
-    except that a name missing from the agents map runs
-    the fallback agent when a fallback agent is configured, and its replies report
-    it queued or
-    started like any
-    other delegation.
+    A delegation that names an agent other than general must find that agent in
+    the
+    agent entries of the merged configuration and run it at the model tier
+    that the delegation names, else at its
+    own tier or the medium tier, except that a name that no agent entry holds
+    runs
+    the fallback agent, and its replies report it queued or started like any
+    other
+    delegation.
 
-    The brief that the service renders must start with the brief text unchanged,
+    The brief that the service renders must start with the brief text
+    unchanged,
     followed by a Files section, an Expected output section and a Reply size
-    section, each only when it is present. The Reply size section asks the child
+    section, each only when it is present. The Reply size section asks the
+    child
     to keep its final reply under the reply budget and says that the reply is
-    returned to the parent whole and never cut. A delegation with an empty
+    returned to the parent model whole and never cut. A delegation with an
+    empty
     brief text must be refused whatever its files hold, and the paths of its
     files are not checked.
 
-    Every start-up of a front end, whether the server or a command, must go through
-    the start-up of the service, so that the start-up sweep runs at every start-up.
+    Every start-up of a front end, whether a parent adapter or a command,
+    must go through
+    the start-up of the service, so that the start-up sweep runs at every
+    start-up.
 
-    The project root must be resolved once for each process, and the
+    The project root must be resolved once successfully for each DelegationService,
+    and the
     agent file, the task record and the child run must all use that same
-    project root, which must not change once it is resolved. No other component
+    project root, which must not change once it is resolved. A process holds at
+    most one DelegationService for each parent session at a time. A
+    parent adapter
+    that builds one DelegationService for each parent session shuts the
+    old one down before it starts the next, and a parent adapter that keeps one
+    DelegationService for its process ends a parent session with a
+    session cancel.
+    No other component
     may call for a project root for its own use, and each receives it from
-    DelegationService, with one exception: a parent adapter that runs in a process
-    where no DelegationService starts reads the agent file under the project root
-    that its parent reports, because it has no DelegationService to ask. A call
+    DelegationService, with one exception: a parent adapter that runs in a
+    process
+    where no DelegationService starts reads the merged configuration under the
+    project root
+    that its parent host reports, because it has no DelegationService to ask. A
+    call
     made before the
     project root is resolved must return the unresolved root error and must
     create no task, task record or line of the task index.
@@ -179,38 +318,64 @@ component DelegationService {
     The live task registry must hold no state beyond this process, and the
     task record stays the only durable state of a task.
 
-    A parallel limit must be counted from the child runs of this process that
-    are Starting or Live, and a child run that is Pending must not be counted.
+    A session cancel must reach only the tasks of this process, and a task of
+    another process stays as it is.
+
+    A completion notice and a stop notice must never carry the transcript of a
+    child run, and the stop notice must never ask the parent model to act.
+
+    A parallel limit must be counted from each child run of this process that
+    is Starting or Live, and a child run that is Pending must not be counted.
     A child run that ends in any way, whether Settled, Failed or Cancelled,
     must stop being counted at once and release the next Pending child run. A
     delegation from a command line process or from another session is not
     counted, and nothing may signal or lock across processes to enforce it.
 
+    The guided setup must write the file of its setup scope only through an
+    apply of AgentConfig with the preview fingerprint of a setup preview, and
+    must add no agent entry, and must use
+    the project root that a DelegationService resolved and never the
+    working directory of its process. It must run one model check at a time,
+    so that a single model endpoint is not overloaded, and it must make no
+    delegation, task or task record, because the models it checks are not in
+    the agent file yet.
+
     A child run that is Pending must be returned with its queue place and its
     enqueue time and never with a start time, and the time it waits must not
     count toward its timeout.
 
-    DelegationService depends on TaskCore for the task, on the driver registry of
-    Kernel for the child port of the host of an agent definition, on AgentConfig
-    for the agent definition, the general agent, the fallback agent, the tier error
-    and the project root, and on TaskStore for the task record, the
-    task status and the start-up sweep. It must not depend on any particular
-    child driver or parent adapter, and it names no host, because more of both will
+    DelegationService depends on TaskCore for the task, on the driver registry
+    of
+    Kernel for the child port of the child host of an agent definition and,
+    for the guided setup, for the model listing, the model check, the
+    prerequisites check and the starter tools of a child host, on
+    AgentConfig
+    for the agent definition, the child host options, the general agent, the
+    fallback agent, the
+    tier error, the project root and the setup preview, and on TaskStore for
+    the task record, the task status and the start-up sweep. It must not
+    depend on any particular
+    child driver or parent adapter, and it names no child host, because more of
+    both will
     come and
     each plugs in through Kernel.
   }
 
   cases {
-    A delegation with an unknown agent name, in an agent file with no
-    fallback agent, returns the unknown agent error and writes no task record. A
-    delegation that names the agent general, in an agent file with a fallback agent
-    and no general agent, returns the unknown agent error and writes no
-    task record, and runs no fallback agent.
+    A delegation with an unknown agent name runs the fallback agent, records
+    its
+    agent as fallback, and its reply says that the named agent is not
+    configured. A
+    delegation that names the agent general runs the general agent on the
+    medium tier and records its agent as general.
 
-    A delegation with an unknown agent name, in an agent file with a
-    fallback agent, runs the fallback agent with its own tool list, records its
-    agent as fallback, and its reply says that the named agent is not configured. A
-    delegation that names the agent fallback runs the same agent and records the
+    A delegation with an unknown agent name, in a project with a fallback
+    agent, a built-in one included, runs the fallback agent with its own tool list,
+    records its
+    agent as fallback, and its reply says that the named agent is not
+    configured. A
+    delegation that names the agent fallback runs the same agent and records
+    the
     same agent, and its reply does not say that a name is not configured.
 
     A call made before any project root is known returns the
@@ -230,35 +395,72 @@ component DelegationService {
     and third Pending at queue place 1 and 2. Cancelling the second moves the
     third to queue place 1.
 
-    A delegation with the model tier medium starts the general agent on the host,
-    model and thinking level of that model tier and records the agent definition
-    general:medium, and tier:medium gives the same task. A delegation with no agent
-    and no model tier runs the general agent with its full tool list and records
+    A delegation with the model tier medium starts the general agent on the
+    child host,
+    model and thinking level of that model tier and records the
+    agent definition
+    general:medium, and tier:medium gives the same task. A delegation with no
+    agent
+    and no model tier runs the general agent with its full tool list and
+    records
     its agent as general, and a delegation that names the agent general and no
     model tier does the same.
 
-    A delegation with a model tier that is not configured returns the tier error
-    and writes no task record. A delegation that names the agent reviewer and the
+    A delegation with a model tier that is not configured returns the
+    tier error and
+    writes no task record. A delegation that names the agent reviewer and the
     model tier large runs reviewer on large, with reviewer's tier override for
-    large when it has one, and records reviewer:large, and a delegation that names
-    reviewer and no model tier runs it on its own tier and records reviewer.
+    large
+    when
+    it has one, and records reviewer:large, and a delegation that names
+    reviewer and
+    no model tier runs it on its own tier and records reviewer.
 
-    A delegation with files and an expected output gives a brief that starts with
+    A delegation with files and an expected output gives a brief that starts
+    with
     the brief text, then lists the files and the expected output.
 
     A delegation with a reply budget of 48,000 characters gives a brief that
     ends with a Reply size section that names 48,000 characters, and a
     delegation with no reply budget gives a brief with no Reply size section.
 
-    A collect of a task whose owner process died after the server started says
+    A collect of a task whose owner process died after the process started says
     that the task is abandoned and has no result, because the sweep ran again
     before the collect.
 
-    A collect by task id after the server restarted returns the stored result of a
+    A collect by task id after the process restarted returns the stored result
+    of a
     settled task, and says that an abandoned task has no result.
 
-    A cancel of a running task that another process owns reports that it belongs
+    A cancel of a running task that another process owns reports that it
+    belongs
     to another process, signals no process and leaves the task status running.
+
+    With two live tasks and one Pending task of parent session id A and one
+    live
+    task of parent session id B, a session cancel for A cancels the three tasks
+    of
+    A, reports their three task ids, and leaves the task of B running. A
+    session cancel with no parent session id cancels nothing and says that the
+    session is unknown.
+
+    With three tasks of one parent session id that the caller did not wait for,
+    the first to settle gives a completion notice that names it and its status,
+    says how to
+    collect its result, lists the other two with their status line and
+    gives the instruction to wait for them. A task
+    ended by a session cancel gives the stop notice and no completion notice.
+
+    A delegation in a project with no agent file and a global file that holds
+    a medium tier runs the general agent as a built-in agent on the medium
+    tier, with the starter tools of the child driver. A delegation in a project
+    with no agent file and no medium tier in the global file returns the off
+    error and makes no task, and says to run subzero init. A delegation in a
+    project whose agent file holds an enabled switch of false returns the off
+    error and makes no task, whatever the global file holds.
+
+    A shutdown while a child run ignores its cancel past the deadline records
+    that task as cancelled, and its task record does not stay running.
   }
 
   interface {
@@ -272,28 +474,39 @@ component DelegationService {
     instead, return the report that the named agent is not configured with
     the task id, whether or not the caller waits.
 
-    Report each queued task by its model endpoint, by its queue place when it is a
+    Report each queued task by its model endpoint, by its queue place when it
+    is a
     task of this process, and by the time it has waited, and never as started.
-    Give every front end the same wording for it, the status line of a task that
+    Give every front end the same wording for it, the status line of a task
+    that
     has no result and the result text of a settled task, so that no front end
     words the state of a task for itself.
 
-    Offer each domain event of the child run of a waited delegation to the caller
+    Offer each domain event of the child run of a waited delegation to the
+    caller
     as it happens.
 
     Hand the project root, once resolved, to the front end that started the
     service, for that front end's own use, and never resolve a different one.
 
     Let a caller collect the result of a task by task id, returning no result
-    while its task status is running, but its start time, or its model endpoint,
+    while its task status is running, but its start time, or its
+    model endpoint,
     queue place and enqueue time while it is Pending, and let a caller cancel a
     task by task id.
 
-    Let a caller wait up to a bound for a task by task id, and answer as a collect
+    Let a caller wait up to a bound for a task by task id, and answer as a
+    collect
     does when the bound passes with the task still unsettled or queued.
 
-    Give a front end each supported host that the driver registry lists, so that
-    it can describe the routable tiers without being given a child driver.
+    Give a front end each supported child host that the driver registry lists,
+    so
+    that
+    it can describe each routable tier without being given a child driver.
+
+    Give a front end the attach command of a settled task from its task record
+    and the child driver registered for its child host. Refuse the attach
+    command while the task is running or when its task record has no launch spec.
 
     Keep a delegation Pending while its model endpoint has reached its
     parallel limit, and release it first come first served.
@@ -302,34 +515,90 @@ component DelegationService {
     each with its task id, its agent, its task status, the time it was
     created, its start time when one is recorded and its queue place while it
     is Pending in this process, after running the start-up sweep again.
+
+    Offer a session cancel for one parent session id, and list the tasks of one
+    parent session id that are still Pending or live.
+
+    Offer the completion notice of each settled task that its caller did not
+    wait
+    for, with the collect tool of that front end named in it, and the
+    stop notice
+    of a task that was stopped, to the front end that made its delegation,
+    so
+    that every parent adapter words them the same
+    way and none keeps its own list of running tasks.
+
+    Shut down by cancelling every task in the live task registry and recording
+    each one that outlives the deadline as cancelled.
+
+    Offer the guided setup to a parent adapter and to the command line, with
+    the setup operations that give the model listing, the setup state with
+    each model tier marked listed and marked with the file it comes from, the
+    model check of each chosen model, the setup preview of a change set for a
+    setup scope and its apply, and each *setup refusal* with a
+    code
+    and a one-line reason, so that every front end shows the same result. A
+    setup refusal is any error of a setup operation: a change set error, the
+    stale preview error, the write error, the load error, a refused change or
+    a missing or unsupported child host. Offer the guide text to every
+    parent adapter, so that an init that a person starts asks the same
+    questions on every parent host.
   }
 
   decisions {
-    A separate service keeps TaskCore to the lifecycle of one task, and gives the
-    start-up sweep, the agent lookup and the live task registry one owner instead
-    of one for each front end. The files and the expected output are rendered into
-    the brief text because the child port carries one brief, and the fields exist
-    to push a parent toward a fuller brief. The reply budget is a field of the
-    delegation and not a size of the service, because the size a parent can
+    A separate service keeps TaskCore to the lifecycle of one task, and gives
+    the
+    start-up sweep, the agent lookup and the live task registry one owner
+    instead
+    of one for each front end. The files and the expected output are rendered
+    into
+    the brief text because the child port carries one brief, and the fields
+    exist
+    to push a parent model toward a fuller brief. The reply budget is a field
+    of
+    the
+    delegation and not a size of the service, because the size a parent model
+    can
     take inline is known only to the front end that returns the result.
 
-    A task that runs the fallback agent records its agent as fallback and not as
-    general, because its tool list is its own and not that of the general agent. A
+    A task that runs the fallback agent records its agent as fallback and not
+    as
+    general, because its tool list is its own and not that of the
+    general agent. A
     task that runs the general agent without a model tier records its agent as
-    general, whether the delegation names it or names nothing.
-    A tiered task records its agent as <agent>:<tier>, so that listings, launch
-    names and the frozen agent definition show which model tier ran, and the
-    frozen definition with its model is the proof that the work was routed. The
-    queue place is counted per process because the parallel limit is, so it
-    names the place in this session's queue only.
+    general, whether the delegation names it or names nothing. A tiered
+    task records
+    its agent as <agent>:<tier>, so that listings, launch names and the frozen
+    agent definition show which model tier ran, and the frozen definition with its
+    model is
+    the proof that the work was routed. The queue place is counted per process
+    because the parallel limit is, so it names the place in this session's
+    queue
+    only.
 
-    The status line and the result text live here, and not in a front end, because
+    The status line and the result text live here, and not in a front end,
+    because
     this component is the one owner of the state of a task: the wording of that
     state is shared by every front end, and a front end that imported it from
-    another front end would depend on a parent adapter, which the Kernel forbids
+    another front end would depend on a parent adapter, which the Kernel
+    forbids
     of every core service, the command line included. The queued view is
-    derived here, so its wording sits beside it. Fitting a reply to the limit of
-    its parent and ordering a listing stay with the front end that needs
+    derived here, so its wording sits beside it. Fitting a reply to the limit
+    of
+    its parent host and ordering a listing stay with the front end that needs
     them.
+
+    Each built-in agent takes its starter tools from the child driver here,
+    where the driver registry is, so that no component below AgentConfig names
+    a tool. The guided setup lives here, beside the delegation, so that the
+    Claude Code parent host, through the command line, and the pi parent host
+    reach the
+    same setup operations and cannot drift apart. The conversation of an init
+    that a person starts, its questions, suggestions and warnings, lives in
+    the guide text that
+    both parent adapters follow, and not in the setup operations. A model check is
+    a
+    one-turn run of the child driver and not a delegation, because a
+    delegation needs an agent entry and makes a task record.
   }
 }

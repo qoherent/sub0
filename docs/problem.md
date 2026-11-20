@@ -1,5 +1,8 @@
 # Problem statement
 
+> **Vocabulary (2026-11-12).** Below, "host" means either kind of coding agent. In the design, a **parent host** is
+> the agent you work in and a **child host** is the agent subzero starts; see [design.md](design.md) §1.
+
 ## Context
 
 Coding agents (Claude Code, Codex CLI, pi, ...) are extended with **skills**: folders with a `SKILL.md`

@@ -6,7 +6,7 @@ import { tempDir } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const SCRIPT = path.join(REPO, 'scripts', 'publish-plugin-branch.mjs');
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
 const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** What the plugin branch holds: the staged plugin (the release allowlist) and its marketplace file. */
@@ -20,6 +20,8 @@ const BRANCH_FILES = [
   'hooks/hooks.json',
   'package.json',
   'skills/init/SKILL.md',
+  'skills/init/guided-init.md',
+  'skills/cancel/SKILL.md',
   'skills/tasks/SKILL.md',
 ].sort();
 
@@ -39,7 +41,7 @@ function sourceTree(options: { dist?: boolean; version?: string } = {}): string 
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     cpSync(path.join(REPO, file), path.join(root, file));
   }
-  for (const skill of ['init', 'tasks']) cpSync(path.join(REPO, 'skills', skill), path.join(root, 'skills', skill), { recursive: true });
+  for (const skill of ['init', 'tasks', 'cancel']) cpSync(path.join(REPO, 'skills', skill), path.join(root, 'skills', skill), { recursive: true });
   mkdirSync(path.join(root, 'src'));
   writeFileSync(path.join(root, 'src', 'decoy.ts'), 'decoy\n');
   if (options.dist !== false) {

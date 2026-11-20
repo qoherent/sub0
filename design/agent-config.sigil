@@ -1,318 +1,680 @@
-@design/kernel.sigil from Kernel import { supported host, parent adapter, host }
+@design/kernel.sigil from Kernel import {
+  supported child host, parent adapter, child host, parent model,
+}
+@design/task-core.sigil from TaskCore import { starter tools }
 
 component AgentConfig {
   goal {
-    Load and validate the spike's agent configuration so that every other component
-    receives an agent definition whose host, model and thinking level come from one
-    model tier and whose skills are absolute folders.
+    Load and validate the spike's agent configuration so that every other
+    component receives an agent definition whose child host, model and
+    thinking level come from one model tier and whose skills are absolute
+    folders.
   }
 
   state {
-    The configuration is one *agent file*, .agents/subzero.yaml, with a
-    *skills map* from skill name to *skill folder*, an *endpoints map*, a
-    *models map* and an *agents map* of named agents, each an *agent entry*.
+    The configuration is two layers. The *agent file*, .agents/subzero.yaml
+    under the project root, holds a *skills map* from skill name to
+    *skill folder*, an *endpoints map*, a *models map* and an *agents map* of
+    named agents, each an *agent entry*. The *global file*,
+    ~/.agents/subzero.yaml, whose path *SUBZERO_GLOBAL_CONFIG* may name instead,
+    holds only a models map with its
+    tiers map, an endpoints map, the *routing block* that the agent file may
+    also hold and the child host options, which the agent file may not hold. A
+    hosts map under the key hosts gives the child host options of a child host,
+    from the name of a child host to a map. AgentConfig keeps each map as
+    written and never reads inside one, because the child driver of that child
+    host owns what its options mean. A *shared file* is the agent file when it and
+    the global file are one file, symbolic links followed, as in a project
+    whose project root is the home folder.
 
-    The models map holds a *tiers map* that gives each *model tier* by name a host,
-    a
-    *model* and a *thinking level*. The model tier named default is the
-    *default tier*. The host, the model and the thinking level live only in model
-    tiers and in tier overrides, and never directly in an agent entry.
+    The *merged configuration* is the global file and the agent file combined
+    by name: each model tier by its name, each endpoints entry by its model
+    endpoint and each key of the routing block by its key. An entry of the agent
+    file replaces the entry of the global file with that name whole, and an
+    entry that the agent file does not name is taken from the global file. An
+    agent file that names a model tier or an endpoints entry with no value
+    holds a *removal entry*, which takes it out of the merged configuration.
+    The agent file may hold an *enabled switch*, and an agent file whose enabled
+    switch is false switches subzero off for its project.
 
-    An agent entry has a *description*, the names of its skills, a *tool list* and
-    a
-    *timeout*, and may name a model tier as its own tier and hold a *tier override*
-    for any model tier. The entries named general and fallback have no description.
-    A tier override replaces, for that agent only, any of the host, the model and
-    the thinking level of the model tier it names, and leaves the rest of that
-    model tier as it is.
+    The models map holds a *tiers map* that gives each *model tier* by name a
+    child host, which the agent file writes under the key host, a *model* and a
+    *thinking level*. The child host, the model and the thinking level live
+    only in a model tier or a tier override, and never directly in an
+    agent entry.
 
-    An *agent definition* is one agent entry resolved at one model tier: the tier
-    that the request names, or else the entry's own tier, or else the default tier.
-    It has the description, the skills, the tool list and the timeout of the entry,
-    and the host, the model and the thinking level of that model tier after the
-    entry's tier override for it. It is named after the entry, and named
-    <entry>:<tier> when the request names a model tier.
+    The *medium tier* is the model tier named medium. It is what a request runs
+    on when it names no model tier and the agent entry names none of its own,
+    so the merged configuration must hold it.
+
+    An agent entry has a *description*, the names of its skills, a *tool list*
+    and a *timeout*, and may name a model tier as its own tier and hold a
+    *tier override* for any model tier. The entries named general and fallback
+    have
+    no description. A tier override replaces, for that agent only, any of the
+    child host, the model and the thinking level of the model tier it names,
+    and leaves the rest of that model tier as it is.
+
+    An *agent definition* is one agent entry resolved at one model tier: the
+    tier that the request names, or else the entry's own tier, or else the
+    medium tier. It has the description, the skills, the tool list and the
+    timeout of the entry, and the child host, the model and the thinking level
+    of that model tier after the entry's tier override for it. It is named
+    after the entry, and named <entry>:<tier> when the request names a
+    model tier.
 
     The endpoints map holds an *endpoints entry* for a *model endpoint*. A
     model endpoint is the part of a model before its first slash, and each
-    agent definition belongs to the model endpoint of its model. The entry holds
-    the *parallel limit* of that model endpoint, a positive whole number that is
-    the most child runs that one process runs at the same time on it. A
-    model endpoint with no entry has no parallel limit, and every agent definition
-    on the same model endpoint shares its parallel limit.
+    agent definition belongs to the model endpoint of its model. The entry
+    holds the *parallel limit* of that model endpoint, a positive whole number
+    that is the most child runs that one process runs at the same time on it. A
+    model endpoint with no entry has no parallel limit, and every
+    agent definition on the same model endpoint shares its parallel limit.
 
-    The timeout is a required number of seconds. It limits the wall-clock time of a
-    child run from its spawn to its settlement, including skill verification, and
-    it does not run while the child run is Pending.
+    The timeout is a required number of seconds. It limits the wall-clock time
+    of a child run from its spawn to its settlement, including
+    skill verification, and it does not run while the child run is Pending.
 
-    The agents map may hold an entry named general, the *general agent*, which
-    takes work that names no agent or names general, and whose tool list and
-    timeout tiered work from a parent uses.
+    The merged configuration must hold an entry named general, the
+    *general agent*, which takes work that names no agent or names general, and
+    whose tool list and timeout tiered work uses. It must also hold an entry
+    named fallback, the *fallback agent*, which takes the work of a name other than
+    general that no agent entry of the merged configuration holds. Its tool list
+    can be limited to
+    tools that only read, and the init with a model writes it that way. Neither
+    the general agent nor the fallback agent is chosen by its description or
+    offered to a parent model for routing.
 
-    The agents map may also hold an entry named fallback, the *fallback agent*,
-    which takes the work of a name other than general that the agents map does not
-    hold. Its tool list can be limited to tools that only read, and a front end's
-    init writes it that way. Neither the general agent nor the fallback agent is
-    chosen by its description or offered to a parent for routing. The default tier,
-    the general agent and the fallback agent that a front end's init adds are the
-    *starter entries*.
+    A *built-in agent* is the general agent or the fallback agent when the
+    agents map does not hold it. The built-in general agent has the tool list
+    for a general agent and the built-in fallback agent has the tool list that
+    only reads, both from the starter tools that the caller gives for the child
+    host of the medium tier, as the init with a model writes them. A built-in
+    agent has no skills and a timeout of 1200 seconds, and an entry of the
+    agents map with the same name replaces it. The medium tier, the general agent
+    and the fallback agent that
+    the init with a model adds to the agent file are the *starter entries*.
 
-    A *routable tier* is a model tier whose host, after the tier override of the
-    general agent, is a supported host, or any model tier when the caller gives no
-    supported hosts, and only while the agents map holds a general agent, because
-    tiered work runs on the general agent. The default tier is a routable tier on
-    the same terms as any other, because the general agent runs on it when no tier
-    is named, and a front end that routes by tier word leaves it out because it
-    has none.
+    A *routable tier* is a model tier whose child host, after the tier override
+    of the general agent, is a supported child host, or any model tier when the
+    caller gives no supported child hosts. The medium tier is a routable tier
+    on the same terms as any other, and a front end that routes by tier word
+    leaves out a routable tier that has no tier word.
 
-    The agent file may also hold *routing settings*, which are a *hook switch* that
-    is on unless it is set to false, and an optional *generic agent list* of agent
-    type names.
+    A *tier word* is how a compound-engineering skill names the model of a
+    generic subagent. The tier word cheapest capable maps to the model tier
+    small, mid-tier maps to medium, and session model maps to large. The
+    tier word session model is the name that compound-engineering uses for the
+    model tier large. It is not a fallback to the model of the parent session,
+    and
+    no request runs on it unless it names it.
+
+    A *working directory* is the directory in which a session of a parent host
+    or a command was started.
+
+    A *change set* is what a guided setup asks to change in one file: set
+    a model tier to a model and a thinking level, remove a model tier, set the
+    parallel limit of a model endpoint, or remove it. It changes each
+    model tier and each model endpoint at most once, and each model tier that
+    it sets runs on the child host that its caller gives. A *setup scope* says
+    which file a change set is for: the global file or the agent file, which
+    is the default. The
+    *tier dependents* of a model tier are the agent entries that name it as
+    their own tier or hold a tier override for it, the general agent and the
+    fallback agent included.
+
+    A *setup preview* of a change set holds the change set in a canonical
+    order, each *refused change* with its reason and the agent entries that cause
+    it, each parallel limit that the write drops because no model belongs to
+    its model endpoint after it, each model tier and endpoints entry that the
+    change set sets or removes and that the agent file of this project
+    overrides, when the setup scope is the global file, and a diff and a
+    summary of the write. It also holds a
+    *preview fingerprint* over the text of the file of its setup scope or its
+    absence, the change set, the setup scope and the child host of the write.
+
+    A *tier text* is the model tier that a parent model writes in a request,
+    which may be empty. An *agent alias* is a name that a parent model may
+    write for the general agent: delegate and general are the agent aliases.
   }
 
   logic {
-    On load, read the agent file, validate every model tier, every agent entry, the
-    general agent and the fallback agent included, every tier override and the
-    routing settings against the schema, and resolve each skill folder relative to
-    the directory of the agent file into an absolute path. The flow returns the
-    agent entries, the model tiers and the routable tier names to its caller, or
-    stops with a *load error* that names the offending entry, or says that the
-    agent file is missing, unreadable or malformed. One invalid model tier or agent
-    entry fails the whole load.
+    On a read of the child host options for a guided setup, read only the
+    global file, whatever the agent file holds and also when the project is off,
+    and validate it as a global layer is validated on load, except that a missing
+    medium tier is no error. Return the
+    child host options of the child host that the caller names, or the load
+    error that names the global file, which ends the flow.
 
-    On a request for an agent at a model tier, resolve the agent entry at the tier
-    the request names, or else at the entry's own tier, or else at the
-    default tier, apply the entry's tier override for that tier, and return the
-    agent definition, which ends the flow. When the tier is not configured, or its
-    host after the override is not a supported host, return the tier error and end
-    the flow.
+    On load, read the agent file first. When it holds an enabled switch that is
+    false, stop with the *off error* before the global file is read. Otherwise
+    read the global file when it exists, validate the global file as a layer
+    that holds only a models map with its tiers map, an endpoints map, the
+    routing block and the child host options, validate the agent file as a layer
+    against the *agent-file schema*, which consists only of the validation rules in
+    this
+    AgentConfig contract, merge the two layers by name, fill each default
+    agent, and validate the merged configuration: every model tier, every agent
+    entry,
+    the general agent, the fallback agent and the medium tier included, and every
+    tier override. Resolve each skill folder relative to the directory of the
+    agent file into an absolute path. Take out of the merged configuration an
+    endpoints entry that only the global file holds and no model belongs to,
+    without an error. A shared file is read once, as the global layer, and the
+    agent file layer is then empty, as if the agent file were missing, so
+    that its enabled switch is not read and a key meant only for the agent
+    file is a global file error. The flow returns each agent entry, each
+    model tier, the child host options and the names of each routable tier to its
+    caller, or stops with the off error when
+    the agent file is missing and the merged configuration holds no medium tier,
+    or with a *load error* that names the file it comes from, the global file
+    or the agent file, and the offending entry or model tier, or names the
+    missing general agent, fallback agent or medium tier, or says that a
+    file is unreadable or malformed. One invalid model tier or agent entry
+    fails the whole load.
+
+    On a request for an agent, resolve the agent entry for the agent name, or
+    the general agent when the request names no agent or an agent alias. A name
+    that no agent entry of the merged configuration holds, a built-in agent
+    included, stops the flow with the unknown agent error. Then choose the
+    model tier: the tier the request
+    names, or else the entry's own tier, or else the medium tier. Apply the
+    entry's tier override for that tier and return the agent definition, which
+    ends the flow. When the chosen tier is not configured, or its child host
+    after the override is not a supported child host, return the tier error and
+    end the flow.
+
+    On a tier text, return the model tier it maps to, which ends the flow: a
+    configured model tier name, or tier: followed by one, maps to that
+    model tier, and a tier word maps to its model tier. An empty tier text maps
+    to no model tier, and any other tier text is an *unmatched tier text*,
+    which the caller treats as an empty tier text.
+
+    On a read of the *setup state*, read the global file and the agent file,
+    reading a shared file once as the global file, and return each model tier of
+    the merged configuration with its tier
+    dependents, its model endpoint and the file it comes from, and, when the
+    agent file overrides it, the global file's model tier, and each endpoints
+    entry with the model tiers whose model belongs to it, the file it comes
+    from, whether only a tier override uses it and whether no model uses it,
+    which ends the flow. A missing agent file gives a setup state with no file.
+    A file that fails to load only for a missing medium tier or a parallel
+    limit that no model uses gives the setup state and that load error as what
+    the write repairs, and any other load error gives a refused setup state
+    that holds the load error unchanged.
+
+    On a change set, refuse it with a *change set error* when it is malformed
+    or changes a model tier or a model endpoint twice, and with the load error
+    when the setup state is refused, which ends the flow. Otherwise build the
+    setup preview. Refuse the removal of the medium tier, of a model tier that
+    is not configured, and of a model tier that has tier dependents, naming
+    every one of them. Refuse a parallel limit for a model endpoint that no
+    model of a model tier or of a tier override belongs to, and refuse the
+    whole change set when no medium tier would remain in the merged
+    configuration. When the setup scope is the agent file and the agent file is
+    a shared file, refuse the whole change set with a refused change that names
+    the shared file, and write nothing, and likewise refuse to add the starter
+    entries to a shared file. When the setup scope is the agent file,
+    removing a model
+    tier or a parallel limit that only the global file holds writes a removal
+    entry. When the setup scope is the global file, also build the merged
+    configuration of this project with the changed global file, refuse a
+    change after which that merged configuration would lack a model tier that
+    an agent entry of this project names as its own tier or holds a tier
+    override for, and keep a load error of this project that the change would
+    cause.
+    Drop the parallel limit of each model endpoint that no model belongs to
+    after the change, keep one that only a tier override uses, and load the
+    result as the merged configuration, keeping its load error when it would
+    not load. A change set adds no starter entry. Return the setup preview and
+    write nothing, which ends the flow.
+
+    On an apply of a change set with a preview fingerprint, build its
+    setup preview again from the file of its setup scope as it is now. Refuse
+    with a
+    *stale preview error* when the preview fingerprint differs, and refuse
+    when the setup preview holds a refused change or would not load, writing
+    nothing. Write nothing when nothing changes, and otherwise write the result
+    and return the setup preview with whether it wrote, which ends the flow.
+    When the file system refuses that write, leave that file as it was
+    and refuse with a *write error* that names the file and the cause the
+    file system gave, which ends the flow.
   }
 
   constraints {
-    A model tier must be rejected with a load error that names it when it has no
-    host, no model or no thinking level. A tier override must be rejected with a
-    load error that names its agent and its model tier when it names a model tier
-    that is not configured or holds anything other than a host, a model or a
-    thinking level. An agent entry must be rejected, naming it, when its own tier
-    is not a configured model tier, or when it holds a host, a model or a
-    thinking level directly.
+    A model tier must be rejected with a load error that names it when it has
+    no child host, no model or no thinking level. A tier override must be
+    rejected with a load error that names its agent and its model tier when it
+    names a model tier that is not configured or holds anything other than a
+    child host, a model or a thinking level. An agent entry must be rejected,
+    naming it, when its own tier is not a configured model tier, or when it
+    holds a child host, a model or a thinking level directly.
 
-    The agent file must be rejected with a load error that names the default tier
-    when its agents map holds an agent entry and its models map holds no
-    default tier.
+    The merged configuration must be rejected with a load error that names the
+    medium tier when the agent file exists and neither file holds a model tier
+    named medium, except that an agent file whose enabled switch is false is off
+    without it. When the caller gives no starter tools to a call that returns an
+    agent definition, a general agent or fallback agent that the agents map does
+    not hold must be rejected with a load error that names it. A call that
+    lists only the tier names, the routable tiers or the routing block needs no
+    tool list, and fills each built-in agent without one.
 
-    AgentConfig takes the supported hosts from its caller, which gets them from
-    Kernel, and AgentConfig names no host itself. When its caller gives no
-    supported hosts, AgentConfig checks no host. A model tier whose host is not a
-    supported host still loads and is not a routable tier.
+    The global file must be rejected with a load error that names the global
+    file and the key when it holds anything other than a models map with a
+    tiers map, an endpoints map, the routing block or the child host options,
+    the enabled switch, a skills map and an agents map included. The key
+    hosts must be a map whose every value is a map, and anything else gives a
+    load error that names the global file, the key hosts and, for a value that
+    is not a map, its child host. The load checks
+    nothing inside a map, because a malformed one must not break a project that
+    never uses that child host, and the child driver reports it when it would
+    start a child. An agent file that holds the key hosts must be rejected with
+    a load error that names the agent file, because a repository must not choose
+    the code that runs in the children of its user, and a shared file is
+    read as the global file, so its hosts key is accepted. The process
+    environment, SUBZERO_GLOBAL_CONFIG, HOME and PATH included, is trusted, so
+    AgentConfig honors the child host options of whichever file is the global
+    file. An
+    empty SUBZERO_GLOBAL_CONFIG counts as unset, a missing global file is no layer
+    and no error, and an
+    unreadable or malformed global file must be rejected with a load error that
+    names it. A removal entry is accepted only in the agent file. The enabled
+    switch must be true or false.
+
+    Each load error must name the file it comes from, the global file or the
+    agent file. An agent entry whose own tier or tier override names a model
+    tier is checked against the model tiers of the merged configuration, and a
+    model tier that a removal entry took out is not configured. A general agent
+    or fallback agent in the agents map replaces the built-in agent of that name
+    and nothing else, so an agents map with only a reviewer entry still gets
+    both built-in agents.
+
+    AgentConfig takes the supported child hosts from its caller, which gets
+    them from Kernel, and AgentConfig names no child host itself. When its
+    caller gives no supported child hosts, AgentConfig checks no child host. A
+    model tier whose child host is not a supported child host still loads and
+    is not a routable tier.
 
     The general agent and the fallback agent must each be rejected with a
     load error that starts with its name when it holds a description, because
     neither is chosen by its description.
 
     An endpoints entry must be rejected with a load error that names its
-    model endpoint when its parallel limit is not a positive whole number, or when
-    no model of a model tier or of a tier override belongs to its model endpoint.
+    model endpoint when its parallel limit is not a positive whole number, or
+    when no model of a model tier or of a tier override belongs to its
+    model endpoint, except an endpoints entry that only the global file holds,
+    which is ignored in a project whose models do not use it.
 
     An agent entry must be rejected, naming it, when it has no timeout or its
     timeout is not a positive number of seconds.
 
-    An agent entry that names a skill missing from the skills map must be rejected
-    with the agent and the skill both named.
+    An agent entry that names a skill missing from the skills map must be
+    rejected with the agent and the skill both named.
 
     The fallback agent must keep the tool list that the agent file gives it, at
     every model tier, and its tool list must not change the tool list of the
     general agent. AgentConfig names no tool, because tool names belong to the
-    host.
+    child host.
 
-    A skill folder that does not exist on disk must still load. The missing folder
-    is reported only when a child is launched.
+    A skill folder that does not exist on disk must still load. The missing
+    folder is reported only when a child is launched.
 
     A request that resolves an agent at a model tier that is not configured, or
-    whose host after the tier override is not a supported host, must return a
-    *tier error* that names the tier it resolved to, lists every configured
-    model tier and, when the host is the cause, names that host and every
-    supported host, and it must not fail the load, whether the host belongs to a
-    model tier that still loads or to a tier override. The routable tiers are only
-    a
-    listing of the model tiers that the general agent can run, for the tool
-    description and the hook, and whether any agent runs at a model tier is decided
-    by the host of its resolved agent definition.
+    whose child host after the tier override is not a supported child host,
+    must return a *tier error* that names the tier it resolved to, lists every
+    configured model tier and, when the child host is the cause, names that
+    child host and every supported child host, and it must not fail the load.
+    The listing of each routable tier names a model tier that the
+    general agent can run, for the tool description and the hook, and whether
+    any agent runs at a model tier is decided by the child host of its resolved
+    agent definition.
 
-    AgentConfig must read the agent file again on each call that asks for an
-    agent definition, a model tier or the routing settings, so that an edit to it
-    is picked up without a restart.
+    AgentConfig must read the agent file and the global file again on each call
+    that asks for an agent definition or a model tier, so that an edit to
+    either is picked up without a restart.
 
-    AgentConfig must read only the one agent file, and it writes that file only to
-    add the starter entries that its interface describes. It must not merge layers,
-    write subzero.lock or ask for repo trust in the spike, because those belong to
-    the agent definition format of a later version.
+    AgentConfig must read only the agent file and the global file, and it
+    writes the agent file only to add the starter entries and the file of the
+    setup scope only to apply a change set, as its interface describes. It
+    must not read a personal override file, write *subzero.lock* or ask for
+    *repo trust* in the spike, because those belong to the agent definition
+    format of a later version.
 
-    When it adds the starter entries, AgentConfig must leave every existing entry
-    and line of the agent file unchanged, add only the default tier, the
-    general agent or the fallback agent when the agent file does not hold it yet,
-    write nothing when the file exists and does not load for a reason other than a
-    missing default tier, add the default tier to a file that holds agent entries
-    and no default tier, and write entries that load.
+    When it writes a file, AgentConfig must leave every entry that the
+    write does not change as it was, and leave each line that the write does
+    not change as it was, except when adding to an empty or *flow-style map*
+    requires rewriting that map. Adding the starter entries adds only the
+    medium tier, the general agent or the fallback agent when the agent file
+    does not hold it yet. A change set may replace a model tier, remove a
+    model tier or an endpoints entry together with the comment lines directly
+    above it, remove several entries of one map in the same write, and set a
+    parallel limit, creating the endpoints map when it is missing, and for the
+    agent file write a removal entry for a model tier or an endpoints entry
+    that only the global file holds. AgentConfig must
+    write nothing when the file exists and does not
+    load for a reason other than missing starter entries or, for a change set,
+    a missing medium tier or a parallel limit that no model uses, and must write
+    only entries that load. A write for the global file creates its folder
+    when it is missing.
 
-    AgentConfig resolves the *project root* from *SUBZERO_PROJECT_DIR* first, then
-    from the roots that the parent adapter reports, and for the command line from
-    its working directory. It must never use the working directory of the server
-    process. It keeps no project root between calls, because DelegationService asks
-    once for each process and hands the answer to the other components. It finds
+    An apply must write a change set only with the preview fingerprint of its
+    setup preview, and must refuse with the stale preview error and write
+    nothing when the file of its setup scope, the setup scope or the change set
+    differs from what was previewed, including a file created or removed since.
+    It writes through a *temporary file* next to that file, created exclusively
+    so that its own path never names an existing file or symbolic link, removed on
+    any
+    failure and then renamed over that file, so that a call that reads the
+    file again sees the old file or the new one and never a part of one. When
+    that file is a symbolic link, every link is followed to the file it
+    resolves to, the temporary file is next to that file, the rename replaces
+    that file and each symbolic link stays as it was.
+
+    AgentConfig resolves the *project root* from *SUBZERO_PROJECT_DIR* first,
+    then from the roots that the parent adapter reports, and for the command
+    line from its working directory. It must never use the working directory of
+    the process that runs it, except for the command line. It keeps no
+    project root between calls, because DelegationService asks once for each
+    DelegationService and hands the answer to the other components. It finds
     the agent file under the project root that its caller hands over.
 
-    An empty SUBZERO_PROJECT_DIR counts as unset. When the parent adapter reports
-    several roots, the first one reported wins. The project root must be an
-    absolute path with its symbolic links resolved. When no source gives a
-    project root, AgentConfig must return an *unresolved root error* that names
-    SUBZERO_PROJECT_DIR as the setting to fix, and must resolve again on the next
-    call.
+    A caller may ask AgentConfig to resolve the project root from the roots
+    that its parent adapter reports alone, and then SUBZERO_PROJECT_DIR is not
+    read.
+
+    An empty SUBZERO_PROJECT_DIR counts as unset. When the parent adapter
+    reports several roots, the first one reported wins. The project root must
+    be an absolute path with its symbolic links resolved. When no source gives
+    a project root, AgentConfig must return an *unresolved root error* that
+    names SUBZERO_PROJECT_DIR as the setting to fix, and must resolve again on
+    the next call.
+
+    AgentConfig finds the global file at the path that SUBZERO_GLOBAL_CONFIG
+    names, or else in the home folder of the user, and no test reads the home
+    folder of a developer.
   }
 
   cases {
-    A file with the default tier set to the host pi, the model r9700/Qwen3.8 and
-    the thinking level medium, and one agent entry with no tier of its own, loads,
-    and that agent definition has that host, model and thinking level and absolute
+    A file with the medium tier set to the child host pi, the model
+    r9700/Qwen3.8 and the thinking level medium, a general agent, a
+    fallback agent and one agent entry with no tier of its own, loads, and that
+    agent definition has that child host, model and thinking level and absolute
     skill folder entries.
 
-    With the model tiers default, small, medium and large, the general agent
-    resolves to four agent definitions: general on the default tier, and
+    With the model tiers medium, small and large configured, the general agent
+    resolves to four agent definitions: general on the medium tier, and
     general:small, general:medium and general:large on the tier each names.
 
-    A reviewer entry whose own tier is medium resolves to the medium model tier
+    A reviewer entry whose own tier is small resolves to the small model tier
     when the request names no tier, and to the large model tier, named
-    reviewer:large, when the request names large. A tier override of the reviewer
-    for large that sets only the model keeps the host and the thinking level of
-    large.
+    reviewer:large, when the request names large. A tier override of the
+    reviewer for large that sets only the model keeps the child host and the
+    thinking level of large.
 
-    An agent entry that holds a model directly gives a load error that names it,
-    and so does a tier override that names a model tier that is not configured.
+    An agent entry that holds a model directly gives a load error that names
+    it, and so does a tier override that names a model tier that is not
+    configured.
 
-    An agents map with entries and no default tier gives a load error that names
-    the default tier. A file with the model tiers default and medium and an
-    agents map that holds no general agent loads and has no routable tier, and the
-    same file with a general agent has the routable tiers default and medium.
+    A file that holds an agent entry but no general agent gets the default
+    general agent, and a file with a general agent and no fallback agent gets
+    the built-in fallback agent. When the caller gives no starter tools, a
+    call that returns an agent definition gives a load error that names the
+    missing agent. An agent file with no model tier named medium, when the
+    global file holds none either, gives a load error that names the
+    medium tier.
 
-    A model tier large with the host claude, when only pi is a supported host,
-    loads, is not a routable tier, and a request for it gives the tier error that
-    names claude and pi. When the caller gives no supported hosts, large is a
-    routable tier.
+    A global file with the model tiers small, medium and large and a parallel
+    limit for the model endpoint local, and an agent file with only a medium
+    tier and a parallel limit for local, give a merged configuration with the
+    agent file's medium tier whole, the global small and large, and the agent
+    file's parallel limit for local. With a global file that holds a medium
+    tier and no agent file, the project is on, and the general agent resolves
+    to a built-in agent on the medium tier with the tool list for a general
+    agent from the starter tools that the caller gives and a timeout of 1200
+    seconds, and the fallback agent to a built-in agent whose tool list only
+    reads. With a global file that holds
+    no medium tier and no agent file, the project is off with the off error.
+    An agent file that holds only an enabled switch of false is off with the
+    off error, whether or not a global file exists, and a broken global file
+    does not reach it.
+
+    A global file that holds an agents map gives a load error that names the
+    global file and the agents key, in every project that is on. A removal
+    entry for large in the agent file takes large out of the merged
+    configuration, and an agent entry whose own tier is large then gives a load
+    error that names the agent file. A global parallel limit for a model
+    endpoint that no model tier of the project uses is ignored in that project.
+
+    A global file whose hosts key holds, for the child host pi, a map with a
+    list of extensions gives that map as written to its caller, in every
+    project that is on, and a map for a child host that no caller starts is kept
+    and used by no one. A map that holds nothing valid for its child driver
+    still loads, and the child driver reports it when it would start a child. A
+    global file named by SUBZERO_GLOBAL_CONFIG gives its child host options
+    like the file at ~/.agents/subzero.yaml, and an agent file that holds the
+    key hosts gives a load error that names the agent file. In a
+    project whose project root is the home folder, the shared file is read once
+    as the global file, so its models map and its child host options both load, and
+    a change set for the agent file is refused naming the shared file with
+    nothing written. A change set for a file that is a symbolic link into a
+    dotfiles folder changes the file the link resolves to, and the symbolic link
+    still names it afterwards.
+
+    A model tier large with the child host claude, when only pi is a
+    supported child host, loads, is not a routable tier, and a request for it
+    gives the tier error that names claude and pi. When the caller gives no
+    supported child hosts, large is a routable tier.
 
     A name that is not configured gives an unknown agent error that lists every
-    configured agent entry. AgentConfig only reports the error, and
-    DelegationService decides whether the fallback agent runs instead.
+    configured agent entry, the built-in agents included. AgentConfig only
+    reports the error, and DelegationService decides whether the fallback agent
+    runs instead.
 
-    Adding the starter entries to an agent file that holds general and reviewer
-    entries and no default tier adds the default tier and the fallback agent and
-    leaves the general and reviewer entries as they were. Adding the
-    starter entries to an agent file that holds a default tier and a general agent
-    and no fallback agent adds only the fallback agent, and every
-    existing line stays as it was. Adding them where no agent file exists creates
-    the file with all three.
+    Adding the starter entries to an agent file that holds general and fallback
+    agents and no medium tier adds the medium tier and leaves every existing
+    entry as it was. Adding them where no agent file exists creates the file
+    with all three.
 
     With no SUBZERO_PROJECT_DIR and no root reported by the parent adapter, the
     project root is not resolved and the caller gets the unresolved root error.
 
     Two agent definitions on the model endpoint r9700, whose entry has a
     parallel limit of 1, are both given that parallel limit of 1, and an
-    agent definition on a model endpoint with no entry is given none. An entry for
-    r9770 that no model of a model tier or tier override belongs to gives a
+    agent definition on a model endpoint with no entry is given none. An entry
+    for r9770 that no model of a model tier or tier override belongs to gives a
     load error that names r9770.
 
-    An agent file with one invalid agent entry gives a load error that names it and
-    returns no agent definition, not even a valid one.
+    An agent file with one invalid agent entry gives a load error that names it
+    and returns no agent definition, not even a valid one.
 
     A fallback agent that holds a description gives a load error that names it.
     With a general agent whose tool list holds read, write and bash and a
-    fallback agent whose tool list holds only read, the fallback agent holds only
-    read at every model tier, and general:medium keeps read, write and bash. A file
-    with a general agent and no fallback agent loads, and its fallback agent is
-    absent.
+    fallback agent whose tool list holds only read, the fallback agent holds
+    only read at every model tier, and general:medium keeps read, write and
+    bash.
 
-    The routing settings with the hook switch set to false and a custom
-    generic agent list are read back as given.
+    With the model tiers small and large configured, the tier text small and
+    tier:small map to small, the tier word cheapest capable maps to small, the
+    tier word session model maps to large, the tier text anthropic/claude-opus
+    is an unmatched tier text, and an empty tier text maps to no model tier.
+
+    With the agent entry reviewer naming small as its own tier, a change set
+    that removes small is refused naming reviewer, and nothing is written. A
+    change set that gives the medium tier another model changes only the model
+    of that tier, and every comment and every other line of the agent file
+    stays as it was. A change set that moves the only model tier on the
+    model endpoint r9700 to another model endpoint drops the endpoints entry of
+    r9700 in the same write. An apply after the agent file changed since its
+    setup preview is refused with the stale preview error and writes nothing.
+
+    With a tiers map that is a flow-style map and holds medium, small and
+    large, a
+    change set that removes small and large leaves only the medium tier, and
+    the agent file loads. An apply whose write the file system refuses returns
+    the write error and leaves the file as it was.
+
+    A change set for the global file that sets the medium tier, in a project
+    whose agent file holds its own medium tier, gives a setup preview that
+    lists that medium tier as overridden by this project. A change set for the
+    global file that removes large is refused when an agent entry of this
+    project names large, and is not refused when the agent file of this project
+    holds its own large. A change set for the agent file that sets only small,
+    in a project with no agent file and a global file that holds a medium
+    tier, writes only the tier small and no agent entry. A change set for the
+    agent file that removes a model tier that only the global file holds
+    writes a removal entry for it.
   }
 
   interface {
-    Resolve an agent entry of the agents map by name at a requested model tier, at
-    its own tier or at the default tier, and provide the agent definition with its
-    host, its model, its thinking level, its tool list, its timeout, its
-    model endpoint with the parallel limit of that model endpoint or none, and
-    every skill folder resolved to an absolute folder. The general agent and the
-    fallback agent resolve the same way when the agents map holds them.
+    Resolve an agent entry of the merged configuration by name at a requested
+    model tier,
+    at its own tier or at the medium tier, and provide the agent definition
+    with its child host, its model, its thinking level, its tool list, its
+    timeout, its model endpoint with the parallel limit of that model endpoint
+    or none, and every skill folder resolved to an absolute folder. Fill each
+    built-in agent from the starter tools that the caller gives, so that the
+    general agent and the fallback agent resolve in a project that holds neither.
 
-    Report which starter entries it added and which the agent file already held,
-    and add the starter entries to the agent file under a project root that its
-    caller hands over: the default tier from a host, a model and a thinking level,
-    and the general agent and the fallback agent from the two tool lists and a
-    timeout, each only when the agent file does not hold it yet, with no skills,
-    creating the agent file, its models map and its agents map when missing. Refuse
-    with the load error when the file exists and does not load for a reason other
-    than a missing default tier, which it adds, and refuse with an error that names
-    both hosts, writing nothing, when the file already holds a
-    default tier whose host differs from the host that the caller gives.
+    Report which starter entries it added and which the agent file already
+    held, and add the starter entries to the agent file under a project root
+    that its caller hands over: the medium tier from a child host, a model and
+    a thinking level, and the general agent and the fallback agent from the
+    starter tools that the caller gives and a timeout, each only when the
+    agent file does not hold it yet, with no skills, creating the agent file,
+    its models map and its agents map when missing. Refuse with the load error
+    when the file exists and does not load for a reason other than missing
+    starter entries, and refuse with an error that names both child hosts,
+    writing nothing, when the file already holds a medium tier whose child host
+    differs from the child host that the caller gives, and refuse with an error
+    that names the shared file, writing nothing, when the agent file is a shared
+    file.
 
-    List the routable tier names, the default tier among them, with the host and
-    the model each one runs for the general agent, apart from the names of every
-    configured model tier.
+    Read the setup state of the merged configuration under a project root that
+    its caller hands over, marking each model tier and each endpoints entry
+    with the file it comes from, each model tier that runs on a child host other
+    than the one the caller gives and, when the caller gives a list of models,
+    each model tier whose model the list does not hold. Return the
+    setup preview of a change set for the child host and the setup scope that
+    the caller gives, and apply a change set with the
+    preview fingerprint of its setup preview, writing the file of the setup
+    scope only as that setup preview shows, or return the change set error, the
+    stale preview error, the write error, each refused change or the
+    load error and leave that file as it was.
 
-    Provide the routing settings with the hook switch and the generic agent list as
-    the agent file gives them.
+    Provide the *child host options* of the global file for a child host, as
+    written, to every caller that starts a child on that child host, also when
+    the project is off or lacks a starter entry, so that guided setup can list
+    and check a model that the child host options provide, and so that a child
+    run, a model listing and a model check all get the same child host options.
+    A guided setup is the one reader that reads the global file when the project
+    is off, and a load error of that read refuses its whole model listing or
+    model check.
 
-    List the names of every agent entry of the agents map so that a caller can
-    report them in an error.
+    List the routable tier names, the medium tier among them, with the
+    child host and the model each one runs for the general agent, apart from
+    the names of every configured model tier.
+
+    Map a tier text to a model tier, including each tier word, or report an
+    unmatched tier text, and treat each agent alias as the general agent, so
+    that every parent adapter maps a request the same way.
+
+    Provide the routing block of the merged configuration, merged by key, so
+    that a caller reads the hook switch and the generic agent list from the
+    one place that merges them.
+
+    List the names of every agent entry of the merged configuration, the
+    built-in agents included, so that a caller can report them in an error.
 
     Return an *unknown agent error* that names the unknown name and every
-    configured agent entry when a name is not configured, so that a front end can
-    show it. When no agent is named, the error says that no agent was named and
-    still lists every configured agent entry.
+    configured agent entry when a name is not configured, so that a front end
+    can show it. When no agent is named, the error says that no agent was named
+    and still lists every configured agent entry.
 
     Return the tier error that names the model tier an agent resolved to, every
-    configured model tier and, when the host is the cause, that host and every
-    supported host, when the agent cannot run at that model tier.
+    configured model tier and, when the child host is the cause, that
+    child host and every supported child host, when the agent cannot run at
+    that model tier.
 
-    Return a load error that names the invalid model tier or agent entry, or says
-    that the agent file is missing, unreadable or malformed, so that a front end
-    can show it.
+    Return a load error that names the file it comes from and the invalid model
+    tier or agent entry, the missing general agent, fallback agent or medium
+    tier, or says that a file is unreadable or malformed, so that a front end
+    can show it. Return the off error, which says whether the agent file is
+    missing and the global file holds no medium tier or the enabled switch of
+    the agent file is false, so that every caller treats the project as off and
+    no subagent runs on a model that no file names.
 
     Provide the project root for a caller in the order the constraints give,
-    starting from SUBZERO_PROJECT_DIR, or return the unresolved root error when no
-    source gives one.
+    starting from SUBZERO_PROJECT_DIR, then the roots that the parent adapter
+    reports, then the working directory of the command line, or return the
+    unresolved root error when no source gives one.
   }
 
   decisions {
-    Skill folders resolve against the directory of the agent file and not the
-    working directory, so the same file behaves the same from the server, the
-    command line and the experiment harness.
+    Each skill folder resolves against the directory of the agent file and not the
+    working directory, so the same file behaves the same from a parent adapter,
+    the command line and the experiment harness.
 
-    The host, the model and the thinking level live in model tiers and not in agent
-    entries, so that what runs a child is set once per tier and an agent says only
-    what it does. An agent that needs something else at one tier gets a
-    tier override for it, as a docker-compose override replaces fields of a base
-    service, and an agent that should run on another tier by default names it as
-    its own tier. The default tier is required so that every agent entry resolves
-    without a tier named.
+    The child host, the model and the thinking level live in model tiers and
+    not in agent entries, so that what runs a child is set once per tier and an
+    agent says only what it does. An agent that needs something else at one
+    tier gets a tier override for it, as a docker-compose override replaces
+    fields of a base service, and an agent that should run on another tier by
+    default names it as its own tier. The medium tier is required so that every
+    agent entry resolves without a tier named, and the general agent and the
+    fallback agent are required so that every request has an agent to run and a
+    read-only agent for a mistyped name.
 
-    The general agent and the fallback agent are entries of the agents map that are
-    named general and fallback, so that a name lookup, a tier and an explicit
-    request find them like any agent and no agent name is reserved. They have no
-    description, because the general agent is the default for work that names no
-    agent and for tiered work, and neither is chosen by its description or offered
-    to a parent for routing. The fallback agent takes the work of a name other than
-    general that the agents map does not hold, and a front end's init writes it
-    read-only so that a mistyped agent name cannot write to the repository or run
-    shell commands, while tiered work keeps the tools of the general agent for
-    compound-engineering reviewers. Only the host knows which tool names only read,
-    so the load cannot enforce read-only, and a person who edits the entry owns
-    that change.
+    The general agent and the fallback agent are entries of the agents map that
+    are named general and fallback, so that a name lookup, a tier and an
+    explicit request find them like any agent and no agent name is reserved.
+    They have no description, because the general agent is the default for work
+    that names no agent and for tiered work, and neither is chosen by its
+    description or offered to a parent model for routing. The fallback agent
+    takes the work of a name other than general that the agents map does not
+    hold, and a front end's init writes it read-only so that a mistyped agent
+    name cannot write to the repository or run shell commands, while tiered
+    work keeps the tools of the general agent for compound-engineering
+    reviewers. Only the child host knows which tool names only read, so the
+    load cannot enforce read-only, and a person who edits the entry owns that
+    change.
 
-    A model tier whose host is not supported still loads and only fails when it is
-    used, so that one tier set for a host with no child driver does not stop every
-    other delegation. Resolving at load and at each request gives tiered work the
-    same model endpoint, parallel limit, timeout and frozen agent definition as a
-    named agent. The routing settings live in the agent file so that the hooks and
-    the server read one source, at the cost of being set per project and not per
-    user.
+    The tier word and the tier text mapping live here and not in a
+    parent adapter, so that the Claude Code parent host and the pi parent host
+    map a request the same way. A project with no agent file and no medium tier
+    in the global file gets the off error, which says to run subzero init, so
+    that no subagent runs on a model that no file names.
+
+    The global file lets a person set the model tiers once for every project,
+    and the agent file lists only what differs, so an entry of the agent file
+    replaces the global entry whole and a model never keeps a thinking level
+    chosen for another model. The agent file is read first so that a project
+    that switches itself off never depends on the global file, except for the
+    guided setup, which reads the global file apart so that it can list and
+    check models of a project that is off, and the global
+    file holds no agent and no skill so that a file in a home folder cannot give
+    every repository a tool list or a skill folder. The child host options
+    are global-only, because they can name code that a child driver loads into
+    every child, so a repository cannot add one through its agent file. The
+    process environment is trusted, SUBZERO_GLOBAL_CONFIG included, because a
+    repository that sets HOME or PATH can already run its own program, so
+    guarding one variable would only look safe. The
+    child host options are one map for each child host under the key hosts, read
+    only by the child driver of that child host, so that AgentConfig and the
+    core never name a child host and a later child host can have options of
+    its own. A shared file is read as the
+    global file so that
+    one file never counts as both layers, and a change set for the agent file
+    is refused there so that a key meant for one project is not written into
+    the file of every project. The built-in agents mean a
+    guided setup writes only the model tiers and limits that a person chose.
+
+    A parallel limit keeps a fan-out on one model endpoint from flooding it.
+
+    A change set edits the text of the file of its setup scope in place and
+    does not render
+    the document again, so that comments and lines it does not change survive.
+    An apply is bound to its setup preview by the preview fingerprint, so that
+    a person confirms exactly what is written, and the write is atomic because
+    each delegation reads the agent file again on every call.
   }
 }

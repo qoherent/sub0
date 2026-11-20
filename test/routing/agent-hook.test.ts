@@ -1,17 +1,18 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decideAgentSpawn, type HookContext, type SpawnInput } from '../../src/routing/routing.js';
 import { removeReadinessMarker, writeReadinessMarker } from '../../src/mcp/parent-session.js';
-import { isAlive, tempDir, until } from '../helpers.js';
+import { GLOBAL_MEDIUM_YAML, isAlive, tempDir, until, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const HOOK = path.join(REPO, 'dist', 'agent-hook.js');
 const DELEGATE = 'mcp__plugin_subzero_subzero__delegate';
 
 const tier = (name: string, model: string) => `    ${name}: { host: pi, model: ${model}, thinking: low }\n`;
-const GENERAL = 'agents:\n  general:\n    tools: [read, bash]\n    timeout: 60\n';
+const GENERAL = 'agents:\n  general:\n    tools: [read, bash]\n    timeout: 60\n  fallback:\n    tools: [read]\n    timeout: 60\n';
 const config = (names: string[], extra = '') =>
   `${extra}models:\n  tiers:\n${tier('default', 'local/d')}${names.map((n) => tier(n, `local/${n}`)).join('')}${GENERAL}`;
 
@@ -36,6 +37,27 @@ function setup(yaml: string | undefined, marker = true) {
 const spawnOf = (prompt: string, extra: Partial<SpawnInput> = {}): SpawnInput => ({ prompt, description: 'review things', ...extra });
 
 describe('decideAgentSpawn', () => {
+  it('uses a mode-neutral deny reason for a live marker without a task mode', () => {
+    const { root, data, ctx } = setup(config(['medium']));
+    const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
+    const file = path.join(data, 'ready', key, `${process.pid}.json`);
+    const marker = JSON.parse(readFileSync(file, 'utf8'));
+    delete marker.taskMode;
+    writeFileSync(file, JSON.stringify(marker));
+    const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
+    expect(out.decision).toBe('deny');
+    if (out.decision === 'deny') {
+      expect(out.reason).toMatch(/if it returns a task id, collect it/i);
+      expect(out.reason).not.toContain('wait: false');
+    }
+  });
+  it('omits the await choreography when the matching server has task mode on', () => {
+    const { root, data, ctx } = setup(config(['medium']), false);
+    writeReadinessMarker(data, root, process.pid, process.ppid, true);
+    const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
+    expect(out.decision).toBe('deny');
+    if (out.decision === 'deny') expect(out.reason).not.toMatch(/wait: false|collect it with the await tool/);
+  });
   it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and wait false', () => {
     const { ctx } = setup(config(['medium']));
     const out = decideAgentSpawn(spawnOf('do the review', { model: 'sonnet', subagent_type: 'general-purpose' }), ctx());
@@ -143,6 +165,25 @@ describe('decideAgentSpawn', () => {
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), ctx()).decision).toBe('allow');
   });
 
+  it('denies a generic sonnet spawn toward the global medium when the project has no file', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const out = decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup(undefined).ctx());
+    expect(out.decision).toBe('deny');
+    if (out.decision === 'deny') expect(out.reason).toContain('tier: "medium"');
+  });
+
+  it('covers AE4: allows everything when the project says enabled false, with a global medium or a broken global file', () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup('enabled: false\n').ctx()).decision).toBe('allow');
+    useGlobalConfig('agents: [oops\n');
+    expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup('enabled: false\n').ctx()).decision).toBe('allow');
+  });
+
+  it('allows everything with a broken global file', () => {
+    useGlobalConfig('agents: [oops\n');
+    expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup(undefined).ctx()).decision).toBe('allow');
+  });
+
   it('allows everything with routing.hook false', () => {
     const { ctx } = setup(config(['medium'], 'routing:\n  hook: false\n'));
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), ctx()).decision).toBe('allow');
@@ -154,10 +195,9 @@ describe('decideAgentSpawn', () => {
     expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), setup(undefined).ctx()).decision).toBe('allow');
   });
 
-  it('allows a sonnet spawn when only the small tier is routable, and a haiku spawn when only medium is', () => {
-    const a = setup(config(['small']));
-    expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), a.ctx()).decision).toBe('allow');
-    expect(decideAgentSpawn(spawnOf('q', { model: 'haiku' }), a.ctx())).toMatchObject({ decision: 'deny', tier: 'small' });
+  it('allows a haiku spawn when small is not configured', () => {
+    const a = setup(config(['medium']));
+    expect(decideAgentSpawn(spawnOf('p', { model: 'haiku' }), a.ctx()).decision).toBe('allow');
   });
 
   it('opus and fable: allowed when their prompt was not denied, denied when it was', () => {
@@ -176,10 +216,10 @@ describe('decideAgentSpawn', () => {
   });
 
   it('a denied prompt whose recorded tier is no longer routable follows the generic and alias rules instead', () => {
-    const { root, ctx } = setup(config(['medium']));
-    expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), ctx()).decision).toBe('deny');
-    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), config(['large']));
-    // The deny memory holds medium, which is gone: opus is not mapped, so it is allowed.
+    const { root, ctx } = setup(config(['medium', 'small']));
+    expect(decideAgentSpawn(spawnOf('p', { model: 'haiku' }), ctx()).decision).toBe('deny');
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), config(['medium', 'large']));
+    // The deny memory holds small, which is gone: opus is not mapped, so it is allowed.
     expect(decideAgentSpawn(spawnOf('p', { model: 'opus' }), ctx()).decision).toBe('allow');
     // A generic spawn with no model maps to large and is denied by the alias table.
     expect(decideAgentSpawn(spawnOf('p'), ctx())).toMatchObject({ decision: 'deny', tier: 'large' });
@@ -210,6 +250,51 @@ describe('decideAgentSpawn', () => {
     expect(decideAgentSpawn(spawnOf('two', { model: 'opus' }), ctx('resumed'))).toMatchObject({ decision: 'deny', tier: 'medium' });
   });
 
+  it('waits for a resumed session and rechecks its age before cleanup', async () => {
+    const { data, ctx } = setup(config(['medium']));
+    expect(decideAgentSpawn(spawnOf('one', { model: 'sonnet' }), ctx('resumed')).decision).toBe('deny');
+    const root = path.join(data, 'sessions', 'deny');
+    const old = readdirSync(root)[0]!;
+    const eightDays = (Date.now() - 8 * 24 * 3600 * 1000) / 1000;
+    utimesSync(path.join(root, old), eightDays, eightDays);
+    const lock = path.join(data, 'sessions', 'deny-locks', `${old}.lock`);
+    const ready = path.join(data, 'holder-ready');
+    const helper = "const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');setTimeout(()=>{fs.writeFileSync(process.argv[2],'new');process.exit(0)},350)";
+    const program = process.platform === 'darwin' ? 'lockf' : 'flock';
+    const args = process.platform === 'darwin'
+      ? ['-k', '-t', '2', lock, process.execPath, '-e', helper, ready, path.join(root, old, 'fresh')]
+      : ['-w', '2', lock, process.execPath, '-e', helper, ready, path.join(root, old, 'fresh')];
+    const holder = spawn(program, args, { detached: true, stdio: 'ignore' });
+    try {
+      await until(() => existsSync(ready));
+      expect(decideAgentSpawn(spawnOf('other', { model: 'sonnet' }), ctx('other')).decision).toBe('deny');
+      expect(existsSync(path.join(root, old))).toBe(true);
+      expect(decideAgentSpawn(spawnOf('one', { model: 'opus' }), ctx('resumed')).decision).toBe('deny');
+    } finally { try { process.kill(-holder.pid!, 'SIGTERM'); } catch { /* already exited */ } }
+  });
+
+  it('does not remember an allowed spawn when cleanup cannot acquire a lock', async () => {
+    const { data, ctx } = setup(config(['medium']));
+    expect(decideAgentSpawn(spawnOf('old', { model: 'sonnet' }), ctx('old-session')).decision).toBe('deny');
+    const root = path.join(data, 'sessions', 'deny');
+    const old = readdirSync(root)[0]!;
+    const eightDays = (Date.now() - 8 * 24 * 3600 * 1000) / 1000;
+    utimesSync(path.join(root, old), eightDays, eightDays);
+    const lock = path.join(data, 'sessions', 'deny-locks', `${old}.lock`);
+    const ready = path.join(data, 'holder-ready');
+    const helper = "require('node:fs').writeFileSync(process.argv[1],'ready');setTimeout(()=>process.exit(0),5000)";
+    const program = process.platform === 'darwin' ? 'lockf' : 'flock';
+    const args = process.platform === 'darwin'
+      ? ['-k', '-t', '2', lock, process.execPath, '-e', helper, ready]
+      : ['-w', '2', lock, process.execPath, '-e', helper, ready];
+    const holder = spawn(program, args, { detached: true, stdio: 'ignore' });
+    try {
+      await until(() => existsSync(ready));
+      expect(decideAgentSpawn(spawnOf('new', { model: 'sonnet' }), ctx('new-session')).decision).toBe('allow');
+    } finally { try { process.kill(-holder.pid!, 'SIGKILL'); } catch { /* already exited */ } }
+    expect(decideAgentSpawn(spawnOf('new', { model: 'opus' }), ctx('new-session')).decision).toBe('allow');
+  }, 10_000);
+
   it('records each denial as its own create-only entry, and sweeps session folders older than seven days on a write', () => {
     const { data, ctx } = setup(config(['medium']));
     decideAgentSpawn(spawnOf('one', { model: 'sonnet' }), ctx('old-session'));
@@ -232,6 +317,7 @@ describe('decideAgentSpawn', () => {
       const { ctx } = setup(config(['medium']));
       expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet' }), ctx()).decision).toBe('deny');
       expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet', description: 'passback review' }), ctx()).decision).toBe('allow');
+      expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet', description: 'passbackdoor' }), ctx()).decision).toBe('deny');
       expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet', description: 'review passback' }), ctx()).decision).toBe('deny');
       expect(decideAgentSpawn(spawnOf('p', { model: 'sonnet', description: 'review' }), ctx()).decision).toBe('deny');
     });
@@ -347,6 +433,19 @@ describe('built PreToolUse hook', () => {
     expect(run(off, data, input({ prompt: 'x', model: 'sonnet' }))).toBe('');
   });
 
+  it('fails open for malformed Agent fields, including a remembered prompt', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    writeReadinessMarker(data, root, process.pid, process.pid);
+    expect(run(root, data, input({ prompt: 'remembered', model: 'sonnet' }))).not.toBe('');
+    for (const isolation of [true, 1, { kind: 'worktree' }]) {
+      expect(run(root, data, input({ prompt: 'remembered', model: 'sonnet', isolation }))).toBe('');
+    }
+    expect(run(root, data, input({ prompt: 'new', model: 'sonnet', description: 42 }))).toBe('');
+    expect(run(root, data, input({ prompt: 'new', model: { value: 'sonnet' } }))).toBe('');
+    expect(run(root, data, input({ prompt: 'new', model: 'sonnet' }, '   '))).toBe('');
+  });
+
   it('exits 0 with no output for malformed stdin, empty stdin, no session id and a missing project', () => {
     const root = project(config(['medium']));
     const data = tempDir();
@@ -385,6 +484,22 @@ describe('built PreToolUse hook', () => {
     const retry = await Promise.all(prompts.map((p) => runAsync(root, data, input({ prompt: p, model: 'haiku' }))));
     for (const out of retry) expect(JSON.parse(out).hookSpecificOutput.permissionDecision).toBe('deny');
     expect(readdirSync(path.join(data, 'sessions', 'deny', readdirSync(path.join(data, 'sessions', 'deny'))[0]!))).toHaveLength(6);
+  });
+
+  it('keeps concurrent routing responsive while cleaning expired sessions', async () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    writeReadinessMarker(data, root, process.pid, process.pid);
+    const deny = path.join(data, 'sessions', 'deny');
+    mkdirSync(deny, { recursive: true });
+    const old = (Date.now() - 8 * 24 * 3600 * 1000) / 1000;
+    for (let i = 0; i < 3; i++) {
+      const folder = path.join(deny, `old-${i}`);
+      mkdirSync(folder);
+      utimesSync(folder, old, old);
+    }
+    const replies = await Promise.all(Array.from({ length: 6 }, (_, i) => runAsync(root, data, input({ prompt: `new-${i}`, model: 'sonnet' }))));
+    for (const reply of replies) expect(JSON.parse(reply).hookSpecificOutput.permissionDecision).toBe('deny');
   });
 
   it('AE12: allows a passback of a denied prompt through the built hook', () => {

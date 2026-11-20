@@ -1,19 +1,21 @@
 @design/delegation-service.sigil from DelegationService import {
-  delegation, brief text, reply budget,
+  delegation, brief text, reply budget, guided setup, setup operations,
+  status line, result text, setup refusal,
 }
 @design/task-core.sigil from TaskCore import {
-    task, task id, brief, child run, result, transcript, launch spec, attach command,
+    task, task id, brief, result, transcript, launch spec, attach command,
   session export, child driver, child session, starter tools,
   prerequisites check,
 }
 @design/agent-config.sigil from AgentConfig import {
-    project root, unknown agent error, load error, general agent, fallback agent,
-  agent definition,
-        agent file, starter entries, timeout, thinking level, model, default tier,
-  agents map, tool list,
+  project root, load error, general agent, fallback agent,   agent definition,         agent file, starter entries, timeout, thinking level, model, medium tier,   tool list, working directory,
 }
 @design/kernel.sigil from Kernel import {
-  driver registry, parent adapter, supported host, entry point, host,
+  driver registry, parent adapter, supported child host, entry point, child host,
+}
+@design/agent-config.sigil from AgentConfig import {
+  change set, preview fingerprint, stale preview error, unresolved root error,
+  write error, refused change, setup scope, global file,
 }
 @design/task-store.sigil from TaskStore import {
     task record, task status, parent session id, start-up sweep,
@@ -21,72 +23,129 @@
 
 component Cli {
   goal {
-    Give a person at a terminal the same delegation as the MCP server, plus a way
+    Give a person at a terminal the same delegation as a parent adapter, plus a
+    way
     to open and export what a child did after the parent session is gone.
   }
 
   logic {
     Every command starts through the delegation service, so that the
     start-up sweep runs first. On subzero run, make a delegation from the agent
-    name given with the agent option, which may be left out, and the brief text in
+    name given with the agent option, which may be left out, and the brief text
+    in
     the arguments, with no parent session id, wait
     for
     it
-    and print the result. When no agent name is given or the agent name is general,
-    and no general agent is configured, or when the agent name is a name other than
-    general that the agents map does not hold and no fallback agent is configured,
-    print the unknown agent error to stderr and exit non-zero with no task made.
-    When a fallback agent is configured, a name other than general that the agents
-    map does not hold runs the fallback agent and the printed result says that the
+    and print the result. When no agent name is given or the agent name is
+    general, the general agent runs. When the agent name is a name other than
+    general that the
+    agent entries of the merged configuration do not hold, a built-in agent
+    included, runs the fallback agent and the printed result
+    says
+    that the
     named
     agent is not configured. When the
     agent file fails to load, print the load error to stderr and exit non-zero
-    the same way. On subzero init, take a model from the arguments and, from named
-    options, a host, a timeout that defaults to 1200 seconds and a thinking level
-    that defaults to medium, where the host option may be left out when exactly one
-    supported host is registered, and ask the driver registry for the
-    prerequisites check of the child driver of that host and run it, when it
-    offers one, before anything is written: when it returns a message, print the
+    the same way. On subzero init, take a model from the arguments and, from
+    named
+    options, the option host, which names the child host, a timeout that
+    defaults
+    to 1200 seconds and a
+    thinking level
+    that defaults to medium, where the option host may be left out when
+    exactly one
+    supported child host is registered, and ask the driver registry for the
+    prerequisites check of the child driver of that child host and run it, when
+    it
+    offers one, before anything is written: when it returns a message, print
+    the
     message to stderr and exit non-zero with every file unchanged. Then ask the
     driver registry for the starter tools of that child driver, and ask
     AgentConfig to add the
-    starter entries to the agent file under the project root that the delegation
-    service resolved: the default tier with that host, that model and that
-    thinking level, a general agent with the tool list for a general agent and a
-    fallback agent with the tool list that only reads, both with that timeout, and
+    starter entries to the agent file under the project root that the
+    delegation
+    service resolved: the medium tier with that child host, that model and that
+    thinking level, a general agent with the tool list for a general agent and
+    a
+    fallback agent with the tool list that only reads, both with that timeout,
+    and
     print which entries it added and
-    which it found already there. Refuse with a message that says no host is
+    which it found already there. Refuse with a message that says no child host
+    is
     registered when the driver registry lists none, refuse with a message that
-    names every supported host when the host is missing and several are registered,
-    or is not a supported
-    host, refuse with a message that names the host when its child driver offers no
-    starter tools, and print the load error and exit non-zero when the agent file
-    exists and does not load for a reason other than a missing default tier, and
-    print the error that names both hosts and exit
-    non-zero when the agent file already holds a default tier on another host than
-    the given host. On subzero tasks, read the task record of each task
+    names every supported child host when the child host is missing and several
+    are
+    registered,
+    or is not a supported child host, refuse with a message that names the
+    child host when its
+    child driver offers no
+    starter tools, and print the load error and exit non-zero when the
+    agent file
+    exists and does not load for a reason other than a missing starter entry,
+    and
+    print the error that names both child hosts and exit
+    non-zero when the agent file already holds a medium tier on another
+    child host
+    than
+    the given child host. On subzero tasks, read the task record of each task
     and print
     the
     id,
     agent, task status and creation time of every task. On subzero attach, read
     the launch spec of the task, refuse when the task has no recorded
-    launch spec or its child run is live, and otherwise ask the driver registry for
-    the attach command of the child driver of the host of the agent definition of
-    the task, start it, and refuse with a message that names the host when that
-    child driver offers none. On subzero show, export the child session of the task
-    through the session export of the child driver of the host of the task,
-    refusing with a message that names the host when that child driver offers none,
-    and say that an abandoned task has no result. Each
+    launch spec or its task status is running, and otherwise ask the
+    driver registry for
+    the attach command of the child driver of the child host of the
+    agent definition of
+    the task, start it, and refuse with a message that names the child host
+    when
+    that
+    child driver offers none. On subzero show, export the child session of the
+    task
+    through the session export of the child driver of the child host of the
+    task,
+    refusing with a message that names the child host when that child driver
+    offers
+    none,
+    and say that an abandoned task has no result.
+
+    On subzero init with no model, print a usage error that says to run
+    /subzero:init in Claude Code or the /subzero command with init in pi for a
+    guided setup,
+    because a terminal has no parent model to run it, and exit with code 2,
+    writing nothing. On one of the config commands, make the guided setup of
+    DelegationService with the project root that the delegation service
+    resolved and the option host, and run the one of its setup operations
+    that has the name of the command.
+    Split each model from its thinking level at the last colon, because a model
+    can hold a colon. Take the setup scope of a preview or an apply from the
+    option scope, which is global or project and project when it is left out,
+    and treat any other value as a usage error that exits 2 and writes nothing.
+    The command show takes no setup scope and prints the setup state of the
+    merged configuration with the file each model tier and limit comes from,
+    the global file or the agent file. A preview for the global file also
+    prints each model tier and limit of the change set that this project
+    overrides. Print one
+    JSON document on stdout: ok true with the
+    result, or ok false with the code and the one-line message of the
+    setup refusal and any refused change,
+    exiting 1, also for the unresolved root error, the load error and the
+    write error. A
+    malformed argument is a usage error on stderr that exits 2. Each
     command ends by printing its output and exiting.
   }
 
   constraints {
-    The Cli passes its working directory to the delegation service as its fallback
-    project root, and receives from the delegation service the project root that it
-    resolved, which comes from AgentConfig in the order its constraints give, for
+    The Cli passes its working directory to the delegation service as its
+    fallback
+    project root, and receives from the delegation service the project root
+    that it
+    resolved, which comes from AgentConfig in the order its constraints give,
+    for
     its own use by init.
 
-    A delegation from the Cli must carry no parent session id, because a command
+    A delegation from the Cli must carry no parent session id, because a
+    command
     line has no conversation, and no reply budget, because the Cli prints the
     result whole to a terminal that has no inline limit.
 
@@ -95,55 +154,101 @@ component Cli {
     owner abandoned. It must also be refused with a message that no launch spec
     was recorded when the task record has none.
 
-    Cli depends on DelegationService for the delegation, the status line and
+    Cli depends on DelegationService for the delegation, the guided setup,
+    the status line and
     the result text that it prints, on TaskStore for the
     task record, on TaskCore for the launch spec, the attach command and the
-    session export, on AgentConfig for the agent file, the starter entries and the
-    errors it shows, and on the driver registry of Kernel for the child driver of a
-    host. Cli must not depend on any particular child driver or parent adapter, and
-    it names no host. The entry point of the command line process is outside Cli:
-    it imports the child drivers that process needs and registers them with Kernel,
+    session export, on AgentConfig for the agent file, the starter entries and
+    the
+    errors it shows, and on the driver registry of Kernel for the child driver
+    of a
+    child host. Cli must not depend on any particular child driver or
+    parent adapter, and
+    it names no child host. The entry point of the command line process is
+    outside
+    Cli:
+    it imports the child drivers that process needs and registers them with
+    Kernel,
     and Cli imports none of them.
   }
 
   cases {
-    Attach on a task whose task status is running is refused. On a settled task it
-    asks the driver registry for the attach command of the child driver of its host
-    and builds it from the launch spec, and on a task with no recorded launch spec
-    it is refused. When the child driver of its host offers no attach command, it
-    is refused with a message that names the host.
+    Attach on a task whose task status is running is refused. On a settled task
+    it
+    asks the driver registry for the attach command of the child driver of its
+    child host
+    and builds it from the launch spec, and on a task with no recorded
+    launch spec
+    it is refused. When the child driver of its child host offers no
+    attach command, it
+    is refused with a message that names the child host.
 
     Subzero run against a scripted pi writes the task record with task.json,
     events.jsonl and turns/1.json, appends an index line and prints the result.
 
-    Subzero run with an unknown agent name and no fallback agent prints the
-    unknown agent error and exits non-zero without making a task. Subzero run with
-    no agent name runs the general agent. Subzero init with the host pi, in an
-    agent file whose default tier is on the host claude, prints the error that
-    names both hosts, exits non-zero and writes nothing.
+    Subzero run with an unknown agent name runs the fallback agent, a built-in
+    one when the agent file holds none. Subzero run with
+    no agent name runs the general agent. Subzero init with the child host pi,
+    in
+    an
+    agent file whose medium tier is on the child host claude, prints the error
+    that
+    names both child hosts, exits non-zero and writes nothing.
 
-    Subzero init with the host pi, when the prerequisites check of its child
-    driver returns a message that says pi was not found, prints that message,
+    Subzero init with the child host pi, when the prerequisites check of its
+    child driver returns a message that says pi was not found, prints that
+    message,
     exits non-zero and writes no agent file. When that child driver offers no
     prerequisites check, init goes on.
 
     Subzero init in a project with no agent file creates the agent file with a
-    default tier on the one registered host, the given model and the thinking level
-    medium, and a general agent and a read-only fallback agent, each with a timeout
-    of 1200 seconds. Run again, it adds nothing, changes no line and says that all
-    three entries are already there. With a general agent already in the file, it
-    adds only the fallback
-    agent and leaves the general agent as it was.
+    medium tier on the one registered child host, the given model and the
+    thinking level
+    medium, and a general agent and a read-only fallback agent, each with a
+    timeout
+    of 1200 seconds. Run again, it adds nothing, changes no line and says that
+    all
+    three entries are already there. With a general agent already in the file,
+    it
+    adds only the fallback agent and leaves the general agent as it was.
+
+    Subzero init with no model, or with only the option thinking, prints the
+    usage error that names /subzero:init and the /subzero command with init,
+    exits 2 and writes
+    nothing. Subzero config preview --tier
+    medium=ollama/qwen2.5-coder:7b:medium previews the medium tier on the
+    model ollama/qwen2.5-coder:7b at the thinking level medium. Subzero config
+    apply with a preview fingerprint from before the agent file changed prints
+    ok false with the code of the stale preview error, exits 1 and writes
+    nothing. Subzero config apply on a project whose agent file the file system
+    refuses to write prints ok false with the code of the write error, exits 1
+    and leaves the agent file as it was. Subzero config preview with the option
+    scope global and a tier previews the global file and creates it when it
+    is missing, and the same with the option scope other is a usage error that
+    exits 2. Subzero config show in a project with no agent file and a global
+    file that holds a medium tier prints each model tier with the source global
+    file.
   }
 
   interface {
-    Offer five commands: subzero init with a model and the named options host,
-    timeout and thinking, subzero run with a brief and the named option agent,
+    Offer six commands: *subzero init* with a model and the named options
+    host, which names the child host,
+    timeout and thinking, *subzero config*, *subzero run* with a brief and
+    the named option agent,
     which may be left out,
-    subzero tasks, subzero attach with a task id,
-    and subzero show with a task id.
+    *subzero tasks*, *subzero attach* with a task id,
+    and *subzero show* with a task id.
 
-    Make the child session of a task, its transcript and its task record reachable
+    Offer the *config commands* subzero config models, show, check, preview
+    and apply, each with the option host, for the init command of the
+    Claude Code parent host. Check takes one or more models, each written
+    <model>:<thinking>. Preview and apply take a change set as repeated flags:
+    --tier <tier>=<model>:<thinking>, --unset <tier>, --limit <endpoint>=<n>
+    and --no-limit <endpoint>, with the option scope for the setup scope, and
+    apply also takes the preview fingerprint of that preview as --expect.
+
+    Make the child session of a task, its transcript and its task record
+    reachable
     by task id after the parent session has ended.
   }
 }

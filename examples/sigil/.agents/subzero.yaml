@@ -16,7 +16,7 @@ endpoints:
 # What runs a child lives here and never in an agent: host, model and thinking.
 models:
   tiers:
-    default:
+    medium:
       host: pi
       model: r9700/Qwen3.8
       thinking: high
@@ -32,6 +32,12 @@ models:
       thinking: high
 
 agents:
+  general:
+    tools: [read, bash, edit, write, grep, find, ls]
+    timeout: 1800
+  fallback:
+    tools: [read, grep, find, ls]
+    timeout: 1800
   sigil-interpreter:
     description: Reads one prepared sigilc request and writes its claim rows to the answer file the brief names.
     skills: [sigil-understand, sigil-egglog]

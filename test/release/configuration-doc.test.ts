@@ -1,8 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { THINKING_LEVELS, loadAgentFile, resolveAgent } from '../../src/config/agent-config.js';
-import { tempDir } from '../helpers.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  BUILT_IN_TIMEOUT,
+  LoadError,
+  MissingAgentFileError,
+  ProjectDisabledError,
+  THINKING_LEVELS,
+  globalFile,
+  loadAgentFile,
+  loadCatalog,
+  resolveAgent,
+} from '../../src/config/agent-config.js';
+import { piExtensionsOf } from '../../src/pi/launch.js';
+import { tempDir, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const read = (file: string) => (existsSync(path.join(REPO, file)) ? readFileSync(path.join(REPO, file), 'utf8') : '');
@@ -11,6 +23,8 @@ const flat = (text: string) => text.replace(/\s+/g, ' ');
 const DOC_RAW = read('docs/configuration.md');
 const DOC = flat(DOC_RAW);
 const README = flat(read('README.md'));
+const CHANGELOG = flat(read('CHANGELOG.md'));
+const STARTER = () => ({ general: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls'], fallback: ['read', 'grep', 'find', 'ls'] });
 
 /** A project whose agent file is the given text. */
 function projectWith(yaml: string): string {
@@ -28,11 +42,35 @@ function yamlAfter(heading: string): string {
   return start === -1 || open === -1 ? '' : DOC_RAW.slice(open + 8, close + 1);
 }
 
+/** The README's section with that title. */
+function sectionRaw(title: string): string {
+  const text = read('README.md');
+  const start = text.indexOf(`## ${title}\n`);
+  const end = text.indexOf('\n## ', start + 1);
+  return start === -1 ? '' : text.slice(start, end === -1 ? undefined : end);
+}
+
+/** The text of one `## ` section of the page, from its heading to the next one. */
+function sectionOfDoc(heading: string): string {
+  const start = DOC_RAW.indexOf(`## ${heading}`);
+  const end = DOC_RAW.indexOf('\n## ', start + 1);
+  return start === -1 ? '' : DOC_RAW.slice(start, end === -1 ? undefined : end);
+}
+
+/** The yaml code blocks of a section, in order. */
+function yamlBlocks(heading: string): string[] {
+  return [...sectionOfDoc(heading).matchAll(/```yaml\n([\s\S]*?)\n```/g)].map((match) => match[1]! + '\n');
+}
+
+const GLOBAL_SECTION = 'The global file: one setup for every project';
+
 const MINIMAL = `
 models:
   tiers:
-    default: { host: pi, model: local/x, thinking: low }
+    medium: { host: pi, model: local/x, thinking: low }
 agents:
+  general: { tools: [read], timeout: 5 }
+  fallback: { tools: [read], timeout: 5 }
 `;
 
 describe('docs/configuration.md', () => {
@@ -44,7 +82,7 @@ describe('docs/configuration.md', () => {
   it('has a complete example that loads and resolves as the page says', () => {
     const root = projectWith(yamlAfter('## A complete example'));
     const catalog = loadAgentFile(root);
-    expect([...catalog.tiers.keys()]).toEqual(['default', 'small', 'medium']);
+    expect([...catalog.tiers.keys()]).toEqual(['small', 'medium']);
     expect([...catalog.entries.keys()]).toEqual(['general', 'fallback', 'file-facts']);
     expect(catalog.limits.get('local')).toBe(1);
     expect(catalog.routing).toEqual({ hook: true, genericAgents: ['general-purpose', 'claude'] });
@@ -53,7 +91,152 @@ describe('docs/configuration.md', () => {
     expect(facts).toMatchObject({ model: 'local/qwen3-coder-30b', thinking: 'high', timeout: 120 });
     // General on a named tier runs that tier, recorded as general:medium.
     expect(resolveAgent(catalog, undefined, { tier: 'medium' })).toMatchObject({ name: 'general:medium', thinking: 'medium' });
-    expect(resolveAgent(catalog, undefined)).toMatchObject({ name: 'general', thinking: 'low' });
+    expect(resolveAgent(catalog, undefined)).toMatchObject({ name: 'general', thinking: 'medium' });
+  });
+
+  describe('the global file', () => {
+    const [globalYaml, projectYaml] = yamlBlocks(GLOBAL_SECTION);
+    const disabledYaml = yamlBlocks(GLOBAL_SECTION).find((block) => block.startsWith('enabled:'));
+
+    it('has an example pair that merges as the page says', () => {
+      useGlobalConfig(globalYaml!);
+      const catalog = loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER });
+      // The project's medium replaces model and thinking together, and its `small:` removes the inherited tier.
+      expect([...catalog.tiers.keys()]).toEqual(['medium']);
+      expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high' });
+      // The limit of local is inherited, and the routing key too.
+      expect(catalog.limits.get('local')).toBe(1);
+      expect(catalog.routing.hook).toBe(true);
+      // Built-in agents fill general and fallback: 1200 seconds, no skills, the host's starter tools.
+      expect(BUILT_IN_TIMEOUT).toBe(1200);
+      expect(DOC).toContain('the timeout is 1200 seconds');
+      expect(catalog.entries.get('general')).toMatchObject({ timeout: 1200, skills: [], tools: STARTER().general });
+      expect(catalog.entries.get('fallback')).toMatchObject({ timeout: 1200, skills: [], tools: STARTER().fallback });
+    });
+
+    it('turns subzero on with no project file, and a project agent replaces the built-in one', () => {
+      useGlobalConfig(globalYaml!);
+      const bare = tempDir('subzero-configdoc-');
+      expect([...loadCatalog(bare, { starterAgents: STARTER }).entries.keys()]).toEqual(['general', 'fallback']);
+      const own = projectWith('agents:\n  general: { tools: [read], timeout: 9 }\n');
+      expect(loadCatalog(own, { starterAgents: STARTER }).entries.get('general')).toMatchObject({ timeout: 9, tools: ['read'] });
+      expect(DOC).toMatch(/has a `medium` tier \| none \| On, with the built-in agents/);
+    });
+
+    it('is off with no medium tier in the global file and no project file', () => {
+      useGlobalConfig('routing:\n  hook: false\n');
+      expect(() => loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER })).toThrow(MissingAgentFileError);
+      expect(DOC).toMatch(/no `medium` tier \| none \| Off, as before/);
+    });
+
+    it('is switched off by enabled: false before the global file is read', () => {
+      expect(disabledYaml).toBe('enabled: false\n');
+      useGlobalConfig('this is: [not valid\n');
+      expect(() => loadCatalog(projectWith(disabledYaml!), { starterAgents: STARTER })).toThrow(ProjectDisabledError);
+      expect(DOC).toMatch(/The global file is not read/);
+      // Without it, the broken global file fails the project, and the error names that file.
+      const path_ = useGlobalConfig('this is: [not valid\n');
+      expect(() => loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER })).toThrow(`global file is malformed: ${path_}`);
+      // A project file with no medium tier anywhere is still a load error.
+      useGlobalConfig('routing:\n  hook: true\n');
+      expect(() => loadCatalog(projectWith('endpoints: {}\n'), { starterAgents: STARTER })).toThrow(LoadError);
+    });
+
+    it('holds only models.tiers, endpoints, routing and hosts.pi.extensions, and an error names the file and the key', () => {
+      for (const key of ['models.tiers', 'endpoints', 'routing', 'hosts.pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
+      const file = useGlobalConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
+      expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`not "agents": ${file}`);
+      for (const [yaml, fragment] of [
+        ['skills: {}\n', '"skills"'],
+        ['enabled: true\n', '"enabled"'],
+        ['version: 1\n', '"version"'],
+        ['models:\n  other: 1\n', '"models.other"'],
+      ] as const) {
+        const where = useGlobalConfig(yaml);
+        expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`${fragment}: ${where}`);
+      }
+      expect(DOC).toMatch(/Any other key, such as `agents`, `skills` or `enabled`, is a load error that names the file and the key/);
+    });
+
+    it('documents hosts.pi.extensions with an example that loads, and the global-only rule, the dialog warning and where it loads', () => {
+      const text = flat(sectionOfDoc(GLOBAL_SECTION));
+      const example = yamlBlocks(GLOBAL_SECTION).find((block) => block.includes('extensions:'))!;
+      expect(example).toBe('# ~/.agents/subzero.yaml\nhosts:\n  pi:\n    extensions:\n      - ~/.pi/reggiellm-pi/index.ts\n');
+      // The example loads once the file it names exists, and the path is expanded from the home folder.
+      const home = tempDir('subzero-confighome-');
+      mkdirSync(path.join(home, '.pi', 'reggiellm-pi'), { recursive: true });
+      writeFileSync(path.join(home, '.pi', 'reggiellm-pi', 'index.ts'), '');
+      const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+      try {
+        const fileAtDefaultPlace = path.join(home, '.agents', 'subzero.yaml');
+        mkdirSync(path.dirname(fileAtDefaultPlace), { recursive: true });
+        writeFileSync(fileAtDefaultPlace, `${globalYaml!}${example}`);
+        vi.stubEnv('SUBZERO_GLOBAL_CONFIG', '');
+        const catalog = loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER });
+        expect(catalog.childHostOptions.pi?.extensions).toEqual(['~/.pi/reggiellm-pi/index.ts']);
+        // The pi driver expands the path from the home folder when it starts pi.
+        expect(piExtensionsOf(catalog.childHostOptions.pi).files).toEqual([path.join(home, '.pi', 'reggiellm-pi', 'index.ts')]);
+        // Named by the environment, the same text loads: the environment is trusted.
+        vi.stubEnv('SUBZERO_GLOBAL_CONFIG', fileAtDefaultPlace + '.copy');
+        writeFileSync(fileAtDefaultPlace + '.copy', `${globalYaml!}${example}`);
+        expect(loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER }).childHostOptions.pi?.extensions).toEqual(['~/.pi/reggiellm-pi/index.ts']);
+      } finally {
+        vi.unstubAllEnvs();
+        homedir.mockRestore();
+      }
+      // A project file may not hold it.
+      useGlobalConfig(globalYaml!);
+      expect(() => loadCatalog(projectWith(`hosts:\n  pi:\n    extensions: []\n${MINIMAL}`), { starterAgents: STARTER })).toThrow(/global file only/);
+      expect(text).toMatch(/A project file that holds a `hosts` key is a load error that names the project file/);
+      expect(text).toMatch(/a repository must not be able to load code into your children/);
+      expect(text).toMatch(/an extension dialog blocks in RPC mode/);
+      expect(text).toMatch(/Child runs, the model listing of guided init \(`subzero config models`\) and the model check \(`subzero config check`\)/);
+      expect(text).toMatch(/absolute or starts with `~\/`/);
+      expect(text).toMatch(/Whether the file exists is not checked when the config loads/);
+      expect(text).toMatch(/Subzero\s+trusts the process environment as a whole/);
+      expect(text).toMatch(/no sandbox against an extension/);
+      expect(DOC).toMatch(/Only `models.tiers`, `endpoints.<endpoint>.parallel`, `routing` and `hosts.pi.extensions`/);
+      expect(CHANGELOG).toContain('`hosts.pi.extensions`');
+      expect(flat(read('docs/target-claude-pi.md'))).toContain('`hosts.pi.extensions` of the global file');
+    });
+
+    it('merges limits by endpoint, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {
+      useGlobalConfig('models:\n  tiers:\n    medium: { host: pi, model: local/x, thinking: low }\nendpoints:\n  local: { parallel: 2 }\n');
+      const moved = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\n');
+      expect(loadCatalog(moved, { starterAgents: STARTER }).limits.size).toBe(0);
+      const removed = projectWith('endpoints:\n  local:\n');
+      expect(loadCatalog(removed, { starterAgents: STARTER }).limits.size).toBe(0);
+      const own = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\nendpoints:\n  local: { parallel: 1 }\n');
+      expect(() => loadCatalog(own, { starterAgents: STARTER })).toThrow(/no model of a tier/);
+      // The removal entry is refused in the global file.
+      useGlobalConfig('models:\n  tiers:\n    large:\n');
+      expect(() => loadCatalog(moved, { starterAgents: STARTER })).toThrow(/removal entry is only accepted in the agent file/);
+      expect(DOC).toMatch(/Only the project file accepts this; in the global file it is an error/);
+      expect(DOC).toMatch(/`large:` under `models.tiers`, or `local:` under `endpoints`/);
+    });
+
+    it('fails delegation, naming the host, when the child driver has no starter tools', () => {
+      useGlobalConfig(globalYaml!);
+      expect(() => loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: () => undefined })).toThrow(/host "pi" offers no starter tools/);
+      expect(DOC).toContain('`offers no starter tools`');
+    });
+
+    it('names the environment variable, and the loader reads it as a full path with empty as unset', () => {
+      expect(DOC).toMatch(/\| `SUBZERO_GLOBAL_CONFIG` \| The full path of the global file[^|]*empty value counts as unset/);
+      expect(globalFile({ SUBZERO_GLOBAL_CONFIG: '/x/global.yaml' })).toBe('/x/global.yaml');
+      expect(globalFile({ SUBZERO_GLOBAL_CONFIG: '' })).toBe(globalFile({}));
+      expect(globalFile({})).toMatch(/\.agents[\\/]subzero\.yaml$/);
+      expect(DOC).toContain('`~/.agents/subzero.yaml`');
+    });
+
+    it('documents the behavior change, the opt-out and the session-start caveat', () => {
+      const text = flat(sectionOfDoc(GLOBAL_SECTION));
+      expect(text).toMatch(/turns subzero on in every project, with or without a project file/);
+      expect(text).toMatch(/`enabled: false`/);
+      expect(text).toMatch(/start a new session for the routing text/);
+      expect(text).toMatch(/In pi the tier text refreshes at once after a guided write/);
+      expect(text).toMatch(/the config file/);
+    });
   });
 
   it('lists the thinking levels the loader accepts', () => {
@@ -61,7 +244,7 @@ describe('docs/configuration.md', () => {
   });
 
   it('names every key of a tier, an agent, and the routing block', () => {
-    for (const key of ['host', 'model', 'thinking', 'description', 'tools', 'timeout', 'skills', 'tier', 'tiers', 'hook', 'generic_agents', 'parallel']) {
+    for (const key of ['host', 'model', 'thinking', 'description', 'tools', 'timeout', 'skills', 'tier', 'tiers', 'hook', 'generic_agents', 'parallel', 'enabled']) {
       expect(DOC, key).toContain(`\`${key}\``);
     }
   });
@@ -87,6 +270,14 @@ describe('docs/configuration.md', () => {
       },
     );
 
+    it('lists only the personal override file and skill-shipped agents as unsupported layering', () => {
+      const notSupported = flat(sectionOfDoc('Not supported yet'));
+      expect(notSupported).toMatch(/A personal override file and skill-shipped agents/);
+      expect(notSupported).toContain('.agents/subzero.local.yaml');
+      expect(notSupported).not.toMatch(/no user file/i);
+      expect(notSupported).not.toMatch(/no `enabled: false`/i);
+    });
+
     it('an endpoint entry holds only parallel: base_url is not read as a field', () => {
       const root = projectWith(`endpoints:\n  local: { base_url: http://x }\n${MINIMAL}`);
       expect(() => loadAgentFile(root)).toThrow(/parallel must be a positive whole number/);
@@ -96,7 +287,7 @@ describe('docs/configuration.md', () => {
   describe('Errors you may see', () => {
     const cases: [string, string][] = [
       ['agent file is malformed', 'agents: [\n'],
-      ['the default tier is required in models.tiers', 'agents:\n  general:\n    tools: [read]\n    timeout: 5\n'],
+      ['the medium tier is required in models.tiers', 'agents:\n  general:\n    tools: [read]\n    timeout: 5\n'],
       ['description is required', `${MINIMAL}  a:\n    tools: [read]\n    timeout: 5\n`],
       ['model cannot be set on an agent', `${MINIMAL}  a:\n    description: d\n    tools: [read]\n    timeout: 5\n    model: x/y\n`],
       ['unknown key "color"', `${MINIMAL}  a:\n    description: d\n    tools: [read]\n    timeout: 5\n    color: red\n`],
@@ -111,9 +302,9 @@ describe('docs/configuration.md', () => {
       expect(DOC, fragment).toContain(quoted.split(' ').slice(0, 3).join(' '));
     });
 
-    it('a missing file reads "agent file is missing"', () => {
-      expect(() => loadAgentFile(tempDir('subzero-configdoc-'))).toThrow('agent file is missing');
-      expect(DOC).toContain('agent file is missing');
+    it('a missing file reads "agent file is missing" and names init in both parents', () => {
+      expect(() => loadAgentFile(tempDir('subzero-configdoc-'))).toThrow(/agent file is missing.*\/subzero:init in Claude Code or \/subzero init in pi/);
+      expect(DOC).toMatch(/`agent file is missing` \|[^|]*`\/subzero:init` in Claude Code or `\/subzero init` in pi/);
     });
 
     it('an unknown agent and an unknown tier read as the table says', () => {
@@ -122,6 +313,42 @@ describe('docs/configuration.md', () => {
       expect(() => resolveAgent(catalog, 'a', { tier: 'huge' })).toThrow(/unknown tier "huge"/);
       expect(() => resolveAgent(catalog, 'a', { supportedHosts: ['codex'] })).toThrow(/runs on the host "pi"/);
     });
+  });
+
+  it('presents guided init in both parents first, then the quick path, and names the config commands', () => {
+    const start = DOC.indexOf('## Writing the file with `init`');
+    const init = DOC.slice(start, DOC.indexOf('## Environment variables'));
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(init).toMatch(/guided setup: `\/subzero:init` in Claude Code, or `\/subzero init` in pi/);
+    expect(init.indexOf('/subzero:init <model>')).toBeGreaterThan(init.indexOf('guided setup'));
+    expect(init).toMatch(/only after you confirm/);
+    for (const command of ['models', 'show', 'check', 'preview', 'apply']) expect(init).toContain(`\`${command}\``);
+    expect(init).toContain('`subzero config`');
+    // The scope choice, the source marks, and what init writes.
+    expect(init).toMatch(/asks first whether the models are for every project or only this one/);
+    expect(init).toMatch(/creates it when it is missing/);
+    expect(init).toMatch(/reads out what this project keeps its own/);
+    expect(init).toMatch(/tiers and limits only, never agents/);
+    expect(init).toMatch(/`--scope global\|project` \(default `project`\), and apply must repeat the preview's scope/);
+    expect(init).toMatch(/`config show` marks each tier and limit as coming from the global file or from the project/);
+    expect(init).toMatch(/`init <model>` is unchanged by the global file. It writes the project file/);
+    expect(init).toMatch(/add `small` or `large` afterwards, run guided init/i);
+    expect(init).toMatch(/checked against this project only: another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
+    expect(init).toMatch(/defaults it offers are the tiers and limits that come from the global file/);
+    expect(init).toMatch(/A write of the global file also needs a new session in every other open project/);
+    expect(init).toMatch(/It writes the project file only, never the global file/);
+  });
+
+  it('tells the README and the CHANGELOG about the one-time setup and the behavior change', () => {
+    const setup = flat(sectionRaw('Set up a model'));
+    expect(setup).toMatch(/whether the models are for every project or only this one/);
+    expect(setup).toContain('~/.agents/subzero.yaml');
+    expect(setup).toMatch(/`enabled: false`/);
+    expect(README).toMatch(/global file has a `medium` tier, subzero is on in every project/);
+    expect(CHANGELOG).toContain('SUBZERO_GLOBAL_CONFIG');
+    expect(CHANGELOG).toMatch(/Behavior change: a global file with a `medium` tier turns subzero on in every project/);
+    expect(CHANGELOG).toContain('`enabled: false`');
+    expect(CHANGELOG).toContain('--scope global|project');
   });
 
   it('links only to files that exist, and carries no dash pileups or banned words', () => {

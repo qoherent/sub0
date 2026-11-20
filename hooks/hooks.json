@@ -20,6 +20,18 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/subzero\" --bundle wake-hook",
+            "asyncRewake": true,
+            "timeout": 3600
+          }
+        ]
+      }
     ]
   }
 }

@@ -1,10 +1,19 @@
 import { existsSync, readdirSync, utimesSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { readParentSessionId, writeParentSessionId } from '../../src/mcp/parent-session.js';
+import { parentIsNonInteractive, readParentSessionId, writeParentSessionId } from '../../src/mcp/parent-session.js';
 import { tempDir } from '../helpers.js';
 
 const DAY = 24 * 3600 * 1000;
+
+describe('parent process mode', () => {
+  it('treats a process without a terminal as non-interactive', () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { detached: true, stdio: 'ignore' });
+    try { expect(child.pid).toBeDefined(); expect(parentIsNonInteractive(child.pid!)).toBe(true); }
+    finally { child.kill(); }
+  });
+});
 
 describe('parent session id per Claude process', () => {
   it('two sessions of one project from different parent processes do not see each other', () => {

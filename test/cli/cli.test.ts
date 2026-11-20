@@ -51,16 +51,8 @@ describe('Cli', () => {
     expect(record.brief).not.toMatch(/Reply size/);
   });
 
-  it('prints the unknown agent error and exits non-zero without making a task', async () => {
-    const root = makeProject();
-    const { run, err } = cli(root);
-    expect(await run('run', '--agent', 'nobody', 'x')).toBe(1);
-    expect(err.join('\n')).toMatch(/unknown agent "nobody"; configured agents: helper, other, free/);
-    expect(existsSync(path.join(root, '.agents', 'subzero'))).toBe(false);
-  });
-
   it('says on stdout that the named agent is not configured when the fallback agent ran instead', async () => {
-    const root = makeProject(DEFAULT_YAML + '  fallback:\n    tools: [read]\n    timeout: 30\n');
+    const root = makeProject(DEFAULT_YAML);
     const { run, out } = cli(root);
     expect(await run('run', '--agent', 'reviewr', 'x')).toBe(0);
     const text = out.join('\n');
@@ -71,7 +63,7 @@ describe('Cli', () => {
   });
 
   it('runs general with no --agent option, and a lone argument is always the brief', async () => {
-    const root = makeProject(DEFAULT_YAML + '  general:\n    tools: [read]\n    timeout: 30\n');
+    const root = makeProject(DEFAULT_YAML);
     const { run, out } = cli(root);
     expect(await run('run', 'helper')).toBe(0);
     expect(out[0]).toMatch(/^task: sz-[a-z2-7]{6} · general · status: completed/);
@@ -80,7 +72,7 @@ describe('Cli', () => {
   });
 
   it('runs general at the default tier with the host, model and thinking of that tier', async () => {
-    const root = makeProject(DEFAULT_YAML + '  general:\n    tools: [read]\n    timeout: 30\n');
+    const root = makeProject(DEFAULT_YAML);
     const { run, out } = cli(root);
     await run('run', 'go');
     const taskId = /sz-[a-z2-7]{6}/.exec(out[0]!)![0];
@@ -88,12 +80,13 @@ describe('Cli', () => {
     expect(frozen).toMatchObject({ name: 'general', host: 'pi', model: 'local/qwen', thinking: 'high' });
   });
 
-  it('with no --agent and no general entry prints the unknown agent error and runs nothing, never fallback', async () => {
-    const root = makeProject(DEFAULT_YAML + '  fallback:\n    tools: [read]\n    timeout: 30\n');
-    const { run, err } = cli(root);
-    expect(await run('run', 'do it')).toBe(1);
-    expect(err.join('\n')).toMatch(/no agent was named.*helper, other, free, fallback/);
-    expect(existsSync(path.join(root, '.agents', 'subzero'))).toBe(false);
+  it('with no --agent and no general entry runs the built-in general agent with the starter tools of pi', async () => {
+    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, ''));
+    const { run, out, fake } = cli(root);
+    expect(await run('run', 'do it')).toBe(0);
+    expect(out[0]).toMatch(/^task: sz-[a-z2-7]{6} · general · status: completed/);
+    const argv = fake.log()[0].argv as string[];
+    expect(argv[argv.indexOf('--tools') + 1]).toBe('read,bash,edit,write,grep,find,ls');
   });
 
   it('prints the usage when run has no brief or an unknown option', async () => {
@@ -139,7 +132,7 @@ describe('Cli', () => {
     expect(err.at(-1)).toMatch(/task sz-queued is queued, not launched yet/);
     expect(err.at(-1)).not.toMatch(/task sz-queued is running/);
     expect(await run('attach', 'sz-runnin')).toBe(1);
-    expect(err.at(-1)).toMatch(/task sz-runnin is running/);
+    expect(err.at(-1)).toMatch(/task sz-runnin is running, started .* ago\)/);
   });
 
   it('builds the attach command from the launch spec of a settled task', async () => {
@@ -198,7 +191,7 @@ describe('Cli', () => {
       const root = tempDir();
       const { run, out } = cli(root);
       expect(await run('init', 'r9700/Qwen3.8')).toBe(0);
-      expect(out.join('\n')).toMatch(/added.*default.*general.*fallback/s);
+      expect(out.join('\n')).toMatch(/added.*medium.*general.*fallback/s);
       expect(getAgent(root, 'general')).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'medium', timeout: 1200, tools: FULL, skills: [] });
       expect(getAgent(root, 'fallback')).toMatchObject({ tools: READ_ONLY, timeout: 1200 });
     });
@@ -222,7 +215,7 @@ describe('Cli', () => {
     });
 
     it('adds only the fallback agent beside an existing general agent, leaving its lines alone', async () => {
-      const text = `models:\n  tiers:\n    default: { host: pi, model: a/b, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 7\n`;
+      const text = `models:\n  tiers:\n    medium: { host: pi, model: a/b, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 7\n`;
       const root = makeProject(text);
       const { run, out } = cli(root);
       expect(await run('init', 'm/x')).toBe(0);
@@ -233,7 +226,7 @@ describe('Cli', () => {
     });
 
     it('refuses naming both hosts, exits non-zero and writes nothing when default is on another host', async () => {
-      const text = `models:\n  tiers:\n    default: { host: claude, model: a/b, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 7\n`;
+      const text = `models:\n  tiers:\n    medium: { host: claude, model: a/b, thinking: low }\nagents:\n  general:\n    tools: [read]\n    timeout: 7\n`;
       const root = makeProject(text);
       const { run, err } = cli(root);
       expect(await run('init', 'm/x', '--host', 'pi')).toBe(1);
@@ -250,12 +243,37 @@ describe('Cli', () => {
     });
 
     it('prints the load error, exits non-zero and writes nothing when the file does not load', async () => {
-      const text = `models:\n  tiers:\n    default: { host: pi, model: a/b, thinking: low }\nagents:\n  a:\n    description: d\n    tools: [read]\n`;
+      const text = `models:\n  tiers:\n    medium: { host: pi, model: a/b, thinking: low }\nagents:\n  a:\n    description: d\n    tools: [read]\n`;
       const root = makeProject(text);
       const { run, err } = cli(root);
       expect(await run('init', 'm/x')).toBe(1);
       expect(err.join('\n')).toMatch(/agent "a": timeout/);
       expect(readFileSync(agentFile(root), 'utf8')).toBe(text);
+    });
+
+    it('prints exactly what it added for a model alone (AE1)', async () => {
+      const root = tempDir();
+      const { run, out, err } = cli(root);
+      expect(await run('init', 'local/qwen')).toBe(0);
+      expect(out).toEqual(['added the medium tier, the general agent, the fallback agent']);
+      expect(err).toEqual([]);
+      expect(getAgent(root, 'general')).toMatchObject({ model: 'local/qwen', thinking: 'medium' });
+    });
+
+    it('without a model, points to the guided init of both parents and writes nothing', async () => {
+      const root = tempDir();
+      const { run, out, err } = cli(root);
+      expect(await run('init')).toBe(2);
+      const message = err.join('\n');
+      expect(message).toContain('/subzero:init');
+      expect(message).toContain('/subzero init');
+      expect(message).toMatch(/Claude Code/);
+      expect(message).toMatch(/\bpi\b/);
+      err.length = 0;
+      expect(await run('init', '--thinking', 'high')).toBe(2);
+      expect(err.join('\n')).toContain('/subzero:init');
+      expect(out).toEqual([]);
+      expect(existsSync(agentFile(root))).toBe(false);
     });
 
     it('refuses without a model, with a bad timeout or a bad thinking level, writing nothing', async () => {

@@ -34,6 +34,7 @@ agents:
 
   reviewer:
     description: Reviews one source file for bugs and replies with the findings, one line each.
+    tier: default
     skills: [code-review]
     tools: [read, grep, find, ls]
     timeout: 600

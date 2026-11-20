@@ -1,0 +1,472 @@
+@design/delegation-service.sigil from DelegationService import {
+  delegation, brief text, session cancel, completion notice, stop notice,
+  status line, result text, queued task, collect tool, guided setup,
+  setup operations, guide text, setup refusal,
+}
+@design/agent-config.sigil from AgentConfig import {
+  tier word, tier text, unmatched tier text, agent alias, agent file,
+  project root, SUBZERO_PROJECT_DIR, load error, general agent, model tier,
+  medium tier, parallel limit, working directory, starter entries, change set,
+  setup preview, preview fingerprint, refused change, fallback agent,
+  tier error, stale preview error, write error, setup scope, global file,
+  off error, enabled switch,
+}
+@design/cli.sigil from Cli import { subzero init }
+@design/kernel.sigil from Kernel import {
+  parent adapter, parent host, child host, entry point, driver registry,
+  supported child host,
+}
+@design/task-core.sigil from TaskCore import {
+  task id, attach command, child driver, transcript, starter tools,
+  prerequisites check,
+}
+@design/task-store.sigil from TaskStore import { parent session id, task record }
+
+component PiExtension {
+  goal {
+    Let a developer who works in the pi parent host run compound-engineering
+    skills and have every subagent they start run as an isolated subzero child,
+    on the model tier its request maps to in the agent file, or on the medium tier
+    when it names none, with each task kept in the shared task record and
+    a
+    way to watch, collect and stop the children.
+  }
+
+  state {
+    PiExtension is the parent adapter of the pi parent host. It runs inside the
+    pi
+    process as an extension that pi loads from a pi package. The entry point of
+    that pi package is outside PiExtension: it creates a Kernel, registers a
+    child driver for each child host it supports and registers PiExtension as the
+    parent adapter pi.
+
+    The *subagent tool* is the tool named subagent that PiExtension gives the
+    pi
+    parent host. Its request holds a brief text, an optional agent name, an
+    optional
+    model, which is the tier text, an optional async flag, optional files and
+    an
+    optional expected output.
+
+    The *subzero tools* are the tools subzero_await, subzero_tasks and
+    subzero_cancel. The tool subzero_await is the collect tool that the
+    completion notice names, and it collects the result of tasks started without
+    waiting,
+    waits up to an *await timeout* that defaults to 30 seconds and never exceeds
+    600
+    seconds,
+    and answers a task that has not settled with its status line. The tool
+    subzero_tasks lists the tasks of the session core, and the tool
+    subzero_cancel
+    cancels one task by its task id or every task of the session core.
+
+    A *session core* is the DelegationService that the entry point of the
+    extension
+    builds for one pi session, with the Kernel and the child drivers that only
+    the
+    entry point holds. Its parent session id is the session id of that pi
+    session,
+    and its project root is resolved from the working directory of that pi session.
+
+    The *session widget* shows each Pending or live task of the session core
+    with
+    its model tier, its model and its elapsed time or its queue place, while
+    the pi
+    parent host has a user interface.
+
+    The */subzero command* lists the tasks of the session core, prints the
+    attach command of one task, cancels every task of the session core or
+    one
+    by its task id, and sets subzero up with init.
+
+    The *init tools* are the six tools subzero_init_show, subzero_init_models,
+    subzero_init_ask, subzero_init_check, subzero_init_preview and
+    subzero_init_apply. Each wraps one of the setup operations of the
+    guided setup, except subzero_init_ask, which asks the user a question in
+    the user interface of pi and returns the answer. They are registered
+    inactive, and only a *guided init* turns them on: the agent run that the
+    /subzero command with init and no model starts with the shared guide text
+    and the mapping of its steps to the init tools.
+
+    The *pi-subagents* extension is the existing pi extension that also gives
+    the pi
+    parent host a tool named subagent.
+
+    The *extension factory* is the function that pi calls each time it loads or
+    reloads PiExtension, and it gives pi the tools and commands of the
+    extension.
+
+    A *clash warning* says that another extension provides the subagent tool or
+    that
+    pi-subagents is still loaded, names which extension owns the subagent tool
+    and
+    says to remove pi-subagents. The /subzero command repeats it.
+
+    A *turn trigger* is the setting on a message sent into a pi session that
+    makes
+    pi start a model turn when it is idle.
+
+    The *isolation error* is the error that says isolation is not supported
+    yet,
+    which the subagent tool returns for a request for a worktree, for worktree
+    isolation or for a fork.
+
+    The *parallel execution mode* of pi runs the tool calls of one message at
+    the
+    same time. The *peer dependencies* of a pi package are the packages that it
+    relies on pi to provide instead of bundling them.
+
+    A *print mode* is a pi session with no user interface that runs one prompt
+    and
+    exits, such as pi -p or the json mode.
+  }
+
+  logic {
+    On the start of a pi session, the entry point builds the session core and
+    hands
+    it to PiExtension, which checks the registered tools and commands for a
+    clash warning and shows it, and gives the subagent tool a description that
+    lists
+    each
+    tier word with the model tier it maps to, or says that a tier word whose
+    model tier is not configured should omit its model, and says to await
+    background
+    tasks
+    with subzero_await before using their results. The flow ends there.
+
+    On a subagent tool call, refuse it with the isolation error when it asks
+    for a
+    worktree, for worktree isolation or for a fork, and refuse a call that sets
+    a
+    management field, such as action or a workflow field, with a message that
+    points
+    to the subzero tools, which ends the flow. Map its agent name through
+    AgentConfig, so that an agent alias names the general agent, and map its
+    tier text to a model tier. An unmatched tier text is treated as no tier text,
+    and the
+    reply says the value was not used. Make a delegation with the brief text,
+    the
+    mapped agent name and model tier, the files, the expected output and the
+    parent session id of the session core, and send it to the session core. The
+    flow
+    returns the task id at once, or the result text when the call sets async to
+    false, and it ends there.
+
+    When a task that the call did not wait for settles, send its
+    completion notice
+    into the pi session with a turn trigger as a steering message, so that it
+    starts
+    a turn when pi is idle and joins the turn that is running otherwise, which
+    ends
+    that flow. A task that ended by a session cancel after an abort, or by a
+    cancel
+    through the subzero tools or the /subzero command, sends no turn trigger:
+    its
+    stop notice is shown to the user, and the parent model gets one stop notice
+    for
+    each stopped task on its next turn, which ends that flow. A task that ends
+    with
+    the pi session sends no stop notice to the parent model, and the user sees
+    only
+    the count of cancelled tasks.
+
+    On the /subzero command with init and a model, with the optional named
+    options thinking and timeout, ask Kernel for the prerequisites check and
+    the starter tools of the child host, which is the one supported child host,
+    refusing with a message that names the supported child hosts when the
+    driver registry lists several, and ask AgentConfig to add the starter entries
+    under the
+    project root of the session core, as subzero init does on the command line.
+    Rebuild the description of the subagent tool from the agent file when it
+    added any, and show which it added, which ends the flow. The init with a
+    model writes only the agent file, whether or not a global file exists.
+
+    On the /subzero command with init and no model, refuse when pi has no user
+    interface or the agent is running. Otherwise make the guided setup with the
+    project root of the session core, turn the init tools on and send the
+    guide text as a user message, which starts the guided init and ends the
+    flow.
+
+    On a call of subzero_init_preview or subzero_init_apply, take the setup
+    scope from the call, which is the agent file when it gives none, so that
+    the user's answer to the first question of the guide text, every project
+    or only this one, reaches the setup operations.
+
+    On a call of subzero_init_apply, build the setup preview of its change set
+    again for its setup scope, and refuse it, writing nothing, when the
+    preview fingerprint
+    differs, when it holds a refused change or when it would not load.
+    Otherwise show its diff and summary in the confirmation dialog of pi. When
+    the user declines, write nothing and turn the init tools off, which ends the
+    flow. When the user
+    confirms, apply the change set with that preview fingerprint. When the
+    apply writes, rebuild the description of the subagent tool from the
+    merged configuration and turn the init tools off, which ends the flow. When
+    AgentConfig refuses the apply with the stale preview error, return that
+    setup refusal and leave the init tools on, so that the guided init can
+    preview again, which ends the flow. When it refuses the apply with any
+    other setup refusal, the write error and the load error included, return
+    that setup refusal and turn the init tools off, which ends the flow. The
+    init tools are also turned off
+    when the agent run settles and at the start and the end of a pi session,
+    which ends the flow.
+
+    When an agent run starts, keep the init tools on only when it is the first
+    run after the /subzero command with init and its message carries the
+    guide text of that guided init, and otherwise turn the init tools off
+    before the run sees them, which ends the flow.
+
+    When a turn of the pi session settles as aborted by the user, run a
+    session cancel for the session core, which ends the flow.
+
+    On the end of a pi session, for any reason, including a new session, a
+    resumed
+    session, a fork and a reload, run a session cancel, shut the session core
+    down,
+    which records every task that was still live as cancelled and ends the
+    child runs
+    that are left, and show the user how many tasks were cancelled, which ends
+    the
+    flow.
+  }
+
+  constraints {
+    PiExtension requires its entry point to build every part of the
+    session core
+    inside the extension factory or on the start of a pi session, never at the
+    top
+    level of its module, so that a reload that runs the factory again never
+    meets a
+    Kernel that already holds the parent adapter pi.
+
+    PiExtension must give the working directory of the pi session as the sole
+    root for DelegationService to resolve the project root, and must not read
+    SUBZERO_PROJECT_DIR, because that setting
+    may
+    leak in from the shell that started pi.
+
+    A pi project that is off, with no agent file and no medium tier in the
+    global file or with an enabled switch of false in its agent file, must be
+    refused with the off error that names its cause, and that says to run
+    subzero init only when the cause is the missing medium tier, and PiExtension
+    must never run a subagent on a model that no file names. A malformed agent
+    file or global file must still return its load error, and a name that no
+    agent entry holds must still run the fallback agent.
+
+    PiExtension must reach the core only through the session core,
+    AgentConfig and, for init, the guided setup and the prerequisites check
+    and the starter tools that Kernel provides,
+    and it must never be given a child driver: its entry point holds each
+    child driver, and it names no child host.
+
+    The init tools must be active only during a guided init that the user
+    started with the /subzero command, which only the user can run, so that the
+    parent model cannot reach them at any other time. A guided init whose run
+    never starts must not leave the init tools on for a later run, and a call
+    of one of the init tools while no guided init runs must be refused and
+    change nothing. subzero_init_apply must
+    write the file of its setup scope only after the user confirms the diff of
+    its setup preview in the confirmation dialog of pi, and it must refuse and
+    write nothing when pi has no user interface.
+
+    The subagent tool must run in pi's parallel execution mode, so that several
+    calls
+    in one message start their children at the same time, up to each
+    parallel limit.
+
+    In a print mode, every subagent tool call must wait for its result,
+    whatever its
+    async flag says, and the reply must say so when async was set, because a
+    child
+    left running in the background would be killed when pi exits.
+
+    A completion notice and a stop notice must never be sent after the end of
+    the pi
+    session that started their task, so that no notice crosses into another
+    session.
+    Neither may carry the transcript of a child run.
+
+    The session widget must be shown only when the pi parent host has a user
+    interface. The clash warning must always be shown: as a notification when
+    the pi
+    parent host has a user interface, and on the error stream in a print mode.
+
+    PiExtension must ship as a *pi package* from a git branch, built from the
+    same
+    source as each other parent adapter, and the pi package must list pi's own
+    packages as peer dependencies and not bundle them.
+  }
+
+  cases {
+    With the model tier small configured on a local model, a subagent tool call
+    whose
+    model is cheapest capable starts a child on that local model and returns
+    its task id at once.
+
+    In a project with no agent file and no medium tier in the global file, a
+    subagent tool call returns the off error that names the missing medium
+    tier and says to run subzero init, and starts no child. With an enabled
+    switch of false in the agent file, the same call returns the off error that
+    names the enabled switch and does not say to run subzero init. With a
+    medium tier in the global file and no agent
+    file, the same call runs the general agent on the medium tier.
+
+    With the medium tier configured, a subagent tool call with no model runs on
+    the
+    medium tier, and a call that names the agent reviewer, whose own tier is
+    small,
+    and no model runs on small.
+
+    A subagent tool call with the model anthropic/claude-opus, an
+    unmatched tier text,
+    runs as a call with no model would: the general agent runs on the
+    medium tier and
+    the agent reviewer runs on its own tier small, and the reply says the value
+    was
+    not used.
+
+    A subagent tool call that asks for worktree isolation or a fork fails with
+    the
+    isolation error and starts no child.
+
+    With three tasks running in the background and pi idle, the first task to
+    settle
+    sends a completion notice that starts a turn, names the two tasks still
+    running
+    and says to wait for them.
+
+    With two background tasks from an earlier turn and one from the current
+    turn, a
+    turn aborted by the user ends all three as cancelled, sends no
+    turn trigger, and
+    the parent model gets three stop notices on its next turn, one for each
+    task.
+
+    With pi idle and two background tasks running, the /subzero command with
+    cancel
+    ends both as cancelled and reports 2, and no turn starts.
+
+    With one background task running, a new pi session runs a session cancel
+    that ends
+    it as cancelled and shows that one task was cancelled.
+
+    In a print mode, a subagent tool call that sets async waits and returns the
+    result text.
+
+    With pi-subagents installed, the start of a pi session shows the
+    clash warning
+    whether or not PiExtension owns the subagent tool, and the warning names
+    the
+    extension that owns it.
+
+    Each task that the subagent tool starts is in the task record under the
+    parent session id of the pi session, and the subzero command line lists it.
+
+    With pi idle and a user interface, the /subzero command with init turns on
+    the init tools and starts a guided init. When the user declines the diff
+    that subzero_init_apply shows, nothing is written and the init tools are
+    off. When the user confirms it, the file of the chosen setup scope is
+    written, the description of the subagent tool names the new model tiers in
+    the same pi session, and
+    the init tools are off. When pi has no user interface, the /subzero command
+    with init and no model writes nothing and says to give a model.
+
+    When pi cannot start the run of a guided init because no model is
+    selected, the next agent run that the user starts begins with the
+    init tools off, and a call of subzero_init_show is refused and writes
+    nothing.
+  }
+
+  interface {
+    Give the pi parent host the subagent tool, which takes a brief text and an
+    optional agent name, tier text, async flag, files and expected output, and
+    returns
+    a task id at once or, with async set to false, the result text.
+
+    Give the pi parent host the subzero tools to collect, list and cancel the
+    tasks of
+    its session core, each reply about a task with no result giving its
+    status line
+    and never calling a queued task started.
+
+    Deliver the completion notice of each background task into the pi session,
+    and the
+    stop notice of each task that was stopped, under the rules of the logic.
+
+    Run a session cancel when the user aborts a turn, when the /subzero command
+    asks
+    for one, and at the end of each pi session.
+
+    Show the session widget while pi has a user interface, show any
+    clash warning in
+    every pi session, and offer the /subzero command to list, attach and cancel
+    tasks and to run init with a model or as a guided init.
+
+    Be registered with Kernel as the parent adapter pi by the entry point of
+    the pi package, which also creates the Kernel and registers the child driver of
+    each
+    child host it supports, and be installed from its pi package. The
+    entry point
+    builds the Kernel and the child drivers inside the extension factory,
+    builds the
+    session core at the start of each pi session, and hands PiExtension only
+    that
+    session core and, for init, the Kernel.
+  }
+
+  decisions {
+    PiExtension replaces pi-subagents for compound-engineering and owns the
+    name
+    subagent, because compound-engineering asks for subagent in pi and a second
+    tool
+    name would be bypassed. pi keeps only the first extension that registers a
+    tool
+    name, so the clash warning is the only signal when the two are both loaded.
+
+    Background is the default, as in pi-subagents, and each finished task wakes
+    the
+    parent model with a completion notice that lists the tasks still running,
+    so the
+    model reacts to each result but waits for the rest. A stopped task does not
+    wake
+    the model, because a person who stops everything must not see the model
+    start
+    again.
+
+    An unconfigured model tier returns the tier error, and an
+    unmatched tier text is ignored and reported in the reply, so that a typo or
+    an unknown model never moves work to a more
+    expensive
+    model. The medium tier runs work that names no tier, so
+    compound-engineering works
+    in every project once subzero init has written the agent file or the
+    global file. The
+    session core
+    lives for one pi session and is cancelled at its end, because the pi
+    process
+    outlives a session and a child left running would keep a running
+    task record with
+    a live owner.
+
+    pi gives an extension no event for Escape while it is idle, so Escape stops
+    every
+    child only during a turn, and the /subzero command stops them while pi is
+    idle.
+
+    A project is refused until a medium tier exists in the agent file or the
+    global file, so that no subagent runs on a model that no file names. The
+    starter tools of the general agent, which may write files and run shell
+    commands, are the ones that the child driver gives when no agent file names
+    its own. Installing the pi package and writing a global file with a medium
+    tier are the opt-in that accepts this in every project, and an enabled
+    switch of false in a project is the way out of it. The init tools exist
+    only for a guided init, and subzero_init_apply asks for the confirmation
+    itself, because pi has no permission gate on a tool and the pi package has
+    no command line. pi builds
+    the description of the subagent tool at the start of a session, so it is
+    rebuilt after a write and the new model tiers route without a new session.
+    Capping the tools of a child to the active tools
+    of the
+    pi session is left for a later change.
+  }
+}

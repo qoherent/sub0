@@ -1,7 +1,65 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getAgent } from '../../src/config/agent-config.js';
-import { attachCommand, launchArgs } from '../../src/pi/launch.js';
-import { makeProject } from '../helpers.js';
+import { attachCommand, childRpcArgs, launchArgs, piExtensionsOf } from '../../src/pi/launch.js';
+import { makeProject, tempDir } from '../helpers.js';
+
+describe('piExtensionsOf (the pi section of the child host options)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function fileIn(dir: string, relative: string): string {
+    const file = path.join(dir, relative);
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, 'export default function () {}\n');
+    return file;
+  }
+
+  it('is no extension when the options hold none', () => {
+    expect(piExtensionsOf(undefined)).toEqual({ files: [] });
+    expect(piExtensionsOf({})).toEqual({ files: [] });
+    expect(piExtensionsOf({ extensions: null })).toEqual({ files: [] });
+    expect(piExtensionsOf({ extensions: [] })).toEqual({ files: [] });
+  });
+
+  it('keeps absolute paths in order, expands ~/ and drops duplicates', () => {
+    const home = tempDir('subzero-home-');
+    vi.spyOn(os, 'homedir').mockReturnValue(home);
+    const a = fileIn(home, '.pi/ext/index.ts');
+    const b = fileIn(tempDir(), 'b.ts');
+    expect(piExtensionsOf({ extensions: [b, '~/.pi/ext/index.ts', a] })).toEqual({ files: [b, a] });
+  });
+
+  it('names the path of an entry that is no file, so the models of that extension never just show as unknown', () => {
+    const dir = tempDir();
+    const gone = path.join(dir, 'gone.ts');
+    expect(piExtensionsOf({ extensions: [gone] }).problem).toContain(gone);
+    expect(piExtensionsOf({ extensions: [dir] }).problem).toContain(dir);
+    expect(piExtensionsOf({ extensions: [fileIn(dir, 'ok.ts'), gone] })).toMatchObject({ files: [], problem: expect.stringContaining(gone) });
+  });
+
+  it('refuses a key other than extensions, so a misspelled key is not ignored', () => {
+    expect(piExtensionsOf({ extension: ['/x.ts'] })).toMatchObject({ files: [], problem: expect.stringContaining('"extension"') });
+    expect(piExtensionsOf({ extensions: [], other: 1 }).problem).toContain('"other"');
+  });
+
+  it('refuses a bad shape in one line that says where it was written', () => {
+    const shapes: Record<string, unknown> = {
+      'a list that is not a list': 'ext.ts',
+      'an entry that is not a string': [5],
+      'an empty entry': [''],
+      'a relative path': ['ext/index.ts'],
+      'a dotted path': ['./ext.ts'],
+      'a bare ~': ['~'],
+    };
+    for (const [name, extensions] of Object.entries(shapes)) {
+      const { files, problem } = piExtensionsOf({ extensions });
+      expect(files, name).toEqual([]);
+      expect(problem, name).toMatch(/hosts\.pi\.extensions in the global file/);
+    }
+  });
+});
 
 describe('launch spec', () => {
   it('uses exactly the isolation flag set and never --session', () => {
@@ -16,6 +74,33 @@ describe('launch spec', () => {
       '--name', 'subzero:helper:sz-abcdef',
     ]);
     expect(args).not.toContain('--session');
+  });
+
+  it('builds the children\'s RPC isolation flags in one place, which every child run starts with', () => {
+    expect(childRpcArgs()).toEqual(['--mode', 'rpc', '--offline', '-na', '-ne', '-nc', '-np', '--no-themes', '-ns']);
+    const root = makeProject();
+    const args = launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: [], sessionsFolder: '/s' });
+    expect(args.slice(0, childRpcArgs().length)).toEqual(childRpcArgs());
+  });
+
+  it('adds -e <path> for each extension right after the isolation flags, keeping -ne, and nothing when there are none', () => {
+    expect(childRpcArgs([])).toEqual(childRpcArgs());
+    expect(childRpcArgs(['/e/one.ts', '/e/two.ts'])).toEqual([
+      '--mode', 'rpc', '--offline', '-na', '-ne', '-nc', '-np', '--no-themes', '-ns',
+      '-e', '/e/one.ts', '-e', '/e/two.ts',
+    ]);
+    const root = makeProject();
+    const args = launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: ['/o/alpha'], sessionsFolder: '/s', piExtensions: ['/e/one.ts'] });
+    expect(args.slice(0, 11)).toEqual([...childRpcArgs(), '-e', '/e/one.ts']);
+    expect(args.slice(11, 13)).toEqual(['--skill', '/o/alpha']);
+    expect(args).toContain('-ne');
+    expect(launchArgs({ taskId: 'sz-abcdef', agent: getAgent(root, 'helper'), overlaySkills: [], sessionsFolder: '/s' })).not.toContain('-e');
+  });
+
+  it('keeps the -e flags in the attach command, which reopens the child with the same extensions', () => {
+    const command = ['pi', '--mode', 'rpc', '--offline', '-ne', '-e', '/e/one.ts', '--session-dir', '/s', '--session-id', 'sz-abcdef'];
+    const attach = attachCommand({ command, cwd: '/p', envNames: [], version: '0.87.0', skillFolders: [], thinkingLevel: 'high' });
+    expect(attach).toEqual(['pi', '--offline', '-ne', '-e', '/e/one.ts', '--session-dir', '/s', '--session-id', 'sz-abcdef']);
   });
 
   it('builds the attach command without --mode rpc and without --session', () => {

@@ -1,4 +1,4 @@
-// @sigil implements design/mcp-server.sigil McpServer (process entry)
+// @sigil implements design/claude-mcp-server.sigil ClaudeMcpServer (process entry)
 //
 // node dist/server.js, started by Claude Code from the plugin's .mcp.json. The
 // project root comes from SUBZERO_PROJECT_DIR or the roots Claude Code reports,
@@ -9,7 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { Kernel } from '../kernel/kernel.js';
 import { PI_HOST, PiDriver } from '../pi/driver.js';
 import { DelegationService } from '../service/delegation-service.js';
-import { dataDir, readParentSessionId, removeReadinessMarker, setting, writeReadinessMarker } from './parent-session.js';
+import { dataDir, parentIsNonInteractive, readParentSessionId, removeReadinessMarker, setting, writeReadinessMarker } from './parent-session.js';
 import { createSubzeroServer } from './server.js';
 
 // Stamped by build.mjs from package.json; absent when this file runs unbundled.
@@ -24,7 +24,6 @@ const pi = setting(env.SUBZERO_PI);
 const piDriver = new PiDriver(pi !== undefined ? { piCommand: [pi] } : {});
 const kernel = new Kernel();
 kernel.registerChildDriver(PI_HOST, piDriver);
-// McpServer is the parent adapter of Claude Code sessions.
 kernel.registerParentAdapter('claude-code');
 const service = new DelegationService({
   env,
@@ -41,11 +40,12 @@ const data = dataDir(env);
 // project: written once the project root resolves, removed on exit. A killed server
 // leaves a marker whose pid is dead, which counts as absent.
 let markedRoot: string | undefined;
+let readyTaskMode = false;
 function markReady(): void {
   const root = service.projectRoot;
   if (root === undefined || markedRoot !== undefined) return;
   try {
-    writeReadinessMarker(data, root, process.pid, process.ppid);
+    writeReadinessMarker(data, root, process.pid, process.ppid, readyTaskMode);
     markedRoot = root;
   } catch {
     // Without a marker the hook lets every spawn through, which is the safe side.
@@ -60,9 +60,25 @@ process.on('exit', () => {
   }
 });
 
+const nonInteractive = parentIsNonInteractive();
 server = createSubzeroServer({
   service,
   version,
+  wakeDataDir: data,
+  nonInteractive,
+  taskMode: !nonInteractive,
+  onTaskMode: (enabled) => {
+    if (readyTaskMode === enabled) return;
+    if (markedRoot !== undefined) {
+      try { writeReadinessMarker(data, markedRoot, process.pid, process.ppid, enabled); }
+      catch {
+        // A stale task-mode marker is unsafe; remove it so routing fails open.
+        try { removeReadinessMarker(data, markedRoot, process.pid); } catch {}
+        markedRoot = undefined;
+      }
+    }
+    readyTaskMode = enabled;
+  },
   parentSessionId: () => {
     markReady(); // a root that resolved later, through a reported root, is marked on the next call
     return readParentSessionId(data, service.projectRoot, process.ppid);
