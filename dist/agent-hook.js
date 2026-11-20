@@ -27206,9 +27206,12 @@ var tierFieldSchemas = {
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function defaultGlobalFile() {
+  return path2.join(os.homedir(), ".agents", "subzero.yaml");
+}
 function globalFile(env = process.env) {
   const fromEnv = env.SUBZERO_GLOBAL_CONFIG;
-  return fromEnv !== void 0 && fromEnv !== "" ? fromEnv : path2.join(os.homedir(), ".agents", "subzero.yaml");
+  return fromEnv !== void 0 && fromEnv !== "" ? fromEnv : defaultGlobalFile();
 }
 function isSameFile(a, b) {
   try {
@@ -27251,8 +27254,8 @@ function readGlobalText(file2) {
     throw new LoadError(`global file is unreadable: ${file2} (${code ?? String(err)})`);
   }
 }
-var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "pi"];
-var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and pi.extensions";
+var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "hosts"];
+var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and hosts";
 function inFile(file2, step) {
   try {
     return step();
@@ -27320,7 +27323,7 @@ function build(readGlobal, projectText, options) {
     tiers,
     routing: { hook: routing.hook ?? true, ...routing.genericAgents !== void 0 ? { genericAgents: routing.genericAgents } : {} },
     limits,
-    piExtensions: [...new Set(global?.piExtensions ?? [])]
+    childHostOptions: global?.childHostOptions ?? {}
   };
 }
 function fillBuiltInAgents(entries, host, starterAgents) {
@@ -27353,8 +27356,8 @@ function parseLayer(text, file2, kind, options) {
       }
     }
   }
-  if (!global && "pi" in doc) {
-    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file2}`);
+  if (!global && "hosts" in doc) {
+    throw new LoadError(`the project file holds a "hosts" key, but child host options are allowed in the global file only (a repo must not load code into your children): ${file2}`);
   }
   if (doc.enabled !== void 0 && typeof doc.enabled !== "boolean") throw new LoadError("enabled must be true or false");
   const agentsMap = doc.agents ?? {};
@@ -27414,7 +27417,7 @@ function parseLayer(text, file2, kind, options) {
     routing: validateRouting(doc.routing),
     skillFolders,
     agents: agentsMap,
-    piExtensions: global ? validatePiExtensions(doc.pi, file2) : []
+    childHostOptions: global ? validateChildHostOptions(doc, file2) : {}
   };
 }
 function validateTier(name, raw) {
@@ -27509,30 +27512,16 @@ function validateAgent(name, raw, skillFolders, tiers) {
     overrides
   };
 }
-function validatePiExtensions(raw, file2) {
-  if (raw === void 0) return [];
-  const bad = (detail) => new LoadError(`pi: ${detail}: ${file2}`);
-  if (!isRecord(raw)) throw bad("must be a map holding extensions, a list of paths");
-  for (const key of Object.keys(raw)) {
-    if (key !== "extensions") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file2}`);
+function validateChildHostOptions(doc, file2) {
+  if (doc.hosts === void 0 || doc.hosts === null) return {};
+  if (!isRecord(doc.hosts)) throw new LoadError(`hosts: must be a map from a child host to its options: ${file2}`);
+  const options = {};
+  for (const [host, section] of Object.entries(doc.hosts)) {
+    if (section === null) continue;
+    if (!isRecord(section)) throw new LoadError(`hosts.${host}: must be a map of options: ${file2}`);
+    options[host] = section;
   }
-  if (raw.extensions === void 0) return [];
-  if (!Array.isArray(raw.extensions)) throw bad("extensions must be a list of paths");
-  return raw.extensions.map((entry, i) => {
-    if (typeof entry !== "string" || entry.trim() === "") throw bad(`extensions[${i}] must be a non-empty path`);
-    const resolved = entry === "~" ? "" : entry.startsWith("~/") ? path2.join(os.homedir(), entry.slice(2)) : entry;
-    if (resolved === "" || !path2.isAbsolute(resolved)) {
-      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
-    }
-    let isFile = false;
-    try {
-      isFile = statSync2(resolved).isFile();
-    } catch {
-      throw bad(`extension "${entry}" does not exist (${resolved})`);
-    }
-    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
-    return path2.normalize(resolved);
-  });
+  return options;
 }
 function validateRouting(raw) {
   if (raw === void 0 || raw === null) return {};
