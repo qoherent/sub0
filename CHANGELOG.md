@@ -24,7 +24,11 @@
   and `apply` take `--scope global|project`, and `config show` marks where each
   tier and limit comes from. `init <model>` is unchanged.
 - Load errors name the file they come from, the global file or the project file.
-- Global file key `pi.extensions`: a list of pi extension files (absolute or
+- Global file key `hosts.pi.extensions`: a list of pi extension files (absolute or
   `~/` paths) that every pi process of subzero loads with `-e` next to `-ne`:
   child runs, `subzero config models` and `subzero config check`. A project file
-  with a `pi` key is a load error.
+  with a `hosts` key is a load error. The process environment, including
+  `SUBZERO_GLOBAL_CONFIG`, is trusted. The pi driver, not the config, checks the
+  section. A path
+  that names no file loads, and pi is not started for it: the child run, listing
+  or check fails with a message that names the path.

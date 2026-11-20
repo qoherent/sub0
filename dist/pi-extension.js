@@ -117,17 +117,17 @@ var require_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    function visit_(key, node2, visitor, path7) {
-      const ctrl = callVisitor(key, node2, visitor, path7);
+    function visit_(key, node2, visitor, path8) {
+      const ctrl = callVisitor(key, node2, visitor, path8);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path7, ctrl);
-        return visit_(key, ctrl, visitor, path7);
+        replaceNode(key, path8, ctrl);
+        return visit_(key, ctrl, visitor, path8);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path7 = Object.freeze(path7.concat(node2));
+          path8 = Object.freeze(path8.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = visit_(i, node2.items[i], visitor, path7);
+            const ci = visit_(i, node2.items[i], visitor, path8);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -138,13 +138,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path7 = Object.freeze(path7.concat(node2));
-          const ck = visit_("key", node2.key, visitor, path7);
+          path8 = Object.freeze(path8.concat(node2));
+          const ck = visit_("key", node2.key, visitor, path8);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = visit_("value", node2.value, visitor, path7);
+          const cv = visit_("value", node2.value, visitor, path8);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -165,17 +165,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node2, visitor, path7) {
-      const ctrl = await callVisitor(key, node2, visitor, path7);
+    async function visitAsync_(key, node2, visitor, path8) {
+      const ctrl = await callVisitor(key, node2, visitor, path8);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path7, ctrl);
-        return visitAsync_(key, ctrl, visitor, path7);
+        replaceNode(key, path8, ctrl);
+        return visitAsync_(key, ctrl, visitor, path8);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node2)) {
-          path7 = Object.freeze(path7.concat(node2));
+          path8 = Object.freeze(path8.concat(node2));
           for (let i = 0; i < node2.items.length; ++i) {
-            const ci = await visitAsync_(i, node2.items[i], visitor, path7);
+            const ci = await visitAsync_(i, node2.items[i], visitor, path8);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -186,13 +186,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node2)) {
-          path7 = Object.freeze(path7.concat(node2));
-          const ck = await visitAsync_("key", node2.key, visitor, path7);
+          path8 = Object.freeze(path8.concat(node2));
+          const ck = await visitAsync_("key", node2.key, visitor, path8);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node2.key = null;
-          const cv = await visitAsync_("value", node2.value, visitor, path7);
+          const cv = await visitAsync_("value", node2.value, visitor, path8);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -219,23 +219,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node2, visitor, path7) {
+    function callVisitor(key, node2, visitor, path8) {
       if (typeof visitor === "function")
-        return visitor(key, node2, path7);
+        return visitor(key, node2, path8);
       if (identity.isMap(node2))
-        return visitor.Map?.(key, node2, path7);
+        return visitor.Map?.(key, node2, path8);
       if (identity.isSeq(node2))
-        return visitor.Seq?.(key, node2, path7);
+        return visitor.Seq?.(key, node2, path8);
       if (identity.isPair(node2))
-        return visitor.Pair?.(key, node2, path7);
+        return visitor.Pair?.(key, node2, path8);
       if (identity.isScalar(node2))
-        return visitor.Scalar?.(key, node2, path7);
+        return visitor.Scalar?.(key, node2, path8);
       if (identity.isAlias(node2))
-        return visitor.Alias?.(key, node2, path7);
+        return visitor.Alias?.(key, node2, path8);
       return void 0;
     }
-    function replaceNode(key, path7, node2) {
-      const parent = path7[path7.length - 1];
+    function replaceNode(key, path8, node2) {
+      const parent = path8[path8.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node2;
       } else if (identity.isPair(parent)) {
@@ -847,10 +847,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path7, value) {
+    function collectionFromPath(schema, path8, value) {
       let v = value;
-      for (let i = path7.length - 1; i >= 0; --i) {
-        const k = path7[i];
+      for (let i = path8.length - 1; i >= 0; --i) {
+        const k = path8[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -869,7 +869,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path7) => path7 == null || typeof path7 === "object" && !!path7[Symbol.iterator]().next().done;
+    var isEmptyPath = (path8) => path8 == null || typeof path8 === "object" && !!path8[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -899,11 +899,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path7, value) {
-        if (isEmptyPath(path7))
+      addIn(path8, value) {
+        if (isEmptyPath(path8))
           this.add(value);
         else {
-          const [key, ...rest] = path7;
+          const [key, ...rest] = path8;
           const node2 = this.get(key, true);
           if (identity.isCollection(node2))
             node2.addIn(rest, value);
@@ -917,8 +917,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path7) {
-        const [key, ...rest] = path7;
+      deleteIn(path8) {
+        const [key, ...rest] = path8;
         if (rest.length === 0)
           return this.delete(key);
         const node2 = this.get(key, true);
@@ -932,8 +932,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path7, keepScalar) {
-        const [key, ...rest] = path7;
+      getIn(path8, keepScalar) {
+        const [key, ...rest] = path8;
         const node2 = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node2) ? node2.value : node2;
@@ -951,8 +951,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path7) {
-        const [key, ...rest] = path7;
+      hasIn(path8) {
+        const [key, ...rest] = path8;
         if (rest.length === 0)
           return this.has(key);
         const node2 = this.get(key, true);
@@ -962,8 +962,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path7, value) {
-        const [key, ...rest] = path7;
+      setIn(path8, value) {
+        const [key, ...rest] = path8;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -3478,9 +3478,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path7, value) {
+      addIn(path8, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path7, value);
+          this.contents.addIn(path8, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -3555,14 +3555,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path7) {
-        if (Collection.isEmptyPath(path7)) {
+      deleteIn(path8) {
+        if (Collection.isEmptyPath(path8)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path7) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path8) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -3577,10 +3577,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path7, keepScalar) {
-        if (Collection.isEmptyPath(path7))
+      getIn(path8, keepScalar) {
+        if (Collection.isEmptyPath(path8))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path7, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path8, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -3591,10 +3591,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path7) {
-        if (Collection.isEmptyPath(path7))
+      hasIn(path8) {
+        if (Collection.isEmptyPath(path8))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path7) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path8) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -3611,13 +3611,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path7, value) {
-        if (Collection.isEmptyPath(path7)) {
+      setIn(path8, value) {
+        if (Collection.isEmptyPath(path8)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path7), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path8), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path7, value);
+          this.contents.setIn(path8, value);
         }
       }
       /**
@@ -5578,9 +5578,9 @@ var require_cst_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path7) => {
+    visit2.itemAtPath = (cst, path8) => {
       let item = cst;
-      for (const [field, index] of path7) {
+      for (const [field, index] of path8) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -5589,23 +5589,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit2.parentCollection = (cst, path7) => {
-      const parent = visit2.itemAtPath(cst, path7.slice(0, -1));
-      const field = path7[path7.length - 1][0];
+    visit2.parentCollection = (cst, path8) => {
+      const parent = visit2.itemAtPath(cst, path8.slice(0, -1));
+      const field = path8[path8.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path7, item, visitor) {
-      let ctrl = visitor(item, path7);
+    function _visit(path8, item, visitor) {
+      let ctrl = visitor(item, path8);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path7.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path8.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -5616,10 +5616,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path7);
+            ctrl = ctrl(item, path8);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path7) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path8) : ctrl;
     }
     exports.visit = visit2;
   }
@@ -7442,9 +7442,9 @@ var Kernel = class {
 // src/pi/driver.ts
 var import_yaml2 = __toESM(require_dist(), 1);
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
 import { homedir } from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // src/config/agent-config.ts
 var import_yaml = __toESM(require_dist(), 1);
@@ -8270,10 +8270,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path7) {
-  if (!path7)
+function getElementAtPath(obj, path8) {
+  if (!path8)
     return obj;
-  return path7.reduce((acc, key) => acc?.[key], obj);
+  return path8.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -8613,11 +8613,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path7, issues) {
+function prefixIssues(path8, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path7);
+    iss.path.unshift(path8);
     return iss;
   });
 }
@@ -9079,16 +9079,16 @@ function flattenError(error62, mapper = (issue2) => issue2.message) {
 }
 function formatError(error62, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -9127,17 +9127,17 @@ function formatError(error62, mapper = (issue2) => issue2.message) {
 }
 function treeifyError(error62, mapper = (issue2) => issue2.message) {
   const result2 = { errors: [] };
-  const processError = (error63, path7 = []) => {
+  const processError = (error63, path8 = []) => {
     var _a3;
     for (const issue2 of error63.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path7, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path7, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
       } else {
-        const fullpath = [...path7, ...issue2.path];
+        const fullpath = [...path8, ...issue2.path];
         if (fullpath.length === 0) {
           result2.errors.push(mapper(issue2));
           continue;
@@ -9176,8 +9176,8 @@ function treeifyError(error62, mapper = (issue2) => issue2.message) {
 }
 function toDotPath(_path) {
   const segs = [];
-  const path7 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
-  for (const seg of path7) {
+  const path8 = _path.map((seg) => typeof seg === "object" ? seg.key : seg);
+  for (const seg of path8) {
     if (typeof seg === "number")
       segs.push(`[${seg}]`);
     else if (typeof seg === "symbol")
@@ -26315,13 +26315,13 @@ function resolveRef(ref, ctx) {
   if (!ref.startsWith("#")) {
     throw new Error("External $ref is not supported, only local refs (#/...) are allowed");
   }
-  const path7 = ref.slice(1).split("/").filter(Boolean);
-  if (path7.length === 0) {
+  const path8 = ref.slice(1).split("/").filter(Boolean);
+  if (path8.length === 0) {
     return ctx.rootSchema;
   }
   const defsKey = ctx.version === "draft-2020-12" ? "$defs" : "definitions";
-  if (path7[0] === defsKey) {
-    const key = path7[1] === void 0 ? void 0 : decodeJSONPointerSegment(path7[1]);
+  if (path8[0] === defsKey) {
+    const key = path8[1] === void 0 ? void 0 : decodeJSONPointerSegment(path8[1]);
     if (!key || !ctx.defs[key]) {
       throw new Error(`Reference not found: ${ref}`);
     }
@@ -27282,9 +27282,12 @@ var tierFieldSchemas = {
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+function defaultGlobalFile() {
+  return path.join(os.homedir(), ".agents", "subzero.yaml");
+}
 function globalFile(env = process.env) {
   const fromEnv = env.SUBZERO_GLOBAL_CONFIG;
-  return fromEnv !== void 0 && fromEnv !== "" ? fromEnv : path.join(os.homedir(), ".agents", "subzero.yaml");
+  return fromEnv !== void 0 && fromEnv !== "" ? fromEnv : defaultGlobalFile();
 }
 function isSameFile(a, b) {
   try {
@@ -27302,17 +27305,17 @@ function loadCatalog(projectRoot, options = {}) {
   const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
   return build(() => readGlobalText(global), projectText, { ...options, agentFile, globalFile: global });
 }
-function loadPiExtensions(projectRoot) {
+function loadChildHostOptions(projectRoot, host) {
   const agentFile = path.join(projectRoot, AGENT_FILE);
   const global = globalFile();
   const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
   const globalText = readGlobalText(global);
   const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true };
   try {
-    return buildCatalog(globalText, projectText, options).piExtensions;
+    return buildCatalog(globalText, projectText, options).childHostOptions[host] ?? {};
   } catch (err) {
     if (!(err instanceof ProjectDisabledError)) throw err;
-    return buildCatalog(globalText, null, options).piExtensions;
+    return buildCatalog(globalText, null, options).childHostOptions[host] ?? {};
   }
 }
 function loadAgentFile(projectRoot, options = {}) {
@@ -27347,8 +27350,8 @@ function readGlobalText(file2) {
 function buildCatalog(globalText, projectText, options) {
   return build(() => globalText, projectText, options);
 }
-var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "pi"];
-var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and pi.extensions";
+var GLOBAL_LAYER_KEYS = ["models", "endpoints", "routing", "hosts"];
+var GLOBAL_KEYS_TEXT = "models.tiers, endpoints, routing and hosts";
 function inFile(file2, step) {
   try {
     return step();
@@ -27416,7 +27419,7 @@ function build(readGlobal, projectText, options) {
     tiers,
     routing: { hook: routing.hook ?? true, ...routing.genericAgents !== void 0 ? { genericAgents: routing.genericAgents } : {} },
     limits,
-    piExtensions: [...new Set(global?.piExtensions ?? [])]
+    childHostOptions: global?.childHostOptions ?? {}
   };
 }
 function fillBuiltInAgents(entries, host, starterAgents) {
@@ -27449,8 +27452,8 @@ function parseLayer(text, file2, kind, options) {
       }
     }
   }
-  if (!global && "pi" in doc) {
-    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file2}`);
+  if (!global && "hosts" in doc) {
+    throw new LoadError(`the project file holds a "hosts" key, but child host options are allowed in the global file only (a repo must not load code into your children): ${file2}`);
   }
   if (doc.enabled !== void 0 && typeof doc.enabled !== "boolean") throw new LoadError("enabled must be true or false");
   const agentsMap = doc.agents ?? {};
@@ -27510,7 +27513,7 @@ function parseLayer(text, file2, kind, options) {
     routing: validateRouting(doc.routing),
     skillFolders,
     agents: agentsMap,
-    piExtensions: global ? validatePiExtensions(doc.pi, file2) : []
+    childHostOptions: global ? validateChildHostOptions(doc, file2) : {}
   };
 }
 function validateTier(name, raw) {
@@ -27605,30 +27608,16 @@ function validateAgent(name, raw, skillFolders, tiers) {
     overrides
   };
 }
-function validatePiExtensions(raw, file2) {
-  if (raw === void 0) return [];
-  const bad = (detail) => new LoadError(`pi: ${detail}: ${file2}`);
-  if (!isRecord(raw)) throw bad("must be a map holding extensions, a list of paths");
-  for (const key of Object.keys(raw)) {
-    if (key !== "extensions") throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file2}`);
+function validateChildHostOptions(doc, file2) {
+  if (doc.hosts === void 0 || doc.hosts === null) return {};
+  if (!isRecord(doc.hosts)) throw new LoadError(`hosts: must be a map from a child host to its options: ${file2}`);
+  const options = {};
+  for (const [host, section] of Object.entries(doc.hosts)) {
+    if (section === null) continue;
+    if (!isRecord(section)) throw new LoadError(`hosts.${host}: must be a map of options: ${file2}`);
+    options[host] = section;
   }
-  if (raw.extensions === void 0) return [];
-  if (!Array.isArray(raw.extensions)) throw bad("extensions must be a list of paths");
-  return raw.extensions.map((entry, i) => {
-    if (typeof entry !== "string" || entry.trim() === "") throw bad(`extensions[${i}] must be a non-empty path`);
-    const resolved = entry === "~" ? "" : entry.startsWith("~/") ? path.join(os.homedir(), entry.slice(2)) : entry;
-    if (resolved === "" || !path.isAbsolute(resolved)) {
-      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
-    }
-    let isFile = false;
-    try {
-      isFile = statSync(resolved).isFile();
-    } catch {
-      throw bad(`extension "${entry}" does not exist (${resolved})`);
-    }
-    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
-    return path.normalize(resolved);
-  });
+  return options;
 }
 function validateRouting(raw) {
   if (raw === void 0 || raw === null) return {};
@@ -27868,7 +27857,38 @@ function unavailableUsage(reason) {
 }
 
 // src/pi/launch.ts
+import { existsSync, statSync as statSync2 } from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
 var CHILD_ENV = { PI_OFFLINE: "1", PI_TELEMETRY: "0" };
+var WHERE = "hosts.pi.extensions in the global file";
+function piExtensionsOf(options) {
+  if (options === void 0) return { files: [] };
+  for (const key of Object.keys(options)) {
+    if (key !== "extensions") return { files: [], problem: `hosts.pi in the global file holds "${key}", but only extensions is known` };
+  }
+  if (options.extensions === void 0 || options.extensions === null) return { files: [] };
+  const list = options.extensions;
+  if (!Array.isArray(list)) return { files: [], problem: `${WHERE} must be a list of paths` };
+  const files = [];
+  for (const [i, entry] of list.entries()) {
+    if (typeof entry !== "string" || entry.trim() === "") return { files: [], problem: `${WHERE}: item ${i + 1} must be a non-empty path` };
+    const resolved = entry === "~" ? "" : entry.startsWith("~/") ? path2.join(os2.homedir(), entry.slice(2)) : entry;
+    if (resolved === "" || !path2.isAbsolute(resolved)) {
+      return { files: [], problem: `${WHERE}: "${entry}" must be an absolute path or start with ~/` };
+    }
+    const file2 = path2.normalize(resolved);
+    let isFile = false;
+    try {
+      isFile = existsSync(file2) && statSync2(file2).isFile();
+    } catch {
+      isFile = false;
+    }
+    if (!isFile) return { files: [], problem: `pi extension not found: ${file2} (named under ${WHERE})` };
+    if (!files.includes(file2)) files.push(file2);
+  }
+  return { files };
+}
 function childRpcArgs(piExtensions = []) {
   return [
     "--mode",
@@ -27922,15 +27942,15 @@ function attachCommand(spec) {
 }
 
 // src/pi/overlay.ts
-import { cpSync, existsSync, statSync as statSync2 } from "node:fs";
-import path2 from "node:path";
+import { cpSync, existsSync as existsSync2, statSync as statSync3 } from "node:fs";
+import path3 from "node:path";
 function overlayFolder(driverFilesFolder) {
-  return path2.join(driverFilesFolder, "skills");
+  return path3.join(driverFilesFolder, "skills");
 }
 function missingSkills(skills) {
   return skills.filter((skill) => {
     try {
-      return !statSync2(skill.folder).isDirectory();
+      return !statSync3(skill.folder).isDirectory();
     } catch {
       return true;
     }
@@ -27939,8 +27959,8 @@ function missingSkills(skills) {
 function prepareOverlay(driverFilesFolder, skills) {
   const root = overlayFolder(driverFilesFolder);
   return skills.map((skill) => {
-    const target = path2.join(root, skill.name);
-    if (!existsSync(target)) cpSync(skill.folder, target, { recursive: true, dereference: true });
+    const target = path3.join(root, skill.name);
+    if (!existsSync2(target)) cpSync(skill.folder, target, { recursive: true, dereference: true });
     return target;
   });
 }
@@ -28138,8 +28158,10 @@ var PiDriver = class {
    * models is an error that points to pi provider setup.
    */
   listModels = async (options = {}) => {
+    const { files: piExtensions, problem } = piExtensionsOf(options.childHostOptions);
+    if (problem !== void 0) throw new Error(problem);
     const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
-    const probe = this.probe([...childRpcArgs(options.piExtensions), "--no-session"], options.projectRoot, { strict: true });
+    const probe = this.probe([...childRpcArgs(piExtensions), "--no-session"], options.projectRoot, { strict: true });
     const timer = deadline(timeoutMs);
     try {
       const answer = await Promise.race([
@@ -28168,8 +28190,10 @@ var PiDriver = class {
    * or failed with a kind and a one-line reason; aborting kills pi.
    */
   checkModel = async (request) => {
-    const { model, thinking, projectRoot, signal, piExtensions } = request;
+    const { model, thinking, projectRoot, signal } = request;
+    const { files: piExtensions, problem } = piExtensionsOf(request.childHostOptions);
     if (signal?.aborted) return checkFailed("cancelled", "the check was cancelled");
+    if (problem !== void 0) return checkFailed("failed", problem);
     const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
     let lastAssistant = null;
     let markSettled;
@@ -28451,24 +28475,26 @@ var PiChildRun = class {
     this.signalTree("SIGKILL");
   }
   async main() {
-    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder, piExtensions } = this.request;
+    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
+    const { files: piExtensions, problem } = piExtensionsOf(this.request.childHostOptions);
     const missing = missingSkills(agent.skills);
     if (missing.length > 0) {
       return failed("skill_mismatch", `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(", ")}`);
     }
+    if (problem !== void 0) return failed("error", problem);
     if (this.stop !== null) return this.stoppedBeforeSpawn();
     const overlay = prepareOverlay(driverFilesFolder, agent.skills);
     const env = this.options.env ?? process.env;
-    const agentDir = this.options.piAgentDir ?? env.PI_CODING_AGENT_DIR ?? path3.join(homedir(), ".pi", "agent");
-    if (existsSync2(path3.join(agentDir, "SYSTEM.md"))) {
+    const agentDir = this.options.piAgentDir ?? env.PI_CODING_AGENT_DIR ?? path4.join(homedir(), ".pi", "agent");
+    if (existsSync3(path4.join(agentDir, "SYSTEM.md"))) {
       this.emit({
         kind: "warning",
-        message: `${path3.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
+        message: `${path4.join(agentDir, "SYSTEM.md")} exists and reaches the child: -nc does not cover it`
       });
     }
     const command = [
       ...this.driver.piCommand,
-      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...piExtensions !== void 0 ? { piExtensions } : {} })
+      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...piExtensions.length > 0 ? { piExtensions } : {} })
     ];
     const launchSpec = {
       command,
@@ -28804,13 +28830,13 @@ function failed(failureKind, message) {
 }
 function expectedSkillName(folder) {
   try {
-    const text = readFileSync2(path3.join(folder, "SKILL.md"), "utf8");
+    const text = readFileSync2(path4.join(folder, "SKILL.md"), "utf8");
     const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
     const name = match ? (0, import_yaml2.parse)(match[1])?.name : void 0;
     if (typeof name === "string" && name !== "") return name;
   } catch {
   }
-  return path3.basename(folder);
+  return path4.basename(folder);
 }
 function verifySkills(expected, response) {
   if (!response.success) return bounded(`get_commands failed: ${response.error ?? "no reason given"}`);
@@ -28914,11 +28940,11 @@ function newTaskId() {
 
 // src/core/task-core.ts
 var Task = class {
-  constructor(core, taskId, agent, brief, port, createdAt, piExtensions = []) {
+  constructor(core, taskId, agent, brief, port, createdAt, childHostOptions = {}) {
     this.core = core;
     this.brief = brief;
     this.port = port;
-    this.piExtensions = piExtensions;
+    this.childHostOptions = childHostOptions;
     this.taskId = taskId;
     this.agent = agent;
     this.createdAt = createdAt;
@@ -28927,7 +28953,7 @@ var Task = class {
   core;
   brief;
   port;
-  piExtensions;
+  childHostOptions;
   taskId;
   agent;
   createdAt;
@@ -28988,7 +29014,7 @@ var Task = class {
           projectRoot: this.core.projectRoot,
           sessionsFolder: this.core.store.sessionsFolder,
           driverFilesFolder: this.core.store.driverFilesFolder(this.taskId),
-          ...this.piExtensions.length > 0 ? { piExtensions: [...this.piExtensions] } : {}
+          ...Object.keys(this.childHostOptions).length > 0 ? { childHostOptions: this.childHostOptions } : {}
         },
         (event) => this.handleEvent(event)
       );
@@ -29099,7 +29125,7 @@ var TaskCore = class {
       endpoint: agent.endpoint,
       createdAt
     });
-    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.piExtensions);
+    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.childHostOptions);
   }
 };
 
@@ -29109,17 +29135,17 @@ import { randomBytes as randomBytes2 } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   mkdirSync as mkdirSync2,
   readdirSync,
   readFileSync as readFileSync3,
   renameSync,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import path4 from "node:path";
+import path5 from "node:path";
 var psProbe = {
   startTime(pid) {
-    if (process.platform === "linux" && existsSync3("/proc/self/stat")) {
+    if (process.platform === "linux" && existsSync4("/proc/self/stat")) {
       try {
         const stat = readFileSync3(`/proc/${pid}/stat`, "utf8");
         const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
@@ -29149,16 +29175,16 @@ var TaskStore = class {
   ownerProcess;
   /** The project root comes from the caller; TaskStore resolves none of its own. */
   constructor(projectRoot, options = {}) {
-    this.storeFolder = path4.join(projectRoot, ".agents", "subzero");
-    this.sessionsFolder = path4.join(this.storeFolder, "sessions");
-    this.indexPath = path4.join(this.storeFolder, "index.jsonl");
+    this.storeFolder = path5.join(projectRoot, ".agents", "subzero");
+    this.sessionsFolder = path5.join(this.storeFolder, "sessions");
+    this.indexPath = path5.join(this.storeFolder, "index.jsonl");
     this.warn = options.warn ?? ((m) => process.stderr.write(`subzero: ${m}
 `));
     this.probe = options.probe ?? psProbe;
     this.ownerProcess = options.owner;
   }
   taskDir(taskId) {
-    return path4.join(this.storeFolder, "tasks", taskId);
+    return path5.join(this.storeFolder, "tasks", taskId);
   }
   /** The driver files of a task sit in its task folder, beside the task record. */
   driverFilesFolder(taskId) {
@@ -29173,21 +29199,21 @@ var TaskStore = class {
   // ---- writes -------------------------------------------------------------
   /** Create the store folder, owner-only, with a .gitignore that ignores it all. */
   ensureStoreFolder() {
-    if (!existsSync3(this.storeFolder)) {
+    if (!existsSync4(this.storeFolder)) {
       mkdirSync2(this.storeFolder, { recursive: true, mode: 448 });
       chmodSync(this.storeFolder, 448);
     }
-    const ignore = path4.join(this.storeFolder, ".gitignore");
-    if (!existsSync3(ignore)) writeFileSync2(ignore, "*\n", { flag: "wx" });
+    const ignore = path5.join(this.storeFolder, ".gitignore");
+    if (!existsSync4(ignore)) writeFileSync2(ignore, "*\n", { flag: "wx" });
   }
   exists(taskId) {
-    return existsSync3(this.taskDir(taskId));
+    return existsSync4(this.taskDir(taskId));
   }
   createTaskRecord(task) {
     this.ensureStoreFolder();
     const dir = this.taskDir(task.taskId);
-    mkdirSync2(path4.join(dir, "turns"), { recursive: true, mode: 448 });
-    writeAtomic(path4.join(dir, "task.json"), task);
+    mkdirSync2(path5.join(dir, "turns"), { recursive: true, mode: 448 });
+    writeAtomic(path5.join(dir, "task.json"), task);
     this.appendIndex({
       taskId: task.taskId,
       agent: task.agent.name,
@@ -29202,24 +29228,24 @@ var TaskStore = class {
   }
   /** Write the start time into the task record: no index line, so the task status is still running. */
   writeStartTime(taskId, startedAt) {
-    const file2 = path4.join(this.taskDir(taskId), "task.json");
+    const file2 = path5.join(this.taskDir(taskId), "task.json");
     const task = readJson(file2);
     if (task === null) throw new Error(`no task record for ${taskId}`);
     writeAtomic(file2, { ...task, startedAt });
   }
   writeLaunchSpec(taskId, spec) {
-    const file2 = path4.join(this.taskDir(taskId), "task.json");
+    const file2 = path5.join(this.taskDir(taskId), "task.json");
     const task = readJson(file2);
     if (task === null) throw new Error(`no task record for ${taskId}`);
     writeAtomic(file2, { ...task, launchSpec: spec });
   }
   appendEvent(taskId, event) {
     const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), ...event }) + "\n";
-    appendFileSync(path4.join(this.taskDir(taskId), "events.jsonl"), line, { mode: 384 });
+    appendFileSync(path5.join(this.taskDir(taskId), "events.jsonl"), line, { mode: 384 });
   }
   /** Write the result in one step, and only then the index line that gives its status. */
   writeResult(taskId, result2, extra = {}) {
-    writeAtomic(path4.join(this.taskDir(taskId), "turns", "1.json"), result2);
+    writeAtomic(path5.join(this.taskDir(taskId), "turns", "1.json"), result2);
     const first = this.readLatest().get(taskId);
     this.appendIndex({
       taskId,
@@ -29271,10 +29297,10 @@ var TaskStore = class {
     return latest;
   }
   readResult(taskId) {
-    return readJson(path4.join(this.taskDir(taskId), "turns", "1.json"));
+    return readJson(path5.join(this.taskDir(taskId), "turns", "1.json"));
   }
   readTaskJson(taskId) {
-    return readJson(path4.join(this.taskDir(taskId), "task.json"));
+    return readJson(path5.join(this.taskDir(taskId), "task.json"));
   }
   /** A stored result outranks whatever the latest index line says. */
   view(line, result2, task = null) {
@@ -29304,7 +29330,7 @@ var TaskStore = class {
   findSessionFile(taskId) {
     try {
       const name = readdirSync(this.sessionsFolder).find((f) => f.endsWith(`_${taskId}.jsonl`) || f === `${taskId}.jsonl`);
-      return name === void 0 ? void 0 : path4.join(this.sessionsFolder, name);
+      return name === void 0 ? void 0 : path5.join(this.sessionsFolder, name);
     } catch {
       return void 0;
     }
@@ -29596,12 +29622,12 @@ var DelegationService = class {
   async delegate(delegation, options) {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === "") throw new EmptyBriefError();
-    const { agent, notice, tier, piExtensions } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier, childHostOptions } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
     const task = core.start({
       agent,
       port,
-      piExtensions,
+      childHostOptions,
       brief: renderBrief(delegation),
       ...delegation.parentSessionId !== void 0 ? { parentSessionId: delegation.parentSessionId } : {}
     });
@@ -29645,17 +29671,19 @@ var DelegationService = class {
     const options = { supportedHosts, ...tier !== void 0 && tier !== "" ? { tier } : {} };
     const named = delegation.agent;
     if (named === void 0 || named === GENERAL_AGENT || catalog.entries.has(named)) {
+      const agent2 = resolveAgent(catalog, named, options);
       return {
-        agent: resolveAgent(catalog, named, options),
+        agent: agent2,
         tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER,
-        piExtensions: catalog.piExtensions
+        childHostOptions: catalog.childHostOptions[agent2.host] ?? {}
       };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
+    const agent = resolveAgent(catalog, FALLBACK_AGENT, options);
     return {
-      agent: resolveAgent(catalog, FALLBACK_AGENT, options),
+      agent,
       tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
-      piExtensions: catalog.piExtensions,
+      childHostOptions: catalog.childHostOptions[agent.host] ?? {},
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(", ")}`
     };
   }
@@ -29814,8 +29842,8 @@ import { Type } from "typebox";
 // src/config/agent-setup.ts
 var import_yaml3 = __toESM(require_dist(), 1);
 import { createHash, randomBytes as randomBytes3 } from "node:crypto";
-import { closeSync, fchmodSync, mkdirSync as mkdirSync3, openSync, realpathSync as realpathSync2, renameSync as renameSync2, statSync as statSync3, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
-import path5 from "node:path";
+import { closeSync, fchmodSync, mkdirSync as mkdirSync3, openSync, realpathSync as realpathSync2, renameSync as renameSync2, statSync as statSync4, unlinkSync, writeFileSync as writeFileSync3 } from "node:fs";
+import path6 from "node:path";
 var DEFAULT_SETUP_TIMEOUT = BUILT_IN_TIMEOUT;
 var ChangeSetError = class extends Error {
   code = "invalid_change_set";
@@ -29860,7 +29888,7 @@ function sha256(text) {
   return createHash("sha256").update(text).digest("hex");
 }
 function readLayers(projectRoot) {
-  const agentFile = path5.join(projectRoot, AGENT_FILE);
+  const agentFile = path6.join(projectRoot, AGENT_FILE);
   const globalPath = globalFile();
   const projectText = isSameFile(agentFile, globalPath) ? null : readTextOrNull(agentFile);
   return { agentFile, globalPath, globalText: readGlobalText(globalPath), projectText };
@@ -29936,7 +29964,7 @@ function viewOf(l, scope, global, project) {
   return { tiers: own2.tiers, limits, project: merged, projectNamed: merged === null ? namedIn(null) : namedIn(project) };
 }
 function emptyCatalog(agentFile) {
-  return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map(), piExtensions: [] };
+  return { agentFile, entries: /* @__PURE__ */ new Map(), tiers: /* @__PURE__ */ new Map(), routing: { hook: true }, limits: /* @__PURE__ */ new Map(), childHostOptions: {} };
 }
 function dependentsOf(catalog, tier) {
   return [...catalog.entries.values()].filter((e) => e.tier === tier || e.overrides.has(tier)).map((e) => e.name);
@@ -29968,7 +29996,7 @@ function readSetupState(projectRoot, options = {}) {
   try {
     layers = readLayers(projectRoot);
   } catch (err) {
-    if (err instanceof LoadError) return { status: "refused", agentFile: path5.join(projectRoot, AGENT_FILE), error: err.message };
+    if (err instanceof LoadError) return { status: "refused", agentFile: path6.join(projectRoot, AGENT_FILE), error: err.message };
     throw err;
   }
   const agentFile = targetPath2(layers, scope);
@@ -30108,7 +30136,7 @@ function applyChanges(projectRoot, changes, fingerprint, starter, scope = "proje
   try {
     writeAtomic2(preview.agentFile, preview.text);
   } catch (err) {
-    if (isErrnoException(err)) throw new SetupWriteError(scope === "global" ? preview.agentFile : path5.relative(projectRoot, preview.agentFile), err);
+    if (isErrnoException(err)) throw new SetupWriteError(scope === "global" ? preview.agentFile : path6.relative(projectRoot, preview.agentFile), err);
     throw err;
   }
   return { ...preview, written: true };
@@ -30485,12 +30513,12 @@ function writeAtomic2(requested, text) {
     file2 = realpathSync2(requested);
   } catch {
   }
-  const dir = path5.dirname(file2);
+  const dir = path6.dirname(file2);
   mkdirSync3(dir, { recursive: true });
-  const tmp = path5.join(dir, `.${path5.basename(file2)}.${process.pid}.${randomBytes3(12).toString("hex")}.tmp`);
+  const tmp = path6.join(dir, `.${path6.basename(file2)}.${process.pid}.${randomBytes3(12).toString("hex")}.tmp`);
   let mode = 420;
   try {
-    mode = statSync3(file2).mode & 511;
+    mode = statSync4(file2).mode & 511;
   } catch {
   }
   let fd;
@@ -30614,10 +30642,10 @@ var SetupService = class {
     if (checkModel === void 0) {
       throw new SetupServiceError("no_model_check", `the child driver of the host "${host}" cannot check a model`);
     }
-    const piExtensions = this.piExtensions();
+    const childHostOptions = this.childHostOptions(host);
     const results = [];
     for (const { model, thinking } of models) {
-      const result2 = await checkModel({ model, thinking, projectRoot: this.projectRoot, piExtensions, ...signal ? { signal } : {} });
+      const result2 = await checkModel({ model, thinking, projectRoot: this.projectRoot, childHostOptions, ...signal ? { signal } : {} });
       results.push({ model, thinking, ...result2 });
     }
     return { host, results };
@@ -30637,17 +30665,17 @@ var SetupService = class {
     if (listModels === void 0) {
       throw new SetupServiceError("no_model_listing", `the child driver of the host "${host}" cannot list its models`);
     }
-    const piExtensions = this.piExtensions();
+    const childHostOptions = this.childHostOptions(host);
     try {
-      return await listModels({ projectRoot: this.projectRoot, piExtensions });
+      return await listModels({ projectRoot: this.projectRoot, childHostOptions });
     } catch (err) {
       throw new SetupServiceError("listing_failed", err instanceof Error ? err.message : String(err));
     }
   }
-  /** The pi extensions of the merged config for the project: the one place the listing and the check read them. */
-  piExtensions() {
+  /** The child host options of the global file for a host: the one place the listing and the check read them, also when the project is off. */
+  childHostOptions(host) {
     try {
-      return loadPiExtensions(this.projectRoot);
+      return loadChildHostOptions(this.projectRoot, host);
     } catch (err) {
       if (err instanceof LoadError) throw new SetupServiceError("invalid_config", err.message);
       throw err;
@@ -30965,7 +30993,7 @@ function sendStopped(pi, content) {
 }
 
 // src/pi-parent/ui.ts
-import path6 from "node:path";
+import path7 from "node:path";
 import { realpathSync as realpathSync3 } from "node:fs";
 function clashWarning(pi, ownFile) {
   const tools = pi.getAllTools();
@@ -30975,7 +31003,7 @@ function clashWarning(pi, ownFile) {
     try {
       return realpathSync3(file2);
     } catch {
-      return path6.resolve(file2);
+      return path7.resolve(file2);
     }
   };
   const foreignOwner = owner !== void 0 && canonical(owner.sourceInfo.path) !== canonical(ownFile);
