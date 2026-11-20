@@ -9,6 +9,7 @@ import type { TaskRecordWriter } from '../store/task-store.js';
 import { newTaskId } from './ids.js';
 import {
   ENDED_STATES,
+  type ChildHostOptions,
   type ChildOutcome,
   type ChildPort,
   type ChildRun,
@@ -23,8 +24,8 @@ export interface TaskRequest {
   brief: string;
   /** The child port of the host of the agent definition. */
   port: ChildPort;
-  /** Extension files the global file names for pi children, handed to the child port on start. */
-  piExtensions?: string[];
+  /** The global file's options for the child host of the agent definition, handed to the child port on start. */
+  childHostOptions?: ChildHostOptions;
   parentSessionId?: string;
 }
 
@@ -58,7 +59,7 @@ export class Task {
     private readonly brief: string,
     private readonly port: ChildPort,
     createdAt: string,
-    private readonly piExtensions: readonly string[] = [],
+    private readonly childHostOptions: ChildHostOptions = {},
   ) {
     this.taskId = taskId;
     this.agent = agent;
@@ -122,7 +123,7 @@ export class Task {
           projectRoot: this.core.projectRoot,
           sessionsFolder: this.core.store.sessionsFolder,
           driverFilesFolder: this.core.store.driverFilesFolder(this.taskId),
-          ...(this.piExtensions.length > 0 ? { piExtensions: [...this.piExtensions] } : {}),
+          ...(Object.keys(this.childHostOptions).length > 0 ? { childHostOptions: this.childHostOptions } : {}),
         },
         (event) => this.handleEvent(event),
       );
@@ -244,6 +245,6 @@ export class TaskCore {
       endpoint: agent.endpoint,
       createdAt,
     });
-    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.piExtensions);
+    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.childHostOptions);
   }
 }

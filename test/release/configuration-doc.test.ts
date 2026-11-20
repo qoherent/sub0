@@ -13,6 +13,7 @@ import {
   loadCatalog,
   resolveAgent,
 } from '../../src/config/agent-config.js';
+import { piExtensionsOf } from '../../src/pi/launch.js';
 import { tempDir, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
@@ -141,8 +142,8 @@ describe('docs/configuration.md', () => {
       expect(() => loadCatalog(projectWith('endpoints: {}\n'), { starterAgents: STARTER })).toThrow(LoadError);
     });
 
-    it('holds only models.tiers, endpoints, routing and pi.extensions, and an error names the file and the key', () => {
-      for (const key of ['models.tiers', 'endpoints', 'routing', 'pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
+    it('holds only models.tiers, endpoints, routing and hosts.pi.extensions, and an error names the file and the key', () => {
+      for (const key of ['models.tiers', 'endpoints', 'routing', 'hosts.pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
       const file = useGlobalConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
       expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`not "agents": ${file}`);
       for (const [yaml, fragment] of [
@@ -157,33 +158,46 @@ describe('docs/configuration.md', () => {
       expect(DOC).toMatch(/Any other key, such as `agents`, `skills` or `enabled`, is a load error that names the file and the key/);
     });
 
-    it('documents pi.extensions with an example that loads, and the global-only rule, the dialog warning and where it loads', () => {
+    it('documents hosts.pi.extensions with an example that loads, and the global-only rule, the dialog warning and where it loads', () => {
       const text = flat(sectionOfDoc(GLOBAL_SECTION));
       const example = yamlBlocks(GLOBAL_SECTION).find((block) => block.includes('extensions:'))!;
-      expect(example).toBe('# ~/.agents/subzero.yaml\npi:\n  extensions:\n    - ~/.pi/reggiellm-pi/index.ts\n');
+      expect(example).toBe('# ~/.agents/subzero.yaml\nhosts:\n  pi:\n    extensions:\n      - ~/.pi/reggiellm-pi/index.ts\n');
       // The example loads once the file it names exists, and the path is expanded from the home folder.
       const home = tempDir('subzero-confighome-');
       mkdirSync(path.join(home, '.pi', 'reggiellm-pi'), { recursive: true });
       writeFileSync(path.join(home, '.pi', 'reggiellm-pi', 'index.ts'), '');
       const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
       try {
-        useGlobalConfig(`${globalYaml!}${example}`);
+        const fileAtDefaultPlace = path.join(home, '.agents', 'subzero.yaml');
+        mkdirSync(path.dirname(fileAtDefaultPlace), { recursive: true });
+        writeFileSync(fileAtDefaultPlace, `${globalYaml!}${example}`);
+        vi.stubEnv('SUBZERO_GLOBAL_CONFIG', '');
         const catalog = loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER });
-        expect(catalog.piExtensions).toEqual([path.join(home, '.pi', 'reggiellm-pi', 'index.ts')]);
+        expect(catalog.childHostOptions.pi?.extensions).toEqual(['~/.pi/reggiellm-pi/index.ts']);
+        // The pi driver expands the path from the home folder when it starts pi.
+        expect(piExtensionsOf(catalog.childHostOptions.pi).files).toEqual([path.join(home, '.pi', 'reggiellm-pi', 'index.ts')]);
+        // Named by the environment, the same text loads: the environment is trusted.
+        vi.stubEnv('SUBZERO_GLOBAL_CONFIG', fileAtDefaultPlace + '.copy');
+        writeFileSync(fileAtDefaultPlace + '.copy', `${globalYaml!}${example}`);
+        expect(loadCatalog(tempDir('subzero-configdoc-'), { starterAgents: STARTER }).childHostOptions.pi?.extensions).toEqual(['~/.pi/reggiellm-pi/index.ts']);
       } finally {
+        vi.unstubAllEnvs();
         homedir.mockRestore();
       }
       // A project file may not hold it.
       useGlobalConfig(globalYaml!);
-      expect(() => loadCatalog(projectWith(`pi:\n  extensions: []\n${MINIMAL}`), { starterAgents: STARTER })).toThrow(/global file only/);
-      expect(text).toMatch(/A project file that holds a `pi` key is a load error that names the project file/);
+      expect(() => loadCatalog(projectWith(`hosts:\n  pi:\n    extensions: []\n${MINIMAL}`), { starterAgents: STARTER })).toThrow(/global file only/);
+      expect(text).toMatch(/A project file that holds a `hosts` key is a load error that names the project file/);
       expect(text).toMatch(/a repository must not be able to load code into your children/);
       expect(text).toMatch(/an extension dialog blocks in RPC mode/);
       expect(text).toMatch(/Child runs, the model listing of guided init \(`subzero config models`\) and the model check \(`subzero config check`\)/);
       expect(text).toMatch(/absolute or starts with `~\/`/);
-      expect(DOC).toMatch(/Only `models.tiers`, `endpoints.<endpoint>.parallel`, `routing` and `pi.extensions`/);
-      expect(CHANGELOG).toContain('`pi.extensions`');
-      expect(flat(read('docs/target-claude-pi.md'))).toContain('`pi.extensions` of the global file');
+      expect(text).toMatch(/Whether the file exists is not checked when the config loads/);
+      expect(text).toMatch(/Subzero\s+trusts the process environment as a whole/);
+      expect(text).toMatch(/no sandbox against an extension/);
+      expect(DOC).toMatch(/Only `models.tiers`, `endpoints.<endpoint>.parallel`, `routing` and `hosts.pi.extensions`/);
+      expect(CHANGELOG).toContain('`hosts.pi.extensions`');
+      expect(flat(read('docs/target-claude-pi.md'))).toContain('`hosts.pi.extensions` of the global file');
     });
 
     it('merges limits by endpoint, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {

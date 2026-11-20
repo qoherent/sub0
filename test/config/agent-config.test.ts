@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addStarterEntries,
   buildCatalog,
@@ -13,7 +13,7 @@ import {
   LoadError,
   listAgentNames,
   loadAgentFile,
-  loadPiExtensions,
+  loadChildHostOptions,
   MissingAgentFileError,
   parseCatalog,
   ProjectDisabledError,
@@ -606,7 +606,7 @@ endpoints:
     expect(load(root).limits.has('unused')).toBe(false);
     // Agents in that one file are refused as the global layer refuses them, not read as a project layer.
     writeFileSync(shared, `${GLOBAL_TIERS}agents:\n${GENERAL}${FALLBACK}`);
-    expect(errorOf(() => load(root)).message).toMatch(/the global file holds only models.tiers, endpoints, routing and pi.extensions, not "agents"/);
+    expect(errorOf(() => load(root)).message).toMatch(/the global file holds only models.tiers, endpoints, routing and hosts, not "agents"/);
   });
 
   it('refuses to add starter entries to a project file that is the global file, writing nothing', () => {
@@ -725,130 +725,95 @@ endpoints:
     expect(globalFile({})).toBe(home);
   });
 
-  describe('pi.extensions', () => {
-    /** A home folder with a pi extension file in it; os.homedir() answers it for the test. */
-    function homeWithExtension(relative = '.pi/ext/index.ts'): { home: string; file: string } {
-      const home = tempDir('subzero-home-');
-      const file = path.join(home, relative);
+  describe('child host options (hosts)', () => {
+    beforeEach(() => {
+      vi.spyOn(os, 'homedir').mockReturnValue(tempDir('subzero-home-'));
+      vi.stubEnv('SUBZERO_GLOBAL_CONFIG', '');
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Writes the global file at its default place, ~/.agents/subzero.yaml of a fresh home folder, and uses it. */
+    function withDefaultGlobal(text: string): string {
+      const file = path.join(os.homedir(), '.agents', 'subzero.yaml');
       mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, 'export default function () {}\n');
-      vi.spyOn(os, 'homedir').mockReturnValue(home);
-      return { home, file };
+      writeFileSync(file, text);
+      return file;
     }
-    const withExtensions = (list: string) => `${GLOBAL_TIERS}pi:\n  extensions:\n${list}`;
+
+    const HOSTS = `hosts:\n  pi:\n    extensions:\n      - ~/.pi/ext/index.ts\n`;
     const BARE = `models:\n  tiers:\n    medium: { host: pi, model: local/p, thinking: high }\nagents:\n${GENERAL}${FALLBACK}`;
 
-    it('is an empty list when no file names one', () => {
-      expect(load(projectWith(BARE)).piExtensions).toEqual([]);
-      withGlobal(GLOBAL_TIERS);
-      expect(load(projectWith(null)).piExtensions).toEqual([]);
-      expect(load(projectWith(BARE)).piExtensions).toEqual([]);
+    it('is empty when no file holds hosts', () => {
+      expect(load(projectWith(BARE)).childHostOptions).toEqual({});
+      withDefaultGlobal(GLOBAL_TIERS);
+      expect(load(projectWith(null)).childHostOptions).toEqual({});
+      expect(load(projectWith(BARE)).childHostOptions).toEqual({});
     });
 
-    it('carries the resolved absolute paths of the global file, in file order, into the merged catalog', () => {
-      const first = makeProject();
-      const a = path.join(first, 'a.ts');
-      const b = path.join(first, 'b.ts');
-      writeFileSync(a, '');
-      writeFileSync(b, '');
-      withGlobal(withExtensions(`    - ${b}\n    - ${a}\n`));
-      expect(load(projectWith(null)).piExtensions).toEqual([b, a]);
-      expect(load(projectWith(BARE)).piExtensions).toEqual([b, a]);
+    it('carries each section of the global file as written, for the driver of its host to read', () => {
+      withDefaultGlobal(`${GLOBAL_TIERS}hosts:\n  pi:\n    extensions: [~/a.ts, /b.ts]\n    other: 1\n  claude:\n    flag: true\n  idle:\n`);
+      expect(load(projectWith(null)).childHostOptions).toEqual({
+        pi: { extensions: ['~/a.ts', '/b.ts'], other: 1 },
+        claude: { flag: true },
+      });
+      expect(load(projectWith(BARE)).childHostOptions.pi).toEqual({ extensions: ['~/a.ts', '/b.ts'], other: 1 });
     });
 
-    it('expands a leading ~/ with the home folder', () => {
-      const { file } = homeWithExtension();
-      withGlobal(withExtensions('    - ~/.pi/ext/index.ts\n'));
-      expect(load(projectWith(null)).piExtensions).toEqual([file]);
-    });
-
-    it('removes duplicates, keeping the first place, including a ~/ form of the same file', () => {
-      const { file } = homeWithExtension();
-      withGlobal(withExtensions(`    - ${file}\n    - ~/.pi/ext/index.ts\n    - ${file}\n`));
-      expect(load(projectWith(null)).piExtensions).toEqual([file]);
-    });
-
-    it('refuses a pi key in a project file, naming that file and saying it is allowed in the global file only', () => {
-      const { file } = homeWithExtension();
-      withGlobal(GLOBAL_TIERS);
-      const root = projectWith(`pi:\n  extensions:\n    - ${file}\n${BARE}`);
-      const err = errorOf(() => load(root));
-      expect(err).toBeInstanceOf(LoadError);
-      expect(err.message).toContain(projectFile(root));
-      expect(err.message).toMatch(/pi\.extensions is allowed in the global file only/);
-      // Any pi key counts, even an empty one.
-      expect(errorOf(() => load(projectWith(`pi: {}\n${BARE}`))).message).toMatch(/global file only/);
-      expect(errorOf(() => load(projectWith(`pi:\n${BARE}`))).message).toMatch(/global file only/);
-    });
-
-    it('refuses a pi key in a project file with no global file at all', () => {
-      const root = projectWith(`pi:\n  extensions: []\n${BARE}`);
-      expect(errorOf(() => parseCatalog(readFileSync(projectFile(root), 'utf8'), projectFile(root))).message).toContain(projectFile(root));
-    });
-
-    it('refuses a relative path, naming the global file', () => {
-      const file = withGlobal(withExtensions('    - ext/index.ts\n'));
-      const err = errorOf(() => load(projectWith(null)));
-      expect(err.message).toContain(file);
-      expect(err.message).toContain('ext/index.ts');
-      expect(err.message).toMatch(/absolute|~\//);
-      const dotted = withGlobal(withExtensions('    - ./ext.ts\n'));
-      expect(errorOf(() => load(projectWith(BARE))).message).toContain(dotted);
-    });
-
-    it('refuses a path that is missing or is not a file, naming the global file and the path', () => {
-      const { home } = homeWithExtension();
-      const missing = path.join(home, 'nope.ts');
-      const file = withGlobal(withExtensions(`    - ${missing}\n`));
-      const err = errorOf(() => load(projectWith(null)));
-      expect(err.message).toContain(file);
-      expect(err.message).toContain(missing);
-      expect(err.message).toMatch(/does not exist|not a file/);
-      withGlobal(withExtensions(`    - ${home}\n`));
-      expect(errorOf(() => load(projectWith(null))).message).toMatch(/not a file/);
-      withGlobal(withExtensions('    - ~/missing.ts\n'));
-      expect(errorOf(() => load(projectWith(null))).message).toContain(path.join(home, 'missing.ts'));
-    });
-
-    it('refuses bad shapes, each naming the global file', () => {
-      const { file: ext } = homeWithExtension();
-      const shapes: Record<string, string> = {
-        'a list that is not a list': `${GLOBAL_TIERS}pi:\n  extensions: ${ext}\n`,
-        'a null list': `${GLOBAL_TIERS}pi:\n  extensions:\n`,
-        'an entry that is not a string': `${GLOBAL_TIERS}pi:\n  extensions:\n    - 5\n`,
-        'an empty entry': `${GLOBAL_TIERS}pi:\n  extensions:\n    - ""\n`,
-        'another key under pi': `${GLOBAL_TIERS}pi:\n  extensions: []\n  skills: []\n`,
-        'pi that is not a map': `${GLOBAL_TIERS}pi: [${ext}]\n`,
-        'an empty pi': `${GLOBAL_TIERS}pi:\n`,
-      };
-      for (const [name, text] of Object.entries(shapes)) {
-        const file = withGlobal(text);
-        const err = errorOf(() => load(projectWith(null)));
-        expect(err, name).toBeInstanceOf(LoadError);
-        expect(err.message, name).toContain(file);
-        expect(err.message, name).toMatch(/pi/);
+    it('reads no section from a project file and refuses a hosts key there, naming that file', () => {
+      withDefaultGlobal(GLOBAL_TIERS);
+      for (const text of [`${HOSTS}${BARE}`, `hosts: {}\n${BARE}`, `hosts:\n${BARE}`]) {
+        const root = projectWith(text);
+        const err = errorOf(() => load(root));
+        expect(err).toBeInstanceOf(LoadError);
+        expect(err.message).toContain(projectFile(root));
+        expect(err.message).toMatch(/child host options are allowed in the global file only/);
       }
     });
 
-    it('accepts an empty extensions list', () => {
-      withGlobal(`${GLOBAL_TIERS}pi:\n  extensions: []\n`);
-      expect(load(projectWith(null)).piExtensions).toEqual([]);
+    it('refuses a hosts key in a project file with no global file at all', () => {
+      const root = projectWith(`${HOSTS}${BARE}`);
+      expect(errorOf(() => parseCatalog(readFileSync(projectFile(root), 'utf8'), projectFile(root))).message).toContain(projectFile(root));
     });
 
-    it('lists pi.extensions among the keys the global file holds', () => {
-      withGlobal(`${GLOBAL_TIERS}agents: {}\n`);
-      expect(errorOf(() => load(projectWith(null))).message).toMatch(/models.tiers, endpoints, routing and pi.extensions, not "agents"/);
+    it('reads hosts from whichever file is the global file, the environment being trusted', () => {
+      withGlobal(`${GLOBAL_TIERS}${HOSTS}`);
+      expect(load(projectWith(null)).childHostOptions.pi?.extensions).toEqual(['~/.pi/ext/index.ts']);
+      withDefaultGlobal(`${GLOBAL_TIERS}${HOSTS}`);
+      expect(load(projectWith(null)).childHostOptions.pi?.extensions).toEqual(['~/.pi/ext/index.ts']);
     });
 
-    it('reads the list for a project root without needing a medium tier, general or fallback', () => {
-      const { file } = homeWithExtension();
-      withGlobal(`pi:\n  extensions:\n    - ${file}\n`);
-      expect(loadPiExtensions(tempDir('subzero-bare-'))).toEqual([file]);
-      expect(loadPiExtensions(projectWith('enabled: false\n'))).toEqual([file]);
-      withGlobal(`pi:\n  extensions:\n    - ${path.join(tempDir(), 'gone.ts')}\n`);
-      expect(() => loadPiExtensions(tempDir('subzero-bare-'))).toThrow(LoadError);
+    it('refuses a hosts value that is not a map of maps, naming the global file and the host', () => {
+      const shapes: Record<string, [string, RegExp]> = {
+        'a list': [`${GLOBAL_TIERS}hosts: [pi]\n`, /hosts: must be a map/],
+        'a scalar': [`${GLOBAL_TIERS}hosts: 5\n`, /hosts: must be a map/],
+        'a section that is a list': [`${GLOBAL_TIERS}hosts:\n  pi: [a]\n`, /hosts\.pi: must be a map/],
+        'a section that is a scalar': [`${GLOBAL_TIERS}hosts:\n  pi: yes\n`, /hosts\.pi: must be a map/],
+      };
+      for (const [name, [text, pattern]] of Object.entries(shapes)) {
+        const file = withDefaultGlobal(text);
+        const err = errorOf(() => load(projectWith(null)));
+        expect(err, name).toBeInstanceOf(LoadError);
+        expect(err.message, name).toContain(file);
+        expect(err.message, name).toMatch(pattern);
+      }
+    });
+
+    it('names hosts among the keys the global file holds', () => {
+      withDefaultGlobal(`${GLOBAL_TIERS}agents: {}\n`);
+      expect(errorOf(() => load(projectWith(null))).message).toMatch(/models.tiers, endpoints, routing and hosts, not "agents"/);
+      withDefaultGlobal(`${GLOBAL_TIERS}pi:\n  extensions: []\n`);
+      expect(errorOf(() => load(projectWith(null))).message).toMatch(/not "pi"/);
+    });
+
+    it('reads the options of one host for a project root without needing a medium tier, general or fallback', () => {
+      withDefaultGlobal(`hosts:\n  pi:\n    extensions:\n      - /x/ext.ts\n`);
+      expect(loadChildHostOptions(tempDir('subzero-bare-'), 'pi')).toEqual({ extensions: ['/x/ext.ts'] });
+      expect(loadChildHostOptions(projectWith('enabled: false\n'), 'pi')).toEqual({ extensions: ['/x/ext.ts'] });
+      expect(loadChildHostOptions(tempDir('subzero-bare-'), 'claude')).toEqual({});
+      withDefaultGlobal(`hosts: 5\n`);
+      expect(() => loadChildHostOptions(tempDir('subzero-bare-'), 'pi')).toThrow(LoadError);
       vi.stubEnv('SUBZERO_GLOBAL_CONFIG', '/nowhere/x.yaml');
-      expect(loadPiExtensions(tempDir('subzero-bare-'))).toEqual([]);
+      expect(loadChildHostOptions(tempDir('subzero-bare-'), 'pi')).toEqual({});
     });
   });
 

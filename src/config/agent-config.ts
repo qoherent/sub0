@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMap, parse as parseYaml, parseDocument, stringify as stringifyYaml, type Document } from 'yaml';
 import { z } from 'zod';
-import type { StarterTools } from '../core/types.js';
+import type { ChildHostOptions, StarterTools } from '../core/types.js';
 
 export const AGENT_FILE = path.join('.agents', 'subzero.yaml');
 
@@ -88,10 +88,10 @@ export interface AgentCatalog {
   routing: RoutingSettings;
   limits: Map<string, number>;
   /**
-   * The pi extensions every pi process of subzero loads, from `pi.extensions` of the
-   * global file: absolute paths in file order, no duplicates. Only the pi driver reads it.
+   * The child host options of the global file, by child host: the maps under `hosts`, opaque to
+   * the config. Only the driver of that host reads its entry and checks it.
    */
-  piExtensions: string[];
+  childHostOptions: Record<string, ChildHostOptions>;
 }
 
 /** What the callers that check hosts pass in; none means no host is checked. */
@@ -232,10 +232,15 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The global file: SUBZERO_GLOBAL_CONFIG when set and not empty, else ~/.agents/subzero.yaml. */
+/** The default place of the global file: ~/.agents/subzero.yaml. */
+export function defaultGlobalFile(): string {
+  return path.join(os.homedir(), '.agents', 'subzero.yaml');
+}
+
+/** The global file: SUBZERO_GLOBAL_CONFIG when set and not empty, else the default place. */
 export function globalFile(env: NodeJS.ProcessEnv = process.env): string {
   const fromEnv = env.SUBZERO_GLOBAL_CONFIG;
-  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : path.join(os.homedir(), '.agents', 'subzero.yaml');
+  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : defaultGlobalFile();
 }
 
 /**
@@ -277,21 +282,21 @@ export function loadCatalog(projectRoot: string, options: LoadOptions = {}): Age
 }
 
 /**
- * The pi extensions of the merged config for a project root, read with the lenient rules of
- * guided setup: a missing medium tier, general or fallback is no error, and a project that
- * is switched off still has the global list. A refusal in either file is a load error.
+ * The child host options for one child host, read with the lenient rules of guided setup: a
+ * missing medium tier, general or fallback is no error, and a project that is switched off still
+ * has the global file's options. A refusal in either file is a load error.
  */
-export function loadPiExtensions(projectRoot: string): string[] {
+export function loadChildHostOptions(projectRoot: string, host: string): ChildHostOptions {
   const agentFile = path.join(projectRoot, AGENT_FILE);
   const global = globalFile();
   const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
   const globalText = readGlobalText(global);
   const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true };
   try {
-    return buildCatalog(globalText, projectText, options).piExtensions;
+    return buildCatalog(globalText, projectText, options).childHostOptions[host] ?? {};
   } catch (err) {
     if (!(err instanceof ProjectDisabledError)) throw err;
-    return buildCatalog(globalText, null, options).piExtensions;
+    return buildCatalog(globalText, null, options).childHostOptions[host] ?? {};
   }
 }
 
@@ -367,12 +372,12 @@ interface Layer {
   routing: Partial<RoutingSettings>;
   skillFolders: Map<string, string>;
   agents: Record<string, unknown>;
-  /** The global file's `pi.extensions`, resolved; always empty in a project layer. */
-  piExtensions: string[];
+  /** The global file's child host options, resolved; always empty in a project layer. */
+  childHostOptions: Record<string, ChildHostOptions>;
 }
 
-const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing', 'pi'];
-const GLOBAL_KEYS_TEXT = 'models.tiers, endpoints, routing and pi.extensions';
+const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing', 'hosts'];
+const GLOBAL_KEYS_TEXT = 'models.tiers, endpoints, routing and hosts';
 
 /** Run a step on one file's content; a load error that does not name the file gets it. */
 function inFile<T>(file: string, step: () => T): T {
@@ -448,7 +453,7 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
     tiers,
     routing: { hook: routing.hook ?? true, ...(routing.genericAgents !== undefined ? { genericAgents: routing.genericAgents } : {}) },
     limits,
-    piExtensions: [...new Set(global?.piExtensions ?? [])],
+    childHostOptions: global?.childHostOptions ?? {},
   };
 }
 
@@ -485,8 +490,8 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
       }
     }
   }
-  if (!global && 'pi' in doc) {
-    throw new LoadError(`the project file holds a "pi" key, but pi.extensions is allowed in the global file only (a repo must not load code into your children): ${file}`);
+  if (!global && 'hosts' in doc) {
+    throw new LoadError(`the project file holds a "hosts" key, but child host options are allowed in the global file only (a repo must not load code into your children): ${file}`);
   }
   if (doc.enabled !== undefined && typeof doc.enabled !== 'boolean') throw new LoadError('enabled must be true or false');
   const agentsMap = doc.agents ?? {};
@@ -550,7 +555,7 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     routing: validateRouting(doc.routing),
     skillFolders,
     agents: agentsMap,
-    piExtensions: global ? validatePiExtensions(doc.pi, file) : [],
+    childHostOptions: global ? validateChildHostOptions(doc, file) : {},
   };
 }
 
@@ -662,33 +667,22 @@ function validateAgent(
 }
 
 /**
- * The global file's `pi.extensions`: a list of non-empty paths, each absolute or starting
- * with `~/`, each naming an existing file. Resolved to absolute paths, in file order.
+ * The child host options of the global file: the map `hosts`, from a child host name to that
+ * host's options. AgentConfig reads only the shape, a map of maps; the driver of each host owns
+ * what is inside its section and checks it when it starts. Only the global file may hold them
+ * (the project file is refused), because they can name code that runs in every child. The
+ * process environment, `SUBZERO_GLOBAL_CONFIG` included, is trusted.
  */
-function validatePiExtensions(raw: unknown, file: string): string[] {
-  if (raw === undefined) return [];
-  const bad = (detail: string) => new LoadError(`pi: ${detail}: ${file}`);
-  if (!isRecord(raw)) throw bad('must be a map holding extensions, a list of paths');
-  for (const key of Object.keys(raw)) {
-    if (key !== 'extensions') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "pi.${key}": ${file}`);
+function validateChildHostOptions(doc: Record<string, unknown>, file: string): Record<string, ChildHostOptions> {
+  if (doc.hosts === undefined || doc.hosts === null) return {};
+  if (!isRecord(doc.hosts)) throw new LoadError(`hosts: must be a map from a child host to its options: ${file}`);
+  const options: Record<string, ChildHostOptions> = {};
+  for (const [host, section] of Object.entries(doc.hosts)) {
+    if (section === null) continue;
+    if (!isRecord(section)) throw new LoadError(`hosts.${host}: must be a map of options: ${file}`);
+    options[host] = section;
   }
-  if (raw.extensions === undefined) return [];
-  if (!Array.isArray(raw.extensions)) throw bad('extensions must be a list of paths');
-  return raw.extensions.map((entry, i) => {
-    if (typeof entry !== 'string' || entry.trim() === '') throw bad(`extensions[${i}] must be a non-empty path`);
-    const resolved = entry === '~' ? '' : entry.startsWith('~/') ? path.join(os.homedir(), entry.slice(2)) : entry;
-    if (resolved === '' || !path.isAbsolute(resolved)) {
-      throw bad(`extension "${entry}" must be an absolute path or start with ~/`);
-    }
-    let isFile = false;
-    try {
-      isFile = statSync(resolved).isFile();
-    } catch {
-      throw bad(`extension "${entry}" does not exist (${resolved})`);
-    }
-    if (!isFile) throw bad(`extension "${entry}" is not a file (${resolved})`);
-    return path.normalize(resolved);
-  });
+  return options;
 }
 
 function validateRouting(raw: unknown): Partial<RoutingSettings> {

@@ -277,14 +277,14 @@ inherits the limit of `local`.
   `SUBZERO_GLOBAL_CONFIG` (an empty value counts as unset). A missing file
   means there is no global layer.
 - **Allowed keys.** Only `models.tiers`, `endpoints.<endpoint>.parallel`,
-  `routing` and `pi.extensions` (next section). Any other key, such as `agents`,
+  `routing` and `hosts.pi.extensions` (next section). Any other key, such as `agents`,
   `skills` or `enabled`, is a load error that names the file and the key. Agents
   and skills stay in the project, so a file in your home folder cannot give
   every repository tool access or skill folders.
 - **Read on every delegation.** Like the project file, it is read again each
   time. An edit applies to the next task, with the session-start exception below.
 
-### `pi.extensions`: pi extensions your children load
+### `hosts.pi.extensions`: pi extensions your children load
 
 Every pi process subzero starts runs with `-ne`, which keeps all pi extensions
 out so a child cannot be changed by whatever you have installed. Some setups
@@ -294,9 +294,10 @@ adds `-e <path>` for it, and only for the files you name:
 
 ```yaml
 # ~/.agents/subzero.yaml
-pi:
-  extensions:
-    - ~/.pi/reggiellm-pi/index.ts
+hosts:
+  pi:
+    extensions:
+      - ~/.pi/reggiellm-pi/index.ts
 ```
 
 - **Every pi process loads it.** Child runs, the model listing of guided init
@@ -307,14 +308,29 @@ pi:
   the session with them.
 - **Paths.** Each entry is a non-empty path that is absolute or starts with
   `~/` (your home folder). A relative path is a load error, because there is no
-  folder it could be relative to. The file must exist when the config loads,
-  or the load error names the global file and the path. Duplicates are dropped,
-  and the order of the file is kept.
-- **Global file only.** A project file that holds a `pi` key is a load error that
-  names the project file. The project file is committed to repositories, and a
-  repository must not be able to load code into your children. Any other key
-  under `pi` is a load error too.
+  folder it could be relative to. Whether the file exists is not checked when
+  the config loads, so a moved file never breaks a project that does not run pi.
+  Subzero checks it when pi would start: a child run, the model listing and the
+  model check each fail without starting pi, with a message that names the path.
+  Duplicates are dropped, and the order of the file is kept.
+- **Global file only.** A project file that holds a `hosts` key is a load error
+  that names the project file. The project file is committed to repositories,
+  and a repository must not be able to load code into your children. The config
+  reads only the shape of `hosts`, a map from a host name to a map of options;
+  the pi driver checks what is inside its `pi` section when it starts pi, and
+  reports a bad entry in one line.
+- **Any global file.** The section is read from whichever file is the global
+  file, `~/.agents/subzero.yaml` or the one `SUBZERO_GLOBAL_CONFIG` names. Subzero
+  trusts the process environment as a whole: a repository that can set
+  `SUBZERO_GLOBAL_CONFIG`, `HOME` or `PATH` can already run its own program, so
+  guarding one variable would only look safe. Do not let untrusted repositories
+  set environment variables for your sessions.
 - **Only pi.** The list is read for the host `pi` and ignored for any other host.
+- **Trusted code.** An extension is your own code, loaded inside every pi child
+  with your login. Subzero keeps its tool list and its declared skills for the
+  child, but an extension can still change the prompt or run code of its own, so
+  the read-only tool list of the `fallback` agent limits its tools and is no
+  sandbox against an extension.
 - **No questions at load.** An extension loads when the child starts. A
   background child cannot answer a question, and an extension dialog blocks in
   RPC mode, so an extension that asks you something while it loads leaves the
@@ -339,7 +355,7 @@ pi:
   that project. A limit the project writes itself that no model uses is still a
   load error.
 - **Agents and skills** come from the project file only, and so does nothing
-  under `pi`: `pi.extensions` comes from the global file only.
+  under `hosts`: `hosts.pi.extensions` comes from the global file only.
 
 ### When subzero is on in a project
 

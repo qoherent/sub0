@@ -1,6 +1,6 @@
 @design/agent-config.sigil from AgentConfig import {
   agent definition, tool list, thinking level, model endpoint, timeout,
-  project root, general agent, fallback agent,
+  project root, general agent, fallback agent, child host options,
 }
 @design/delegation-service.sigil from DelegationService import { guided setup }
 @design/kernel.sigil from Kernel import {
@@ -80,7 +80,8 @@ component TaskCore {
     with the status running, the model endpoint of the agent definition and the
     enqueue time. The task id goes to the result and to the child port, and the
     agent definition goes to the child port with the project root, the
-    sessions folder and the folder of the driver files of the task. The
+    sessions folder, the folder of the driver files of the task and the child
+    host options that the request carries. The
     task record
     goes to
     the final
@@ -184,7 +185,8 @@ component TaskCore {
   interface {
     Accept a task request made of an agent definition, a brief, the child port
     of
-    the child host of the agent definition and an optional parent session id.
+    the child host of the agent definition, the child host options for that
+    child host and an optional parent session id.
     Return the
     result, which never carries the transcript, tool output or skill content, with
     the task id first once the child run settles, or let the caller leave the
@@ -207,8 +209,9 @@ component TaskCore {
     Define the child port that a *child driver* implements: start a child run
     for a
     task id, an agent definition, a brief, the project root, the
-    sessions folder
-    and the folder of the driver files of the task, so that a child driver
+    sessions folder,
+    the folder of the driver files of the task and the child host options for
+    its child host, so that a child driver
     resolves
     none of these itself and reads no task record. Hand its launch spec, including
     its child working directory, to the
@@ -229,10 +232,13 @@ component TaskCore {
     and
     a *prerequisites check*, which passes or returns a message that says what
     its
-    child host lacks and what to do, a *model listing*, which gives each model
-    that a child run on its child host can use with the thinking levels that
+    child host lacks and what to do, a *model listing*, which takes the
+    child host options for its child host and
+    gives each model that a child run on its child host can use with the thinking
+    levels that
     model accepts, its model endpoint, its context size, its cost and whether
     it reasons, or a one-line reason why it cannot, and a *model check*, which
+    takes the same child host options and
     sends one fixed prompt to one model at one thinking level as a child run
     would and reports that the model answered, or that it did not with the
     kind unknown_model, timeout, failed or cancelled and a one-line reason. A

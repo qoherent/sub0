@@ -18,6 +18,7 @@ import {
   type ChildRun,
   type ChildRunRequest,
   type DomainEvent,
+  type ChildHostOptions,
   type HostModel,
   type LaunchSpec,
   type Measure,
@@ -28,7 +29,7 @@ import {
   type StarterTools,
   type Unavailable,
 } from '../core/types.js';
-import { CHILD_ENV, attachCommand, childRpcArgs, launchArgs } from './launch.js';
+import { CHILD_ENV, attachCommand, childRpcArgs, launchArgs, piExtensionsOf } from './launch.js';
 import { missingSkills, prepareOverlay } from './overlay.js';
 import { PiRpcClient, type PiEvent, type PiResponse } from './rpc-client.js';
 
@@ -155,9 +156,11 @@ export class PiDriver implements ChildDriver {
    * children cannot reach is not listed. Rejects with a one-line reason; zero
    * models is an error that points to pi provider setup.
    */
-  readonly listModels = async (options: { projectRoot?: string; piExtensions?: string[] } = {}): Promise<HostModel[]> => {
+  readonly listModels = async (options: { projectRoot?: string; childHostOptions?: ChildHostOptions } = {}): Promise<HostModel[]> => {
+    const { files: piExtensions, problem } = piExtensionsOf(options.childHostOptions);
+    if (problem !== undefined) throw new Error(problem);
     const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
-    const probe = this.probe([...childRpcArgs(options.piExtensions), '--no-session'], options.projectRoot, { strict: true });
+    const probe = this.probe([...childRpcArgs(piExtensions), '--no-session'], options.projectRoot, { strict: true });
     const timer = deadline(timeoutMs);
     try {
       const answer = await Promise.race([
@@ -187,8 +190,10 @@ export class PiDriver implements ChildDriver {
    * or failed with a kind and a one-line reason; aborting kills pi.
    */
   readonly checkModel = async (request: ModelCheckRequest): Promise<ModelCheckResult> => {
-    const { model, thinking, projectRoot, signal, piExtensions } = request;
+    const { model, thinking, projectRoot, signal } = request;
+    const { files: piExtensions, problem } = piExtensionsOf(request.childHostOptions);
     if (signal?.aborted) return checkFailed('cancelled', 'the check was cancelled');
+    if (problem !== undefined) return checkFailed('failed', problem);
     const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
     let lastAssistant: any = null;
     let markSettled!: () => void;
@@ -519,12 +524,14 @@ class PiChildRun {
   }
 
   private async main(): Promise<ChildOutcome> {
-    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder, piExtensions } = this.request;
+    const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
+    const { files: piExtensions, problem } = piExtensionsOf(this.request.childHostOptions);
 
     const missing = missingSkills(agent.skills);
     if (missing.length > 0) {
       return failed('skill_mismatch', `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(', ')}`);
     }
+    if (problem !== undefined) return failed('error', problem);
     if (this.stop !== null) return this.stoppedBeforeSpawn();
 
     const overlay = prepareOverlay(driverFilesFolder, agent.skills);
@@ -539,7 +546,7 @@ class PiChildRun {
 
     const command = [
       ...this.driver.piCommand,
-      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...(piExtensions !== undefined ? { piExtensions } : {}) }),
+      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...(piExtensions.length > 0 ? { piExtensions } : {}) }),
     ];
     const launchSpec: LaunchSpec = {
       command,

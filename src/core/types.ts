@@ -96,6 +96,12 @@ export interface ChildOutcome {
 }
 
 /**
+ * The options the global file holds for one child host, read only by the driver of that host.
+ * The core carries them without looking inside, so it names no child host.
+ */
+export type ChildHostOptions = Readonly<Record<string, unknown>>;
+
+/**
  * What a child driver receives on each start. It resolves none of these itself
  * and reads no task record.
  */
@@ -108,8 +114,8 @@ export interface ChildRunRequest {
   sessionsFolder: string;
   /** Where the driver keeps its own files of the task, beside the task record. */
   driverFilesFolder: string;
-  /** Extension files the global file names for pi children; other hosts ignore it. Absent means none. */
-  piExtensions?: string[];
+  /** The global file's options for this child host, as its driver reads them. Absent means none. */
+  childHostOptions?: ChildHostOptions;
 }
 
 export interface ChildRun {
@@ -168,7 +174,7 @@ export interface HostModel {
  * The models a child of the host can use. Rejects with a one-line reason, and
  * never resolves to an empty list.
  */
-export type ListModels = (options?: { projectRoot?: string; piExtensions?: string[] }) => Promise<HostModel[]>;
+export type ListModels = (options?: { projectRoot?: string; childHostOptions?: ChildHostOptions }) => Promise<HostModel[]>;
 
 export interface ModelCheckRequest {
   /** The model as a tier names it: `provider/id`. */
@@ -176,8 +182,8 @@ export interface ModelCheckRequest {
   thinking: ThinkingLevel;
   /** Where the check runs, as a child would; defaults to the current folder. */
   projectRoot?: string;
-  /** Extension files the global file names for pi; loaded as a child loads them. Other hosts ignore it. */
-  piExtensions?: string[];
+  /** The global file's options for this child host; a check loads them as a child does. */
+  childHostOptions?: ChildHostOptions;
   /** Aborting ends the check and stops its process. */
   signal?: AbortSignal;
 }

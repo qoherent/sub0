@@ -13,7 +13,7 @@ import {
   type RootSources,
 } from '../config/agent-config.js';
 import { Task, TaskCore } from '../core/task-core.js';
-import { ENDED_STATES, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
+import { ENDED_STATES, type ChildHostOptions, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
 import type { Kernel } from '../kernel/kernel.js';
 import { TaskStore, type TaskStoreOptions, type TaskView } from '../store/task-store.js';
 import { completionNotice, stopNotice } from './status-text.js';
@@ -243,13 +243,13 @@ export class DelegationService {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === '') throw new EmptyBriefError();
     // The host of the definition comes from its tier; the registry's hosts are the only ones that run.
-    const { agent, notice, tier, piExtensions } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier, childHostOptions } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
 
     const task = core.start({
       agent,
       port,
-      piExtensions,
+      childHostOptions,
       brief: renderBrief(delegation),
       ...(delegation.parentSessionId !== undefined ? { parentSessionId: delegation.parentSessionId } : {}),
     });
@@ -292,24 +292,26 @@ export class DelegationService {
   private chooseAgent(
     projectRoot: string,
     delegation: Delegation,
-  ): { agent: AgentDefinition; tier: string; piExtensions: string[]; notice?: string } {
+  ): { agent: AgentDefinition; tier: string; childHostOptions: ChildHostOptions; notice?: string } {
     const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, '').trim();
     const options = { supportedHosts, ...(tier !== undefined && tier !== '' ? { tier } : {}) };
     const named = delegation.agent;
     if (named === undefined || named === GENERAL_AGENT || catalog.entries.has(named)) {
+      const agent = resolveAgent(catalog, named, options);
       return {
-        agent: resolveAgent(catalog, named, options),
+        agent,
         tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER,
-        piExtensions: catalog.piExtensions,
+        childHostOptions: catalog.childHostOptions[agent.host] ?? {},
       };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
+    const agent = resolveAgent(catalog, FALLBACK_AGENT, options);
     return {
-      agent: resolveAgent(catalog, FALLBACK_AGENT, options),
+      agent,
       tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
-      piExtensions: catalog.piExtensions,
+      childHostOptions: catalog.childHostOptions[agent.host] ?? {},
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(', ')}`,
     };
   }

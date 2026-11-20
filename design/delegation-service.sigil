@@ -11,7 +11,7 @@
   working directory, medium tier, setup state, change set, setup preview,
   preview fingerprint, change set error, stale preview error, write error,
   refused change, setup scope, merged configuration, off error, global file,
-  enabled switch, built-in agent,
+  enabled switch, built-in agent, child host options,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
@@ -141,9 +141,9 @@ component DelegationService {
     tools of the child driver of the child host of the medium tier, which
     fill each built-in agent. When the load fails, return the load error to
     the caller, or the off error when the project is off, and end the flow
-    with no task made.
-    First
-    choose the agent. When the delegation names no agent or names the agent
+    with no task made. First choose the agent. When the delegation names no agent
+    or
+    names the agent
     general, take the general agent. When it names another agent, look up that
     name among the agent entries of the merged configuration, a built-in
     agent included. A name that finds the fallback agent in that lookup
@@ -157,7 +157,9 @@ component DelegationService {
     the chosen agent at that model tier, or else at the agent's own tier or the
     medium tier. When AgentConfig returns the tier error for that agent, return
     it
-    to the caller and end the flow with no task made. The task records its
+    to the caller and end the flow with no task made. Take the child host
+    options for the child host of that agent definition from the same load.
+    The task records its
     agent as
     the name of the chosen agent, followed by :<tier> when the delegation names
     a
@@ -179,7 +181,8 @@ component DelegationService {
     driver registry is asked, and no task is made.
     Otherwise render the files, the expected output and the reply budget after
     the brief text into one brief, start the task in TaskCore with that
-    agent definition, that brief, that child port and the parent session id,
+    agent definition, that brief, that child port, those child host options
+    and the parent session id,
     and add the task to the live task registry, which a later collect or
     cancel reads. When the child runs of its model endpoint in this process
     that are Starting or Live have reached its parallel limit, keep the
@@ -228,14 +231,22 @@ component DelegationService {
 
     On a listing of the models in the guided setup, run the
     prerequisites check of the child driver of its child host when it offers
-    one, and return its message as the error when it gives one. Then return
-    the model listing of that child driver, or an error when it offers none or
+    one, and return its message as the error when it gives one. Then take the
+    child host options for that child host
+    from AgentConfig, also when the project is off, and return the load error as
+    the error of the whole listing when that read fails. Otherwise return
+    the model listing of that child driver for them, or an error when it offers
+    none or
     the listing fails, which ends the flow. On a show, read the setup state
     from AgentConfig, marking each model tier listed or not from the
     model listing when the listing succeeds and otherwise giving the reason it
     failed, and return it with the warning of what configuring the model tier
-    large moves off the parent host, which ends the flow. On a check, run the
-    model check of that child driver for each model, one after another, and
+    large moves off the parent host, which ends the flow. On a check, take the
+    child host options for that child host from AgentConfig
+    in the same way, and return the load error as the error of the whole check
+    when that read fails. Otherwise run the
+    model check of that child driver, given them, for
+    each model, one after another, and
     return one result for each model in the order asked, which ends the flow.
     On a preview or an apply, hand the change set and, for an apply, the
     preview fingerprint to AgentConfig, with that child host and the setup
@@ -339,7 +350,8 @@ component DelegationService {
     for the guided setup, for the model listing, the model check, the
     prerequisites check and the starter tools of a child host, on
     AgentConfig
-    for the agent definition, the general agent, the fallback agent, the
+    for the agent definition, the child host options, the general agent, the
+    fallback agent, the
     tier error, the project root and the setup preview, and on TaskStore for
     the task record, the task status and the start-up sweep. It must not
     depend on any particular

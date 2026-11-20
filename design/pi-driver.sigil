@@ -6,7 +6,7 @@
 }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, skill folder, project root, timeout, thinking level,
-  tool list, general agent, fallback agent,
+  tool list, general agent, fallback agent, child host options,
 }
 @design/task-store.sigil from TaskStore import {
   task record, sessions folder, driver files,
@@ -43,7 +43,9 @@ component PiDriver {
   logic {
     Before spawning, check that every skill folder of the agent definition
     exists,
-    and stop with the failure kind skill_mismatch if one is missing. Copy each
+    and stop with the failure kind skill_mismatch if one is missing. Then check
+    the child host options for pi, and stop with the failure kind error and the
+    message of the check if it fails. Copy each
     declared skill folder into the skill overlay, whose paths the launch spec
     uses.
     Hand the launch spec to the caller in the run started domain event before
@@ -94,21 +96,50 @@ component PiDriver {
     exits when that is combined with --session-id:
     ```
     pi --mode rpc --offline -na -ne -nc -np --no-themes -ns
+       [-e <extension> ...]
        --skill <overlay>/<name> ... --model <provider/id> --thinking <level>
        --tools <tools> --session-dir <sessions folder>
        --session-id <task id> --name subzero:<agent>:<task id>
     ```
 
-    PiDriver receives the project root, the sessions folder and the folder of
-    its
-    driver files through the child port each time it starts a child run,
+    PiDriver owns the meaning of the child host options for pi: a list under
+    the key extensions of paths to the files of a *pi extension*, each path
+    absolute or starting with ~/, which the driver expands from the home folder
+    and de-duplicates, keeping the first. The driver adds one -e flag with its
+    path for each pi extension, in the order given, and no -e flag when the
+    caller gives none. The attach command carries the same -e flags. Before it
+    starts pi for a child run, a model listing or a model check, the driver must
+    check the child host options for pi, and when they hold a key other than
+    extensions, the list is malformed or one pi extension names no file it must
+    fail without starting pi, so that a misspelled key is not ignored; a map
+    that holds nothing counts as no pi extension. with a one-line
+    message that names the problem and the path, because pi gives no warning of
+    a missing path and the models of that pi extension would then show only as
+    unknown. For a child run it makes that check right after the check of the
+    skill folders and before it hands over the launch spec.
+
+    A pi extension is code of the user, which the user named in the child host
+    options, and PiDriver treats it as trusted. Against a pi extension the driver
+    guarantees only two things, and every other constraint of PiDriver still
+    holds: the tools of the child run are those of its tool list, because pi
+    1.5.2 applies that tool list to the tools that a pi extension adds, which
+    PiDriver verifies with its child flags on that version, and the skills are
+    exactly the declared skills. A pi extension may still change the prompt or run
+    code of
+    its own, so a read-only tool list of the fallback agent limits its tools
+    and is no sandbox against a pi extension.
+
+    PiDriver receives the project root, the sessions folder, the folder of
+    its driver files and the child host options through the child port each
+    time it starts a child run,
     resolves
     none of its own, and calls neither TaskStore nor the delegation service.
     PiDriver must not write the task record, and hands the
     launch spec to the caller so that TaskCore writes it.
 
     A child run must see exactly the declared skills and no user or project
-    extensions, context files, prompt templates or other skills. It must run
+    extensions other than the pi extensions in its child host options, and no
+    context files, prompt templates or other skills. It must run
     under
     the user's own pi login, and no credentials may be copied.
 
@@ -160,7 +191,9 @@ component PiDriver {
     which is
     a non-zero exit in mid-turn or a lost pipe, and an error is a run-level
     error
-    that pi reports through its stop reason, or an unknown model.
+    that pi reports through its stop reason, an unknown model, or a precondition
+    that the driver found missing before it started pi, such as a pi extension
+    that names no file.
 
     The driver must not remove the skill overlay of a task while its
     task record
@@ -238,22 +271,27 @@ component PiDriver {
     pi and run subzero init again.
 
     Offer a model listing that asks pi for get_available_models with the
-    configured pi command, the environment and the isolation flags of a
-    child run and no saved session, so that a model that a child run cannot
-    reach is not listed. Give each model the thinking levels it accepts: only
-    off for a model that does not reason, and otherwise each level from off to
+    configured pi command, the environment, the isolation flags of a
+    child run and the pi extensions in the child host options that the caller
+    gives, and no saved
+    session, so that a model that a child run cannot reach is not listed and a
+    model that a pi extension provides is. Give each model the thinking levels
+    it accepts: only off for a model that does not reason, and otherwise each level
+    from off to
     high that its thinking level map does not mark null, and xhigh or max only
     when the map gives them a value. Fail with a one-line reason when pi does
     not answer within 30 seconds, and with a reason that says to set up a pi
     provider when pi lists no model.
 
-    Offer a model check that starts pi with the same command, environment and
-    flags, the model, the thinking level, no tools and no saved session, sends
-    one fixed prompt and reports that the model answered when the turn settles
+    Offer a model check that starts pi with the same command, environment,
+    flags and child host options, the model, the thinking level, no tools and no
+    saved session, sends one fixed prompt and reports that the model answered when
+    the turn settles
     without an error. Report unknown_model when pi does not know the model,
     timeout when no answer comes within 120 seconds, cancelled when the caller
-    aborts it, and failed with the reason from pi otherwise, and end the pi
-    process in every case.
+    aborts it, and failed with the reason from pi otherwise, or with the reason
+    of the check of the child host options for pi when that check fails before
+    pi starts, and end the pi process in every case.
 
     Register with the driver registry of Kernel as the child driver for the
     child host pi

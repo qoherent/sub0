@@ -16,9 +16,16 @@ component AgentConfig {
     under the project root, holds a *skills map* from skill name to
     *skill folder*, an *endpoints map*, a *models map* and an *agents map* of
     named agents, each an *agent entry*. The *global file*,
-    ~/.agents/subzero.yaml, whose path SUBZERO_GLOBAL_CONFIG may name instead,
-    holds only a models map with its tiers map, an endpoints map and the
-    *routing block* that the agent file may also hold.
+    ~/.agents/subzero.yaml, whose path *SUBZERO_GLOBAL_CONFIG* may name instead,
+    holds only a models map with its
+    tiers map, an endpoints map, the *routing block* that the agent file may
+    also hold and the child host options, which the agent file may not hold. A
+    hosts map under the key hosts gives the child host options of a child host,
+    from the name of a child host to a map. AgentConfig keeps each map as
+    written and never reads inside one, because the child driver of that child
+    host owns what its options mean. A *shared file* is the agent file when it and
+    the global file are one file, symbolic links followed, as in a project
+    whose project root is the home folder.
 
     The *merged configuration* is the global file and the agent file combined
     by name: each model tier by its name, each endpoints entry by its model
@@ -132,12 +139,20 @@ component AgentConfig {
   }
 
   logic {
+    On a read of the child host options for a guided setup, read only the
+    global file, whatever the agent file holds and also when the project is off,
+    and validate it as a global layer is validated on load, except that a missing
+    medium tier is no error. Return the
+    child host options of the child host that the caller names, or the load
+    error that names the global file, which ends the flow.
+
     On load, read the agent file first. When it holds an enabled switch that is
     false, stop with the *off error* before the global file is read. Otherwise
     read the global file when it exists, validate the global file as a layer
-    that holds only a models map with its tiers map, an endpoints map and the
-    routing block, validate the agent file as a layer against the
-    *agent-file schema*, which consists only of the validation rules in this
+    that holds only a models map with its tiers map, an endpoints map, the
+    routing block and the child host options, validate the agent file as a layer
+    against the *agent-file schema*, which consists only of the validation rules in
+    this
     AgentConfig contract, merge the two layers by name, fill each default
     agent, and validate the merged configuration: every model tier, every agent
     entry,
@@ -145,8 +160,12 @@ component AgentConfig {
     tier override. Resolve each skill folder relative to the directory of the
     agent file into an absolute path. Take out of the merged configuration an
     endpoints entry that only the global file holds and no model belongs to,
-    without an error. The flow returns each agent entry, each model tier and the
-    names of each routable tier to its caller, or stops with the off error when
+    without an error. A shared file is read once, as the global layer, and the
+    agent file layer is then empty, as if the agent file were missing, so
+    that its enabled switch is not read and a key meant only for the agent
+    file is a global file error. The flow returns each agent entry, each
+    model tier, the child host options and the names of each routable tier to its
+    caller, or stops with the off error when
     the agent file is missing and the merged configuration holds no medium tier,
     or with a *load error* that names the file it comes from, the global file
     or the agent file, and the offending entry or model tier, or names the
@@ -171,8 +190,9 @@ component AgentConfig {
     to no model tier, and any other tier text is an *unmatched tier text*,
     which the caller treats as an empty tier text.
 
-    On a read of the *setup state*, read the global file and the agent file
-    and return each model tier of the merged configuration with its tier
+    On a read of the *setup state*, read the global file and the agent file,
+    reading a shared file once as the global file, and return each model tier of
+    the merged configuration with its tier
     dependents, its model endpoint and the file it comes from, and, when the
     agent file overrides it, the global file's model tier, and each endpoints
     entry with the model tiers whose model belongs to it, the file it comes
@@ -191,7 +211,11 @@ component AgentConfig {
     every one of them. Refuse a parallel limit for a model endpoint that no
     model of a model tier or of a tier override belongs to, and refuse the
     whole change set when no medium tier would remain in the merged
-    configuration. When the setup scope is the agent file, removing a model
+    configuration. When the setup scope is the agent file and the agent file is
+    a shared file, refuse the whole change set with a refused change that names
+    the shared file, and write nothing, and likewise refuse to add the starter
+    entries to a shared file. When the setup scope is the agent file,
+    removing a model
     tier or a parallel limit that only the global file holds writes a removal
     entry. When the setup scope is the global file, also build the merged
     configuration of this project with the changed global file, refuse a
@@ -237,9 +261,22 @@ component AgentConfig {
 
     The global file must be rejected with a load error that names the global
     file and the key when it holds anything other than a models map with a
-    tiers map, an endpoints map or the routing block, the enabled switch, a
-    skills map and an agents map included. An empty SUBZERO_GLOBAL_CONFIG
-    counts as unset, a missing global file is no layer and no error, and an
+    tiers map, an endpoints map, the routing block or the child host options,
+    the enabled switch, a skills map and an agents map included. The key
+    hosts must be a map whose every value is a map, and anything else gives a
+    load error that names the global file, the key hosts and, for a value that
+    is not a map, its child host. The load checks
+    nothing inside a map, because a malformed one must not break a project that
+    never uses that child host, and the child driver reports it when it would
+    start a child. An agent file that holds the key hosts must be rejected with
+    a load error that names the agent file, because a repository must not choose
+    the code that runs in the children of its user, and a shared file is
+    read as the global file, so its hosts key is accepted. The process
+    environment, SUBZERO_GLOBAL_CONFIG, HOME and PATH included, is trusted, so
+    AgentConfig honors the child host options of whichever file is the global
+    file. An
+    empty SUBZERO_GLOBAL_CONFIG counts as unset, a missing global file is no layer
+    and no error, and an
     unreadable or malformed global file must be rejected with a load error that
     names it. A removal entry is accepted only in the agent file. The enabled
     switch must be true or false.
@@ -325,9 +362,13 @@ component AgentConfig {
     nothing when the file of its setup scope, the setup scope or the change set
     differs from what was previewed, including a file created or removed since.
     It writes through a *temporary file* next to that file, created exclusively
-    so that no existing path or symbolic link is followed, removed on any
+    so that its own path never names an existing file or symbolic link, removed on
+    any
     failure and then renamed over that file, so that a call that reads the
-    file again sees the old file or the new one and never a part of one.
+    file again sees the old file or the new one and never a part of one. When
+    that file is a symbolic link, every link is followed to the file it
+    resolves to, the temporary file is next to that file, the rename replaces
+    that file and each symbolic link stays as it was.
 
     AgentConfig resolves the *project root* from *SUBZERO_PROJECT_DIR* first,
     then from the roots that the parent adapter reports, and for the command
@@ -403,6 +444,21 @@ component AgentConfig {
     configuration, and an agent entry whose own tier is large then gives a load
     error that names the agent file. A global parallel limit for a model
     endpoint that no model tier of the project uses is ignored in that project.
+
+    A global file whose hosts key holds, for the child host pi, a map with a
+    list of extensions gives that map as written to its caller, in every
+    project that is on, and a map for a child host that no caller starts is kept
+    and used by no one. A map that holds nothing valid for its child driver
+    still loads, and the child driver reports it when it would start a child. A
+    global file named by SUBZERO_GLOBAL_CONFIG gives its child host options
+    like the file at ~/.agents/subzero.yaml, and an agent file that holds the
+    key hosts gives a load error that names the agent file. In a
+    project whose project root is the home folder, the shared file is read once
+    as the global file, so its models map and its child host options both load, and
+    a change set for the agent file is refused naming the shared file with
+    nothing written. A change set for a file that is a symbolic link into a
+    dotfiles folder changes the file the link resolves to, and the symbolic link
+    still names it afterwards.
 
     A model tier large with the child host claude, when only pi is a
     supported child host, loads, is not a routable tier, and a request for it
@@ -489,7 +545,9 @@ component AgentConfig {
     when the file exists and does not load for a reason other than missing
     starter entries, and refuse with an error that names both child hosts,
     writing nothing, when the file already holds a medium tier whose child host
-    differs from the child host that the caller gives.
+    differs from the child host that the caller gives, and refuse with an error
+    that names the shared file, writing nothing, when the agent file is a shared
+    file.
 
     Read the setup state of the merged configuration under a project root that
     its caller hands over, marking each model tier and each endpoints entry
@@ -502,6 +560,15 @@ component AgentConfig {
     scope only as that setup preview shows, or return the change set error, the
     stale preview error, the write error, each refused change or the
     load error and leave that file as it was.
+
+    Provide the *child host options* of the global file for a child host, as
+    written, to every caller that starts a child on that child host, also when
+    the project is off or lacks a starter entry, so that guided setup can list
+    and check a model that the child host options provide, and so that a child
+    run, a model listing and a model check all get the same child host options.
+    A guided setup is the one reader that reads the global file when the project
+    is off, and a load error of that read refuses its whole model listing or
+    model check.
 
     List the routable tier names, the medium tier among them, with the
     child host and the model each one runs for the general agent, apart from
@@ -581,9 +648,24 @@ component AgentConfig {
     and the agent file lists only what differs, so an entry of the agent file
     replaces the global entry whole and a model never keeps a thinking level
     chosen for another model. The agent file is read first so that a project
-    that switches itself off never depends on the global file, and the global
+    that switches itself off never depends on the global file, except for the
+    guided setup, which reads the global file apart so that it can list and
+    check models of a project that is off, and the global
     file holds no agent and no skill so that a file in a home folder cannot give
-    every repository a tool list or a skill folder. The built-in agents mean a
+    every repository a tool list or a skill folder. The child host options
+    are global-only, because they can name code that a child driver loads into
+    every child, so a repository cannot add one through its agent file. The
+    process environment is trusted, SUBZERO_GLOBAL_CONFIG included, because a
+    repository that sets HOME or PATH can already run its own program, so
+    guarding one variable would only look safe. The
+    child host options are one map for each child host under the key hosts, read
+    only by the child driver of that child host, so that AgentConfig and the
+    core never name a child host and a later child host can have options of
+    its own. A shared file is read as the
+    global file so that
+    one file never counts as both layers, and a change set for the agent file
+    is refused there so that a key meant for one project is not written into
+    the file of every project. The built-in agents mean a
     guided setup writes only the model tiers and limits that a person chose.
 
     A parallel limit keeps a fan-out on one model endpoint from flooding it.

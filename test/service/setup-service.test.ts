@@ -7,7 +7,7 @@ import type { ChildDriver, ModelCheckRequest, ModelCheckResult } from '../../src
 import { Kernel } from '../../src/kernel/kernel.js';
 import { PI_HOST } from '../../src/pi/driver.js';
 import { SetupService, SetupServiceError } from '../../src/service/setup-service.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useGlobalConfig } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, makeProject, manualPort, piKernel, tempDir, useDefaultGlobalConfig, useGlobalConfig } from '../helpers.js';
 
 const piModel = (provider: string, id: string) => ({
   id,
@@ -118,36 +118,35 @@ describe('SetupService pi extensions', () => {
     const root = tempDir();
     await new SetupService({ kernel: kernelWith({ listModels }), projectRoot: root }).models();
     expect(seen[0]).toMatchObject({ projectRoot: root });
-    expect((seen[0] as any).piExtensions ?? []).toEqual([]);
+    expect((seen[0] as any).childHostOptions ?? {}).toEqual({});
     const ext = extension();
-    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n`);
     await new SetupService({ kernel: kernelWith({ listModels }), projectRoot: root }).models();
-    expect(seen[1]).toEqual({ projectRoot: root, piExtensions: [ext] });
+    expect(seen[1]).toEqual({ projectRoot: root, childHostOptions: { extensions: [ext] } });
   });
 
   it('checks each model with the same extensions', async () => {
     const seen: ModelCheckRequest[] = [];
     const checkModel = async (request: ModelCheckRequest): Promise<ModelCheckResult> => (seen.push(request), { ok: true });
     const ext = extension();
-    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n`);
     const root = tempDir();
     await new SetupService({ kernel: kernelWith({ checkModel }), projectRoot: root }).check([
       { model: 'a/one', thinking: 'high' },
       { model: 'b/two', thinking: 'low' },
     ]);
-    expect(seen.map((r) => r.piExtensions)).toEqual([[ext], [ext]]);
+    expect(seen.map((r) => r.childHostOptions)).toEqual([{ extensions: [ext] }, { extensions: [ext] }]);
   });
 
-  it('refuses in one line, without calling the driver, when the global file names a missing extension or the project names pi', async () => {
+  it('refuses in one line, without calling the driver, when the global file holds a bad hosts value or the project holds hosts', async () => {
     const listModels = vi.fn(async () => []);
     const checkModel = vi.fn(async (): Promise<ModelCheckResult> => ({ ok: true }));
-    const gone = path.join(tempDir(), 'gone.ts');
-    const file = useGlobalConfig(`pi:\n  extensions:\n    - ${gone}\n`);
+    const file = useGlobalConfig('hosts: 5\n');
     const service = new SetupService({ kernel: kernelWith({ listModels, checkModel }), projectRoot: tempDir() });
     await expect(service.models()).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringContaining(file) });
-    await expect(service.check([{ model: 'a/one', thinking: 'high' }])).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringContaining(gone) });
+    await expect(service.check([{ model: 'a/one', thinking: 'high' }])).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringContaining(file) });
     useGlobalConfig(GLOBAL_MEDIUM_YAML);
-    const root = makeProject('pi:\n  extensions: []\n' + DEFAULT_YAML);
+    const root = makeProject('hosts:\n  pi:\n    extensions: []\n' + DEFAULT_YAML);
     const project = new SetupService({ kernel: kernelWith({ listModels, checkModel }), projectRoot: root });
     await expect(project.models()).rejects.toMatchObject({ code: 'invalid_config', message: expect.stringMatching(/global file only/) });
     expect(listModels).not.toHaveBeenCalled();
@@ -156,7 +155,7 @@ describe('SetupService pi extensions', () => {
 
   it('lists through the fake pi with -e after the isolation flags', async () => {
     const ext = extension();
-    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n`);
     const { fake, service } = fakePiService(tempDir(), { models: [piModel('reggiellm', 'office')] });
     expect((await service.models()).models.map((m) => m.name)).toEqual(['reggiellm/office']);
     const argv: string[] = fake.log()[0].argv;

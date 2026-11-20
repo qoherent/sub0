@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { onTestFinished } from 'vitest';
+import { onTestFinished, vi } from 'vitest';
 import { unavailableUsage, type ChildOutcome, type ChildPort, type StarterTools } from '../src/core/types.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { PI_HOST, PiDriver, type PiDriverOptions } from '../src/pi/driver.js';
@@ -25,6 +25,26 @@ export function useGlobalConfig(yaml: string): string {
     else process.env.SUBZERO_GLOBAL_CONFIG = previous;
   });
   return file;
+}
+
+/**
+ * Writes the global file at its default place, ~/.agents/subzero.yaml of a fresh home folder that
+ * os.homedir() answers until the test ends.
+ */
+export function useDefaultGlobalConfig(yaml: string): { home: string; file: string } {
+  const home = tempDir('subzero-home-');
+  const file = path.join(home, '.agents', 'subzero.yaml');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, yaml);
+  const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+  const previous = process.env.SUBZERO_GLOBAL_CONFIG;
+  process.env.SUBZERO_GLOBAL_CONFIG = '';
+  onTestFinished(() => {
+    homedir.mockRestore();
+    if (previous === undefined) delete process.env.SUBZERO_GLOBAL_CONFIG;
+    else process.env.SUBZERO_GLOBAL_CONFIG = previous;
+  });
+  return { home, file };
 }
 
 /** A global file with a medium tier on the host pi, for the tests of a project with no file of its own. */

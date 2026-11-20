@@ -6,7 +6,7 @@
 // driver of the host; the conversation itself lives in the shared guide text. Every
 // operation acts on the project root the service was made with, never the process's
 // working directory, and every result is plain JSON.
-import { isThinkingLevel, LoadError, loadPiExtensions, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
+import { isThinkingLevel, LoadError, loadChildHostOptions, THINKING_LEVELS, type ThinkingLevel } from '../config/agent-config.js';
 import {
   applyChanges,
   ChangeSetError,
@@ -24,7 +24,7 @@ import {
   type SetupState,
 } from '../config/agent-setup.js';
 import { LARGE_TIER_WARNING } from '../config/tier-words.js';
-import type { HostModel, ModelCheckResult } from '../core/types.js';
+import type { ChildHostOptions, HostModel, ModelCheckResult } from '../core/types.js';
 import type { Kernel } from '../kernel/kernel.js';
 
 export interface SetupServiceOptions {
@@ -194,10 +194,10 @@ export class SetupService {
     if (checkModel === undefined) {
       throw new SetupServiceError('no_model_check', `the child driver of the host "${host}" cannot check a model`);
     }
-    const piExtensions = this.piExtensions();
+    const childHostOptions = this.childHostOptions(host);
     const results: ModelCheckEntry[] = [];
     for (const { model, thinking } of models) {
-      const result = await checkModel({ model, thinking, projectRoot: this.projectRoot, piExtensions, ...(signal ? { signal } : {}) });
+      const result = await checkModel({ model, thinking, projectRoot: this.projectRoot, childHostOptions, ...(signal ? { signal } : {}) });
       results.push({ model, thinking, ...result });
     }
     return { host, results };
@@ -220,18 +220,18 @@ export class SetupService {
     if (listModels === undefined) {
       throw new SetupServiceError('no_model_listing', `the child driver of the host "${host}" cannot list its models`);
     }
-    const piExtensions = this.piExtensions();
+    const childHostOptions = this.childHostOptions(host);
     try {
-      return await listModels({ projectRoot: this.projectRoot, piExtensions });
+      return await listModels({ projectRoot: this.projectRoot, childHostOptions });
     } catch (err) {
       throw new SetupServiceError('listing_failed', err instanceof Error ? err.message : String(err));
     }
   }
 
-  /** The pi extensions of the merged config for the project: the one place the listing and the check read them. */
-  private piExtensions(): string[] {
+  /** The child host options of the global file for a host: the one place the listing and the check read them, also when the project is off. */
+  private childHostOptions(host: string): ChildHostOptions {
     try {
-      return loadPiExtensions(this.projectRoot);
+      return loadChildHostOptions(this.projectRoot, host);
     } catch (err) {
       if (err instanceof LoadError) throw new SetupServiceError('invalid_config', err.message);
       throw err;

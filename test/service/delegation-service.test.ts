@@ -6,7 +6,7 @@ import { unavailableUsage, type ChildPort, type StarterTools } from '../../src/c
 import { DelegationService, EmptyBriefError, renderBrief } from '../../src/service/delegation-service.js';
 import { TaskStore } from '../../src/store/task-store.js';
 import { Kernel } from '../../src/kernel/kernel.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until, useGlobalConfig } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until, useDefaultGlobalConfig, useGlobalConfig } from '../helpers.js';
 
 function service(root: string, port: ChildPort, starterTools?: () => StarterTools) {
   return new DelegationService({
@@ -265,19 +265,19 @@ describe('DelegationService', () => {
       },
     };
     await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
-    expect(requests[0].piExtensions ?? []).toEqual([]);
+    expect(requests[0].childHostOptions ?? {}).toEqual({});
     const ext = path.join(tempDir(), 'ext.ts');
     writeFileSync(ext, '');
-    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n${GLOBAL_MEDIUM_YAML}`);
     await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
-    expect(requests[1].piExtensions).toEqual([ext]);
+    expect(requests[1].childHostOptions).toEqual({ extensions: [ext] });
   });
 
   it('records the extensions in the launch spec of the task record on the fake pi', async () => {
     const root = makeProject();
     const ext = path.join(tempDir(), 'ext.ts');
     writeFileSync(ext, '');
-    useGlobalConfig(`pi:\n  extensions:\n    - ${ext}\n`);
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n`);
     const fake = fakePiEnv();
     const svc = new DelegationService({
       env: { SUBZERO_PROJECT_DIR: root },
