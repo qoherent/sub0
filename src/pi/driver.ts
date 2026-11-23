@@ -1,11 +1,12 @@
 // @sigil implements design/pi-driver.sigil PiDriver
 //
-// Starts an isolated pi 0.87 child in RPC mode, verifies that it loaded exactly the
-// declared skills, runs one brief to agent_settled, and stops it cleanly in every
-// exit case. The driver writes no task record: it hands the launch spec to its
-// caller in the run started event.
+// Starts an isolated pi 1.5.2 child in RPC mode, verifies that it loaded exactly the
+// declared skills, runs one prompt (the brief, or the follow-up message of a resumed
+// session) to agent_settled, takes steering messages into the running turn, and stops
+// the child cleanly in every exit case. The driver writes no task record: it hands the
+// launch spec to its caller in the run started event.
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -25,7 +26,9 @@ import {
   type ModelCheckFailure,
   type ModelCheckRequest,
   type ModelCheckResult,
+  SessionMissingError,
   type SessionUsage,
+  type SteerAnswer,
   type StarterTools,
   type Unavailable,
 } from '../core/types.js';
@@ -77,7 +80,6 @@ const QUIET_EVENTS = new Set([
   'turn_start',
   'message_start',
   'tool_execution_update',
-  'queue_update',
   'compaction_start',
   'compaction_end',
   'auto_retry_end',
@@ -96,7 +98,11 @@ export class PiDriver implements ChildDriver {
   private readonly probes = new Set<PiProbe>();
 
   /** The child port of this driver, which Kernel hands to a caller. */
-  readonly port: ChildPort = { start: (request, onEvent) => this.start(request, onEvent) };
+  readonly port: ChildPort = {
+    start: (request, onEvent) => this.start(request, onEvent),
+    resume: (request, message, onEvent) => this.resume(request, message, onEvent),
+    steers: true,
+  };
 
   constructor(private readonly options: PiDriverOptions = {}) {}
 
@@ -285,10 +291,28 @@ export class PiDriver implements ChildDriver {
   }
 
   start(request: ChildRunRequest, onEvent: (event: DomainEvent) => void): ChildRun {
-    const run = new PiChildRun(this, this.options, request, onEvent);
+    return this.begin(new PiChildRun(this, this.options, request, onEvent));
+  }
+
+  /**
+   * Starts pi on the existing session of the task, with the same flags as start: pi 1.5.2 reopens
+   * the session from --session-id and --session-dir, so --session is never added. The follow-up
+   * message is the prompt. Throws SessionMissingError, before anything starts, when the session
+   * file is gone.
+   */
+  resume(request: ChildRunRequest, message: string, onEvent: (event: DomainEvent) => void): ChildRun {
+    if (!sessionFileExists(request.sessionsFolder, request.taskId)) throw new SessionMissingError(request.taskId);
+    return this.begin(new PiChildRun(this, this.options, request, onEvent, message));
+  }
+
+  private begin(run: PiChildRun): ChildRun {
     this.live.add(run);
     const outcome = run.execute().finally(() => this.live.delete(run));
-    return { outcome, cancel: () => run.requestStop({ status: 'cancelled' }) };
+    return {
+      outcome,
+      cancel: () => run.requestStop({ status: 'cancelled' }),
+      steer: (message) => run.steer(message),
+    };
   }
 
   /** Last resort when this process must exit now: SIGKILL every live child run. */
@@ -455,6 +479,23 @@ function supportedThinkingLevels(reasoning: boolean, thinkingLevelMap: unknown):
   });
 }
 
+/** True when the sessions folder holds the session file of the task, named as TaskStore finds it. */
+function sessionFileExists(sessionsFolder: string, taskId: string): boolean {
+  try {
+    return readdirSync(sessionsFolder).some((f) => f.endsWith(`_${taskId}.jsonl`) || f === `${taskId}.jsonl`);
+  } catch {
+    return false;
+  }
+}
+
+/** The text of one entry of pi's steering queue, a string or a message object. */
+function queuedText(entry: unknown): string {
+  if (typeof entry === 'string') return entry;
+  const o = entry as { text?: unknown; message?: unknown; content?: unknown } | null;
+  for (const value of [o?.text, o?.message, o?.content]) if (typeof value === 'string') return value;
+  return '';
+}
+
 function seconds(ms: number): string {
   return `${ms / 1000}s`;
 }
@@ -492,12 +533,25 @@ class PiChildRun {
   private sessionFile: string | undefined;
   private timer: NodeJS.Timeout | null = null;
   private readonly log: (message: string) => void;
+  /** The usage baseline of a resumed run: pi's session stats before the prompt. Null when pi gave none. */
+  private baseline: any | null | undefined;
+  private promptSent = false;
+  private triggerPromptSent!: () => void;
+  private readonly promptReturned = new Promise<void>((resolve) => (this.triggerPromptSent = resolve));
+  private triggerEnded!: () => void;
+  private readonly ended = new Promise<void>((resolve) => (this.triggerEnded = resolve));
+  /** Steering messages that pi accepted before agent_settled, with the steering queue pi last reported. */
+  private readonly deliveredSteers: string[] = [];
+  private steeringQueue: string[] = [];
+  private unreadSteers: string[] = [];
 
+  /** `resumeMessage` is the follow-up message of a resumed session; a fresh run sends the brief. */
   constructor(
     private readonly driver: PiDriver,
     private readonly options: PiDriverOptions,
     private readonly request: ChildRunRequest,
     private readonly emit: (event: DomainEvent) => void,
+    private readonly resumeMessage?: string,
   ) {
     this.log = options.log ?? ((m) => process.stderr.write(`subzero: ${m}\n`));
   }
@@ -509,11 +563,63 @@ class PiChildRun {
     this.triggerStop();
   }
 
+  /**
+   * Steering: send a steer to pi. Delivered when pi accepts it (queued or handled) before
+   * agent_settled with no stop pending; settled once agent_settled was seen, sending nothing;
+   * stopping while a cancel or timeout is in progress, or when the run has ended. Each delivered
+   * steer restarts the timeout.
+   */
+  async steer(message: string): Promise<SteerAnswer> {
+    const early = this.steerAnswerNow();
+    if (early !== null) return early;
+    // A steer before the prompt went out waits for it, since pi has no turn to steer yet.
+    if (!this.promptSent) {
+      await Promise.race([this.promptReturned, this.stopped, this.ended]);
+      const next = this.steerAnswerNow();
+      if (next !== null) return next;
+      if (!this.promptSent) return 'stopping';
+    }
+    let accepted = false;
+    const answered = await this.race(
+      // The hook runs when the response is dispatched, before any later event of the same chunk.
+      this.client!.send({ type: 'steer', message }, (response) => {
+        accepted = response.success && !this.settledSeen && this.stop === null && !this.finished;
+        if (accepted) this.deliveredSteers.push(message);
+      }),
+    );
+    if (answered.kind !== 'value') return 'stopping';
+    if (accepted) {
+      this.armTimer();
+      return 'delivered';
+    }
+    if (this.settledSeen) return 'settled';
+    if (!answered.value.success) this.log(`${this.request.taskId}: pi refused a steer: ${bounded(answered.value.error ?? 'no reason given')}`);
+    return 'stopping';
+  }
+
+  private steerAnswerNow(): SteerAnswer | null {
+    if (this.settledSeen) return 'settled';
+    if (this.stop !== null || this.finished) return 'stopping';
+    return null;
+  }
+
+  /** (Re)starts the timeout: the full time, from now, until a stop or the end of the run. */
+  private armTimer(): void {
+    if (this.timer !== null) clearTimeout(this.timer);
+    if (this.stop !== null || this.finished) return;
+    const { agent } = this.request;
+    this.timer = setTimeout(
+      () => this.requestStop({ status: 'failed', failureKind: 'timeout', message: `timed out after ${agent.timeout}s` }),
+      agent.timeout * 1000,
+    );
+  }
+
   async execute(): Promise<ChildOutcome> {
     try {
       return await this.main();
     } finally {
       this.finished = true;
+      this.triggerEnded();
       if (this.timer !== null) clearTimeout(this.timer);
       this.signalGroup('SIGKILL'); // no grandchild of the group may remain
     }
@@ -560,11 +666,8 @@ class PiChildRun {
     if (this.stop !== null) return this.stoppedBeforeSpawn();
 
     this.spawnChild(command);
-    // The timeout starts at spawn and covers skill verification and the turn.
-    this.timer = setTimeout(
-      () => this.requestStop({ status: 'failed', failureKind: 'timeout', message: `timed out after ${agent.timeout}s` }),
-      agent.timeout * 1000,
-    );
+    // The timeout starts at spawn and covers skill verification and the turn; a delivered steer restarts it.
+    this.armTimer();
 
     const state = await this.race(this.client!.send({ type: 'get_state' }));
     if (state.kind !== 'value') return this.interrupted(state.kind);
@@ -581,7 +684,22 @@ class PiChildRun {
     }
     this.emit({ kind: 'skills_verified', skills: agent.skills.map((s) => s.name) });
 
-    const prompt = await this.race(this.client!.send({ type: 'prompt', message: brief }));
+    if (this.resumeMessage !== undefined) {
+      // pi reports tokens and cost across the whole session; the turn's usage is the difference from here.
+      const stats = await this.race(this.client!.send({ type: 'get_session_stats' }));
+      if (stats.kind !== 'value') return this.interrupted(stats.kind);
+      this.baseline = stats.value.success ? (stats.value.data ?? null) : null;
+    }
+
+    const prompt = await this.race(
+      this.client!.send({ type: 'prompt', message: this.resumeMessage ?? brief }, (response) => {
+        if (!response.success) return;
+        // In order with pi's events: the first of them cannot be reported before this.
+        this.promptSent = true;
+        this.emit({ kind: 'prompt_sent' });
+        this.triggerPromptSent();
+      }),
+    );
     if (prompt.kind !== 'value') return this.interrupted(prompt.kind);
     if (!prompt.value.success) {
       await this.killNow();
@@ -710,8 +828,12 @@ class PiChildRun {
         // Only agent_settled settles a run; agent_end may still be followed by retries.
         if (this.stop === null) {
           this.settledSeen = true;
+          this.unreadSteers = this.queuedDeliveries();
           this.triggerSettled();
         }
+        return;
+      case 'queue_update':
+        this.steeringQueue = Array.isArray(event.steering) ? event.steering.map(queuedText) : [];
         return;
       case 'extension_ui_request':
         // No dialog can be answered from here; a blocked dialog would hang the run.
@@ -733,9 +855,29 @@ class PiChildRun {
 
   // ---- endings --------------------------------------------------------------
 
+  /**
+   * The steers this run delivered that pi still holds in its steering queue, in queue order. A steer
+   * pi answered after it settled is not here: its caller was told it settled.
+   */
+  private queuedDeliveries(): string[] {
+    const pending = [...this.deliveredSteers];
+    const unread: string[] = [];
+    for (const queued of this.steeringQueue) {
+      const at = pending.indexOf(queued);
+      if (at === -1) continue;
+      pending.splice(at, 1);
+      unread.push(queued);
+    }
+    return unread;
+  }
+
   private settledOutcome(text: string | null, stats: any): ChildOutcome {
-    const usage = usageFromStats(stats);
-    const base = { usage, ...(this.sessionFile !== undefined ? { sessionFile: this.sessionFile } : {}) };
+    const usage = usageFromStats(stats, this.baseline);
+    const base = {
+      usage,
+      ...(this.sessionFile !== undefined ? { sessionFile: this.sessionFile } : {}),
+      ...(this.unreadSteers.length > 0 ? { unreadSteers: this.unreadSteers } : {}),
+    };
     const message = this.lastAssistant;
     if (message === null) {
       return { ...base, lastAssistantText: text, status: 'failed', failureKind: 'error', message: 'no assistant message' };
@@ -797,7 +939,7 @@ class PiChildRun {
     await this.emitRunExited();
     return {
       lastAssistantText: text,
-      usage: stats ? usageFromStats(stats) : unavailableUsage('pi did not report usage before it was stopped'),
+      usage: stats ? usageFromStats(stats, this.baseline) : unavailableUsage('pi did not report usage before it was stopped'),
       ...(this.sessionFile !== undefined ? { sessionFile: this.sessionFile } : {}),
       ...(stop.status === 'failed' ? { status: 'failed', failureKind: stop.failureKind, message: stop.message } : { status: 'cancelled' }),
     };
@@ -1024,8 +1166,30 @@ function measure(value: unknown, reason: string): Measure {
   return typeof value === 'number' && Number.isFinite(value) ? value : { unavailable: reason };
 }
 
-/** Fill the session usage from get_session_stats; what pi does not report stays unavailable. */
-export function usageFromStats(stats: any): SessionUsage {
+/**
+ * Fill the session usage from get_session_stats; what pi does not report stays unavailable.
+ * pi counts tokens and cost across the whole session, so a resumed run passes the stats it read
+ * before its prompt (`baseline`, null when pi gave none) and reports the difference; context use
+ * is reported as read. Without a baseline the stats are the usage of the run.
+ */
+export function usageFromStats(stats: any, baseline?: any | null): SessionUsage {
+  const usage = readUsage(stats);
+  if (baseline === undefined || stats === null || typeof stats !== 'object') return usage;
+  const before = baseline === null ? null : readUsage(baseline);
+  const turn = (now: Measure, was: Measure | undefined): Measure =>
+    typeof now === 'number' && typeof was === 'number' ? now - was : { unavailable: 'pi did not report the usage before this turn' };
+  return {
+    ...usage,
+    inputTokens: turn(usage.inputTokens, before?.inputTokens),
+    outputTokens: turn(usage.outputTokens, before?.outputTokens),
+    cacheReadTokens: turn(usage.cacheReadTokens, before?.cacheReadTokens),
+    cacheWriteTokens: turn(usage.cacheWriteTokens, before?.cacheWriteTokens),
+    totalTokens: turn(usage.totalTokens, before?.totalTokens),
+    cost: turn(usage.cost, before?.cost),
+  };
+}
+
+function readUsage(stats: any): SessionUsage {
   if (stats === null || typeof stats !== 'object') return unavailableUsage('pi did not report session stats');
   const tokens = stats.tokens ?? {};
   const context = stats.contextUsage ?? {};

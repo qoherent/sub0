@@ -217,7 +217,7 @@ describe('ClaudeMcpServer', () => {
     const second = textOf(await call('delegate', { agent: 'other', brief: 'two', wait: false }));
     const third = textOf(await call('delegate', { agent: 'other', brief: 'three', wait: false }));
     expect(first).toMatch(/^task: sz-[a-z2-7]{6} · running, started \d{4}-[\d\-T:.Z]+ \(\d+s ago\)/);
-    expect(second).toContain("queued, not launched yet: no child is running; it starts when endpoint local has room (place 1 in this session's queue, waiting ");
+    expect(second).toContain("queued, not launched yet: no child is running; it starts when model local/qwen has room (place 1 in this session's queue, waiting ");
     expect(third).toContain("place 2 in this session's queue");
     for (const reply of [second, third]) expect(reply).not.toMatch(/running, started|still running|\bstarted\b/);
     expect(started.length).toBe(1);
@@ -264,7 +264,7 @@ describe('ClaudeMcpServer', () => {
     await Promise.all([server.connect(a), client.connect(b)]);
     const text = (r: any) => r.content.map((c: any) => c.text).join('\n') as string;
     const shown = text(await client.callTool({ name: 'tasks', arguments: { task: second } }, CallToolResultSchema));
-    expect(shown).toMatch(/queued, not launched yet: .*endpoint local .*waiting \d+s/);
+    expect(shown).toMatch(/queued, not launched yet: .*model local\/qwen .*waiting \d+s/);
     expect(shown).not.toMatch(/place \d|this session's queue|running, started|still running|\bstarted\b/);
     expect(shown).toMatch(/another process/);
     const listing = text(await client.callTool({ name: 'tasks', arguments: {} }, CallToolResultSchema));
@@ -295,6 +295,7 @@ describe('ClaudeMcpServer', () => {
       status: i % 20 === 0 ? 'running' : 'completed',
       ...(i % 20 === 0 ? { startedAt: new Date(2026, 0, 1, 0, i, 5).toISOString() } : {}),
       createdAt: new Date(2026, 0, 1, 0, i).toISOString(),
+      enqueuedAt: new Date(2026, 0, 1, 0, i).toISOString(),
       updatedAt: '',
     }));
     const lines = formatListing(views, true).split('\n');
@@ -312,7 +313,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(reply.isError).not.toBe(true);
     expect(textOf(reply)).toMatch(/general:small.*status: completed/);
     const argv = fake.log()[0].argv;
-    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen-small');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen');
   });
 
   it('passes an unmatched tier value back to Claude without creating a task', async () => {
@@ -462,11 +463,11 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   });
 
   it('keeps queued replies for tiered tasks: the second general:medium task is queued, never started', async () => {
-    const { call, textOf, started } = await connectManual(TIERED_YAML.replace('endpoints:\n', 'endpoints:\n  r9700:\n    parallel: 1\n'));
+    const { call, textOf, started } = await connectManual(TIERED_YAML.replace('  parallel:\n', '  parallel:\n    r9700/Qwen3.8: 1\n'));
     const first = textOf(await call('delegate', { brief: 'one', tier: 'medium', wait: false }));
     const second = textOf(await call('delegate', { brief: 'two', tier: 'tier:medium', wait: false }));
     expect(first).toMatch(/running, started/);
-    expect(second).toContain("queued, not launched yet: no child is running; it starts when endpoint r9700 has room (place 1 in this session's queue");
+    expect(second).toContain("queued, not launched yet: no child is running; it starts when model r9700/Qwen3.8 has room (place 1 in this session's queue");
     expect(second).not.toMatch(/running, started|\bstarted\b/);
     const listing = textOf(await call('tasks', {}));
     expect(listing.split('\n').find((l) => l.includes(taskIdOf(second)))).toMatch(/general:medium · queued, not launched yet/);

@@ -58,6 +58,16 @@ export class Kernel {
     return this.driver(host).port;
   }
 
+  /** Whether the driver of the host offers turn steering; false when it offers none. */
+  turnSteering(host: string): boolean {
+    return this.driver(host).port.steers === true;
+  }
+
+  /** Undefined when the driver of the host cannot resume a child session; the caller refuses naming the host. */
+  sessionResume(host: string): ChildPort['resume'] | undefined {
+    return this.driver(host).port.resume;
+  }
+
   /** Undefined when the driver of the host offers none; the caller refuses naming the host. */
   attachCommand(host: string): AttachCommand | undefined {
     return this.driver(host).attachCommand;

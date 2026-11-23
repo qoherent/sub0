@@ -106,7 +106,30 @@ describe('DelegationService', () => {
     expect(renderBrief({ briefText: 'Do X.', files: ['a.ts'] })).not.toMatch(/Reply size/);
   });
 
-  it('keeps the second of two runs on a limit-1 endpoint Pending until the first ends, in each way', async () => {
+  it('covers R17: tiers that name one model share its limit, and a model on the same endpoint with no entry does not', async () => {
+    const root = makeProject(DEFAULT_YAML.replace('    cloud: { host: pi, model: cloud/model, thinking: low }', '    cloud: { host: pi, model: local/qwen-free, thinking: low }'));
+    const { port, started } = manualPort();
+    const svc = service(root, port);
+    await svc.delegate({ agent: 'helper', briefText: 'medium' }, { wait: false });
+    const sameModel = await svc.delegate({ agent: 'other', briefText: 'small tier, same model' }, { wait: false });
+    const otherModel = await svc.delegate({ agent: 'free', briefText: 'same endpoint, other model' }, { wait: false });
+    expect(sameModel).toMatchObject({ kind: 'queued', model: 'local/qwen', place: 1 });
+    expect(otherModel).toMatchObject({ kind: 'started' });
+    expect(started.length).toBe(2);
+  });
+
+  it('reads the limit again at each admission, so a limit raised between two delegations applies to the second', async () => {
+    const root = makeProject();
+    const { port, started } = manualPort();
+    const svc = service(root, port);
+    await svc.delegate({ agent: 'helper', briefText: 'one' }, { wait: false });
+    writeFileSync(path.join(root, '.agents', 'subzero.yaml'), DEFAULT_YAML.replace('    local/qwen: 1', '    local/qwen: 2'));
+    const second = await svc.delegate({ agent: 'other', briefText: 'two' }, { wait: false });
+    expect(second).toMatchObject({ kind: 'started' });
+    expect(started.length).toBe(2);
+  });
+
+  it('keeps the second of two runs on a limit-1 model Pending until the first ends, in each way', async () => {
     for (const end of ['settle', 'fail', 'cancel'] as const) {
       const { port, started } = manualPort();
       const svc = service(makeProject(), port);
@@ -145,7 +168,7 @@ describe('DelegationService', () => {
     expect(started.length).toBe(1);
   });
 
-  it('runs agents on different endpoints, or on one with no entry, at once', async () => {
+  it('runs agents on different models, or on one with no limit, at once', async () => {
     const { port, started } = manualPort();
     const svc = service(makeProject(), port);
     await svc.delegate({ agent: 'helper', briefText: 'one' }, { wait: false });
@@ -197,7 +220,7 @@ describe('DelegationService', () => {
     const here = service(root, manualPort().port);
     const before = indexLines(root).length;
     expect(await here.cancel(taskId)).toMatchObject({ kind: 'other_process', taskId });
-    expect(await here.collect(taskId)).toMatchObject({ kind: 'other_process', taskId, endpoint: 'cloud' });
+    expect(await here.collect(taskId)).toMatchObject({ kind: 'other_process', taskId, model: 'cloud/model' });
     expect(indexLines(root).length).toBe(before);
     expect(here.store.readTask(taskId)!.status).toBe('running');
   });
@@ -306,7 +329,7 @@ describe('DelegationService', () => {
     const frozen: any[] = [];
     const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) });
     await svc.delegate({ agent: 'other', briefText: 'go' }, { wait: false });
-    expect(frozen[0]).toMatchObject({ name: 'other', host: 'pi', model: 'local/qwen-small', thinking: 'low', endpoint: 'local', parallel: 1 });
+    expect(frozen[0]).toMatchObject({ name: 'other', host: 'pi', model: 'local/qwen', thinking: 'low', parallel: 1 });
   });
 
   it('runs general when no agent is named, and names the host when its driver has no starter tools for a missing general entry', async () => {
@@ -344,8 +367,8 @@ describe('DelegationService queued and started status', () => {
     const second = await svc.delegate({ agent: 'other', briefText: 'two' }, { wait: false });
     const third = await svc.delegate({ agent: 'other', briefText: 'three' }, { wait: false });
     expect(first).toMatchObject({ kind: 'started', startedAt: expect.any(String) });
-    expect(second).toMatchObject({ kind: 'queued', endpoint: 'local', place: 1, enqueuedAt: expect.any(String) });
-    expect(third).toMatchObject({ kind: 'queued', endpoint: 'local', place: 2 });
+    expect(second).toMatchObject({ kind: 'queued', model: 'local/qwen', place: 1, enqueuedAt: expect.any(String) });
+    expect(third).toMatchObject({ kind: 'queued', model: 'local/qwen', place: 2 });
     expect(started.length).toBe(1);
     // A queued reply never carries a start time.
     expect(second).not.toHaveProperty('startedAt');
@@ -375,7 +398,7 @@ describe('DelegationService queued and started status', () => {
     const byAgent = new Map(views.map((v) => [v.agent, v]));
     expect(byAgent.get('helper')).toMatchObject({ status: 'running', startedAt: expect.any(String) });
     expect(byAgent.get('helper')!.queuePlace).toBeUndefined();
-    expect(byAgent.get('other')).toMatchObject({ status: 'running', queuePlace: 1, endpoint: 'local' });
+    expect(byAgent.get('other')).toMatchObject({ status: 'running', queuePlace: 1, model: 'local/qwen' });
     expect(byAgent.get('other')!.startedAt).toBeUndefined();
   });
 
@@ -415,9 +438,9 @@ describe('DelegationService queued and started status', () => {
     const second = (await owner.delegate({ agent: 'other', briefText: 'two' }, { wait: false })) as any;
     const here = service(root, manualPort().port);
     const firstReply = (await here.collect(first.taskId)) as any;
-    expect(firstReply).toMatchObject({ kind: 'other_process', endpoint: 'local', startedAt: first.startedAt });
+    expect(firstReply).toMatchObject({ kind: 'other_process', model: 'local/qwen', startedAt: first.startedAt });
     const secondReply = (await here.collect(second.taskId)) as any;
-    expect(secondReply).toMatchObject({ kind: 'other_process', endpoint: 'local', enqueuedAt: second.enqueuedAt });
+    expect(secondReply).toMatchObject({ kind: 'other_process', model: 'local/qwen', enqueuedAt: second.enqueuedAt });
     expect(secondReply.startedAt).toBeUndefined();
     const views = new Map((await here.list()).map((v) => [v.taskId, v]));
     expect(views.get(first.taskId)).toMatchObject({ status: 'running', startedAt: first.startedAt });
@@ -429,7 +452,7 @@ describe('DelegationService queued and started status', () => {
   it('marks the queued task of a dead process abandoned, because its stored status is running', async () => {
     const root = makeProject();
     const dead = new TaskStore(root, { owner: { pid: 999_999, startTime: 'then' } });
-    dead.createTaskRecord({ taskId: 'sz-qdeadd', agent: { name: 'other' } as never, brief: 'b', endpoint: 'local', createdAt: new Date().toISOString() });
+    dead.createTaskRecord({ taskId: 'sz-qdeadd', agent: { name: 'other' } as never, brief: 'b', model: 'local/qwen', createdAt: new Date().toISOString() });
     const svc = service(root, manualPort().port);
     expect(await svc.collect('sz-qdeadd')).toEqual({ kind: 'abandoned', taskId: 'sz-qdeadd' });
   });
@@ -530,7 +553,7 @@ describe('DelegationService tiers, general and fallback', () => {
   });
 
   it('fills a missing general from the starter tools of the driver, for no agent, general and a tier alike', async () => {
-    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '').replace('endpoints:\n  local:\n    parallel: 1\n', ''));
+    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '').replace('  parallel:\n    local/qwen: 1\n', ''));
     const frozen: any[] = [];
     const { port } = manualPort();
     const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
@@ -580,12 +603,12 @@ describe('DelegationService tiers, general and fallback', () => {
   });
 
   it('keeps the queued scenarios for tiered tasks: the second general:medium task waits at place 1, never started', async () => {
-    const root = makeProject(TIERED_YAML.replace('endpoints:\n', 'endpoints:\n  r9700:\n    parallel: 1\n'));
+    const root = makeProject(TIERED_YAML.replace('  parallel:\n', '  parallel:\n    r9700/Qwen3.8: 1\n'));
     const { svc, started } = recording(root);
     const first = await svc.delegate({ briefText: 'one', tier: 'medium' }, { wait: false });
     const second = await svc.delegate({ briefText: 'two', tier: 'medium' }, { wait: false });
     expect(first).toMatchObject({ kind: 'started' });
-    expect(second).toMatchObject({ kind: 'queued', endpoint: 'r9700', place: 1 });
+    expect(second).toMatchObject({ kind: 'queued', model: 'r9700/Qwen3.8', place: 1 });
     expect(started.length).toBe(1);
     expect(await svc.list()).toEqual(
       expect.arrayContaining([expect.objectContaining({ agent: 'general:medium', queuePlace: 1 })]),

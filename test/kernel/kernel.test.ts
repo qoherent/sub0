@@ -27,6 +27,23 @@ describe('Kernel', () => {
     expect(kernel.childPort('pi')).toBe(pi.port);
   });
 
+  it('offers turn steering and session resume as the registered driver does, and neither when it offers none', () => {
+    const kernel = new Kernel();
+    const plain = driver();
+    const resume: ChildPort['resume'] = () => {
+      throw new Error('a test driver resumes no child');
+    };
+    const full = driver();
+    full.port = { ...full.port, steers: true, resume };
+    kernel.registerChildDriver('plain', plain);
+    kernel.registerChildDriver('full', full);
+    expect(kernel.turnSteering('plain')).toBe(false);
+    expect(kernel.sessionResume('plain')).toBeUndefined();
+    expect(kernel.turnSteering('full')).toBe(true);
+    expect(kernel.sessionResume('full')).toBe(resume);
+    expect(() => kernel.turnSteering('absent')).toThrow(UnsupportedHostError);
+  });
+
   it('refuses the child port of a host with no driver, naming the host and every supported host, and starts no child', () => {
     const kernel = new Kernel();
     const pi = driver();

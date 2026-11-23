@@ -1,6 +1,6 @@
 // @sigil implements design/pi-driver.sigil PiDriver (pi RPC client)
 //
-// Our own client for pi 0.87 RPC mode. Each command gets an id and its response is
+// Our own client for pi 1.5.2 RPC mode. Each command gets an id and its response is
 // matched by that id. There is no response timeout here: the driver's own timeout
 // and termination decide how long a child run may take.
 import type { Readable, Writable } from 'node:stream';
@@ -34,7 +34,7 @@ export interface PiRpcClientOptions {
 
 export class PiRpcClient {
   private nextId = 1;
-  private readonly waiting = new Map<string, { resolve: (r: PiResponse) => void; reject: (e: Error) => void }>();
+  private readonly waiting = new Map<string, { resolve: (r: PiResponse) => void; reject: (e: Error) => void; onResponse?: (r: PiResponse) => void }>();
   private closed = false;
   private markLost!: () => void;
   /** Resolves when the pipe to pi is lost, whether or not a command is waiting. */
@@ -70,17 +70,23 @@ export class PiRpcClient {
     if (message?.type === 'response' && typeof message.id === 'string' && this.waiting.has(message.id)) {
       const entry = this.waiting.get(message.id)!;
       this.waiting.delete(message.id);
+      // Runs now, before the next record of the same chunk is dispatched; a resolved promise runs later.
+      entry.onResponse?.(message as PiResponse);
       entry.resolve(message as PiResponse);
       return;
     }
     this.options.onEvent(message as PiEvent);
   }
 
-  send(command: { type: string; [key: string]: unknown }): Promise<PiResponse> {
+  /**
+   * `onResponse`, when given, is called synchronously as the response is dispatched, so it sees
+   * the state of the stream exactly at the response (pi's responses and events share one stdout).
+   */
+  send(command: { type: string; [key: string]: unknown }, onResponse?: (response: PiResponse) => void): Promise<PiResponse> {
     if (this.closed) return Promise.reject(new RpcClosedError());
     const id = `sz-${this.nextId++}`;
     return new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
+      this.waiting.set(id, { resolve, reject, ...(onResponse ? { onResponse } : {}) });
       try {
         this.stdin.write(JSON.stringify({ ...command, id }) + '\n');
       } catch {

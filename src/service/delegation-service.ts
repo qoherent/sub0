@@ -55,13 +55,14 @@ export interface DelegateOptions {
 /**
  * Queued is a view derived on each reply from the live task and the task record,
  * never a stored task status: a Pending child run of this process, with its place
- * in this process's queue of the endpoint, or a task of another process that has
+ * in this process's queue of its model, or a task of another process that has
  * no start time, with no place.
  */
 export interface QueuedStatus {
   taskId: string;
-  endpoint: string;
-  /** Counted from 1 among the Pending child runs of the endpoint in this process. */
+  /** The full model id whose limit holds the task back. */
+  model: string;
+  /** Counted from 1 among the Pending child runs of the model in this process. */
   place: number;
   /** The time the task was created. */
   enqueuedAt: string;
@@ -81,7 +82,7 @@ export type CollectReply =
   | { kind: 'running'; taskId: string; startedAt: string }
   | ({ kind: 'queued' } & QueuedStatus)
   | { kind: 'abandoned'; taskId: string }
-  | { kind: 'other_process'; taskId: string; endpoint?: string; enqueuedAt: string; startedAt?: string }
+  | { kind: 'other_process'; taskId: string; model?: string; enqueuedAt: string; startedAt?: string }
   | { kind: 'not_found'; taskId: string };
 
 /** A task as a listing shows it: its record, and its queue place while it is Pending in this process. */
@@ -120,19 +121,19 @@ export function renderBrief(delegation: Pick<Delegation, 'briefText' | 'files' |
 }
 
 /**
- * Keeps a child run Pending while its endpoint has reached its parallel limit, and
+ * Keeps a child run Pending while its model has reached its parallel limit, and
  * releases it first come first served. Counts only the Starting and Live runs of
  * this process; nothing is locked or signalled across processes.
  */
-export class EndpointLimiter {
+export class ModelLimiter {
   private readonly active = new Map<string, number>();
   private readonly queues = new Map<string, Task[]>();
   private readonly limits = new Map<string, number | null>();
 
-  admit(task: Task, endpoint: string, limit: number | null): void {
-    this.limits.set(endpoint, limit);
-    const queue = this.queues.get(endpoint) ?? [];
-    this.queues.set(endpoint, queue);
+  admit(task: Task, model: string, limit: number | null): void {
+    this.limits.set(model, limit);
+    const queue = this.queues.get(model) ?? [];
+    this.queues.set(model, queue);
     queue.push(task);
     // A cancelled Pending run leaves the queue and never starts.
     const stop = task.onStateChange((state) => {
@@ -141,36 +142,36 @@ export class EndpointLimiter {
         stop();
       }
     });
-    this.drain(endpoint);
+    this.drain(model);
   }
 
-  /** The queue place of a Pending task among the Pending runs of its endpoint, from 1; null when it is not queued here. */
+  /** The queue place of a Pending task among the Pending runs of its model, from 1; null when it is not queued here. */
   place(task: Task): number | null {
     if (task.state !== 'Pending') return null;
-    const pending = (this.queues.get(task.agent.endpoint) ?? []).filter((t) => t.state === 'Pending');
+    const pending = (this.queues.get(task.agent.model) ?? []).filter((t) => t.state === 'Pending');
     const index = pending.indexOf(task);
     return index < 0 ? null : index + 1;
   }
 
-  activeCount(endpoint: string): number {
-    return this.active.get(endpoint) ?? 0;
+  activeCount(model: string): number {
+    return this.active.get(model) ?? 0;
   }
 
-  private drain(endpoint: string): void {
-    const queue = this.queues.get(endpoint)!;
-    const limit = this.limits.get(endpoint) ?? null;
-    while (queue.length > 0 && (limit === null || this.activeCount(endpoint) < limit)) {
+  private drain(model: string): void {
+    const queue = this.queues.get(model)!;
+    const limit = this.limits.get(model) ?? null;
+    while (queue.length > 0 && (limit === null || this.activeCount(model) < limit)) {
       const task = queue.shift()!;
       if (task.state !== 'Pending') continue;
-      this.active.set(endpoint, this.activeCount(endpoint) + 1);
+      this.active.set(model, this.activeCount(model) + 1);
       let counted = true;
       // Whatever way the run ends, it stops being counted at once.
       const stop = task.onStateChange((state) => {
         if (counted && ENDED_STATES.has(state)) {
           counted = false;
           stop();
-          this.active.set(endpoint, this.activeCount(endpoint) - 1);
-          this.drain(endpoint);
+          this.active.set(model, this.activeCount(model) - 1);
+          this.drain(model);
         }
       });
       task.release();
@@ -184,7 +185,7 @@ export class DelegationService {
   private readonly registry = new Map<string, Task>();
   private readonly taskTiers = new Map<string, string>();
   private readonly sessions = new Map<string, Set<string>>();
-  private readonly limiter = new EndpointLimiter();
+  private readonly limiter = new ModelLimiter();
   private readonly warn: (message: string) => void;
 
   constructor(private readonly options: DelegationServiceOptions) {
@@ -274,7 +275,7 @@ export class DelegationService {
       else signal.addEventListener('abort', onAbort, { once: true });
       void task.result.finally(() => signal.removeEventListener('abort', onAbort));
     }
-    this.limiter.admit(task, agent.endpoint, agent.parallel);
+    this.limiter.admit(task, agent.model, agent.parallel);
     options.onTask?.(task.taskId);
     // Only a run the limiter kept back is reported as Pending.
     if (task.state === 'Pending') options.onState?.('Pending');
@@ -321,7 +322,7 @@ export class DelegationService {
     // A task with no start time has not been released, so it is still in line.
     if (task.startedAt === null) {
       const place = this.limiter.place(task) ?? 1;
-      return { kind: 'queued', taskId: task.taskId, endpoint: task.agent.endpoint, place, enqueuedAt: task.enqueuedAt };
+      return { kind: 'queued', taskId: task.taskId, model: task.agent.model, place, enqueuedAt: task.enqueuedAt };
     }
     return { kind: 'started', taskId: task.taskId, startedAt: task.startedAt };
   }
@@ -431,7 +432,7 @@ export class DelegationService {
     return {
       kind: 'other_process',
       taskId,
-      ...(record.endpoint !== undefined ? { endpoint: record.endpoint } : {}),
+      ...(record.model !== undefined ? { model: record.model } : {}),
       enqueuedAt: record.createdAt,
       ...(record.startedAt !== undefined ? { startedAt: record.startedAt } : {}),
     };

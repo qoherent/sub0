@@ -72,7 +72,7 @@ describe('pi extension requests', () => {
     const collected = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
     expect(collected.content[0]).toMatchObject({ text: expect.stringMatching(/status: completed/) });
     const argv = child.log()[0].argv as string[];
-    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen-small');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen');
     const listed = await fake.tools.get('subzero_tasks')!.execute('tasks', {}, undefined, undefined, fake.context as any);
     expect(listed.content[0]).toMatchObject({ text: expect.stringContaining(taskId!) });
   });
@@ -127,7 +127,7 @@ describe('pi extension requests', () => {
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel, warn: () => {} }));
     await fake.emit('session_start');
     await fake.tools.get('subagent')!.execute('call', { task: 'x', agent: 'reviewer' }, undefined, undefined, fake.context as any);
-    expect(models).toEqual(['local/qwen-small']);
+    expect(models).toEqual(['local/qwen']);
     started[0]!.settle();
   });
 
@@ -184,8 +184,8 @@ describe('pi extension requests', () => {
     expect(reply.content[0]).toMatchObject({ text: expect.stringMatching(/status: cancelled/) });
   });
 
-  it('queues simultaneous calls at the endpoint limit', async () => {
-    const root = makeProject(TIERED_YAML.replace('endpoints:\n', 'endpoints:\n  r9700:\n    parallel: 2\n'));
+  it('queues simultaneous calls at the model limit', async () => {
+    const root = makeProject(TIERED_YAML.replace('  parallel:\n', '  parallel:\n    r9700/Qwen3.8: 2\n'));
     const { port, started } = manualPort();
     const fake = fakePi(root);
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));

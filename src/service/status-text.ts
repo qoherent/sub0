@@ -20,8 +20,8 @@ export function describeTaskReply(reply: DelegateReply | CollectReply, view: { a
   const line = reply.kind === 'started' || reply.kind === 'running'
     ? formatStatusLine({ state: 'running', startedAt: reply.startedAt }, now)
     : reply.kind === 'queued'
-      ? formatStatusLine({ state: 'queued', endpoint: reply.endpoint, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt }, now)
-      : formatStatusLine(statusFacts({ ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}), ...(reply.endpoint !== undefined ? { endpoint: reply.endpoint } : {}), createdAt: reply.enqueuedAt }), now);
+      ? formatStatusLine({ state: 'queued', model: reply.model, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt }, now)
+      : formatStatusLine(statusFacts({ ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}), ...(reply.model !== undefined ? { model: reply.model } : {}), createdAt: reply.enqueuedAt }), now);
   if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
   if (reply.kind === 'other_process') return `${lead} · ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
   return `${lead} · ${line}`;
@@ -68,15 +68,15 @@ export function formatResult(result: Result): string {
 
 /** What a reader knows of a task that has no result yet. */
 export type StatusFacts =
-  | { state: 'queued'; endpoint?: string; place?: number; enqueuedAt: string }
+  | { state: 'queued'; model?: string; place?: number; enqueuedAt: string }
   | { state: 'running'; startedAt: string };
 
 /** A task with a start time is running; a task without one has not launched, whatever its stored status says. */
-export function statusFacts(task: { startedAt?: string; endpoint?: string; queuePlace?: number; createdAt: string }): StatusFacts {
+export function statusFacts(task: { startedAt?: string; model?: string; queuePlace?: number; createdAt: string }): StatusFacts {
   if (task.startedAt !== undefined) return { state: 'running', startedAt: task.startedAt };
   return {
     state: 'queued',
-    ...(task.endpoint !== undefined ? { endpoint: task.endpoint } : {}),
+    ...(task.model !== undefined ? { model: task.model } : {}),
     ...(task.queuePlace !== undefined ? { place: task.queuePlace } : {}),
     enqueuedAt: task.createdAt,
   };
@@ -88,12 +88,12 @@ export function formatStatusLine(facts: StatusFacts, now = Date.now()): string {
     return `running, started ${facts.startedAt} (${formatElapsed(now - Date.parse(facts.startedAt))} ago)`;
   }
   const waiting = formatElapsed(now - Date.parse(facts.enqueuedAt));
-  const endpoint = facts.endpoint ?? 'unknown';
+  const model = facts.model ?? 'unknown';
   const where =
     facts.place !== undefined
       ? `place ${facts.place} in this session's queue, waiting ${waiting}`
       : `in another session's queue, waiting ${waiting}`;
-  return `queued, not launched yet: no child is running; it starts when endpoint ${endpoint} has room (${where})`;
+  return `queued, not launched yet: no child is running; it starts when model ${model} has room (${where})`;
 }
 
 /** Put a notice on the line after the first one, so the task id still comes first. */

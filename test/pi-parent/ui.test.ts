@@ -8,7 +8,7 @@ import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, makeProject, manualPort, pi
 
 describe('pi session UI', () => {
   it('shows running and queued children and clears the widget after they finish', async () => {
-    const root = makeProject(TIERED_YAML.replace('endpoints:\n', 'endpoints:\n  r9700:\n    parallel: 2\n'));
+    const root = makeProject(TIERED_YAML.replace('  parallel:\n', '  parallel:\n    r9700/Qwen3.8: 2\n'));
     const { port, started } = manualPort();
     const fake = fakePi(root);
     const service = new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} });
