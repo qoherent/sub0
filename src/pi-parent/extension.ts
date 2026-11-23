@@ -9,7 +9,7 @@ import type { DelegationService, TaskListing } from '../service/delegation-servi
 import { describeContinueReply, describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
 import { INIT_SYNTAX, registerPiInit } from './init.js';
 import { mapPiRequest } from './request.js';
-import { sendCompletion, sendStopped } from './notices.js';
+import { sendCompletion, sendReloadReport, sendStopped } from './notices.js';
 import { clashWarning, SessionWidget } from './ui.js';
 
 const names = { collect: 'subzero_await', cancel: 'subzero_cancel' };
@@ -20,13 +20,14 @@ const describe = (reply: Parameters<typeof describeTaskReply>[0]) =>
 const formatSessionListing = (tasks: TaskListing[]) =>
   tasks.length ? tasks.map((task) => `${task.taskId} · ${task.agent} · ${listingStatus(task)}`).join('\n') : 'no tasks';
 const USAGE = `Usage: /subzero [attach <id> | cancel [id] | ${INIT_SYNTAX}]`;
-const BASE_DESCRIPTION = 'Delegate an isolated task. Await background tasks before using their results. Send a running or finished task more with subzero_continue.';
+const CONTINUE_HINT = 'When the user gives information that a running or finished task needs, subzero_continue sends that task a follow-up message, written self-contained like a brief.';
+const BASE_DESCRIPTION = `Delegate an isolated task. Await background tasks with subzero_await before using their results. ${CONTINUE_HINT}`;
 
 /** The `subagent` description: each tier phrase, configured or not, from the project's agent file. */
 function tierDescription(root: string): string {
   try {
     const tiers = configuredTierNames(root);
-    return ['Delegate an isolated task. Await background tasks with subzero_await before using their results. Send a running or finished task more with subzero_continue.',
+    return [BASE_DESCRIPTION,
       ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier)
         ? `${phrase} (${tier}): pass model: "${tier}".`
         : `${phrase} (${tier}): not configured, omit model.`),
@@ -82,7 +83,8 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     stopping = (async () => {
       const cancelled = await svc.cancelSession(sessionId);
       if (cancelled.count && !activeSession.closed) {
-        sendStopped(pi, `${cancelled.count} subzero tasks stopped: ${cancelled.taskIds.join(', ')}. No action is needed.`);
+        // The parent model gets one stop notice for each stopped task on its next turn.
+        for (const taskId of cancelled.taskIds) sendStopped(pi, await svc.notice(taskId, 'cancelled', sessionId, names.collect));
         if (ctx.hasUI) ctx.ui.notify(`${cancelled.count} subzero tasks cancelled`);
       }
     })().finally(() => { stopping = undefined; });
@@ -109,7 +111,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     if (event?.reason === 'reload' || event?.reason === 'resume') {
       try {
         const report = await svc.reloadReport(sessionId);
-        if (report !== undefined) sendStopped(pi, report);
+        if (report !== undefined) sendReloadReport(pi, report);
       } catch { /* A report that cannot be built must not stop the session from starting. */ }
     }
     description = tierDescription(ctx.cwd);
@@ -258,6 +260,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
             // A new turn nobody waits for reports by completion notice.
             notifyWhenSettled(svc, args.task, reply.turn, sessionId);
           }
+          if (reply.kind === 'new_turn' && forced && args.async === true) text += '\nnotice: this mode waits for the result.';
           return text;
         } finally {
           signal?.removeEventListener('abort', abort);

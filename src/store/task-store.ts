@@ -51,6 +51,12 @@ export interface TurnFile {
   enqueuedAt: string;
   /** True when messages held for the turn before it settled opened this turn by themselves. */
   viaHeld?: true;
+  /**
+   * True when the child run of this turn was released with the brief as its prompt, because no
+   * child run of the task ever sent its prompt or the child session is gone; the follow-up
+   * message stays beside it as held.
+   */
+  briefPrompt?: true;
   /** When the caller released its child run. */
   startedAt?: string;
   stopReason?: StopReason;
@@ -67,6 +73,8 @@ export interface OpenedTurn {
   viaHeld?: true;
   message?: string;
   replayed?: string[];
+  /** Set when the turn is released with the brief as its prompt. */
+  briefPrompt?: true;
   enqueuedAt: string;
 }
 
@@ -194,6 +202,10 @@ export interface TaskRecordWriter {
   /** Record when the child run of a turn was released, for a reader in any process. */
   writeStartTime(taskId: string, startedAt: string, turn?: number): void;
   writeStopReason(taskId: string, turn: number, reason: StopReason): void;
+  /** Mark that a turn is released with the brief as its prompt. */
+  writeBriefPrompt(taskId: string, turn: number): void;
+  /** Mark that the stop of a turn was reported to the parent model. A marker is never removed. */
+  markReported(taskId: string, turn: number): void;
   writeLaunchSpec(taskId: string, spec: LaunchSpec): void;
   /** Append a domain event to the event log, marked with its turn when it has one. */
   appendEvent(taskId: string, event: DomainEvent, turn?: number): void;
@@ -312,6 +324,7 @@ export class TaskStore implements TaskRecordWriter {
       turn,
       owner: this.owner,
       ...(opened.viaHeld === true ? { viaHeld: true as const } : {}),
+      ...(opened.briefPrompt === true ? { briefPrompt: true as const } : {}),
       ...(opened.message !== undefined ? { message: opened.message } : {}),
       ...(opened.replayed !== undefined && opened.replayed.length > 0 ? { replayed: opened.replayed } : {}),
       enqueuedAt: opened.enqueuedAt,
@@ -363,6 +376,10 @@ export class TaskStore implements TaskRecordWriter {
 
   writeStopReason(taskId: string, turn: number, reason: StopReason): void {
     this.updateTurn(taskId, turn, (file) => ({ ...file, stopReason: reason }));
+  }
+
+  writeBriefPrompt(taskId: string, turn: number): void {
+    this.updateTurn(taskId, turn, (file) => ({ ...file, briefPrompt: true }));
   }
 
   // ---- collected markers ---------------------------------------------------
@@ -440,9 +457,15 @@ export class TaskStore implements TaskRecordWriter {
     });
   }
 
-  /** A `prompt_sent` event proves a child session; a v0.1 log has none, so the session file stands in for it. */
+  /**
+   * A `prompt_sent` event proves a child session. A record that an earlier version wrote has no
+   * such event, so its session file stands in for it; a turn 1 file with an owner process marks a
+   * record of this version, where a session file proves nothing because the driver creates it
+   * before the prompt.
+   */
   promptWasSent(taskId: string): boolean {
     if (this.readEvents(taskId).some((e) => e.kind === 'prompt_sent')) return true;
+    if (this.readTurn(taskId, 1)?.owner != null) return false;
     return this.findSessionFile(taskId) !== undefined;
   }
 
@@ -621,7 +644,9 @@ export class TaskStore implements TaskRecordWriter {
       if (parentSessionId !== undefined && line.parentSessionId !== parentSessionId) continue;
       const open = line.status === 'running' || line.status === 'abandoned';
       // The start time lives in the turn file; only a task whose line says running can still be queued.
-      const latest = open ? this.latestTurn(line.taskId) : null;
+      // A line of an earlier version carries no turn number, so its turn file gives it.
+      const read = open || line.turn === undefined ? this.latestTurn(line.taskId) : null;
+      const latest = open || read?.result !== undefined ? read : null;
       const view = this.view(line, latest);
       views.push(
         line.status === 'running' && latest === null && view.startedAt === undefined

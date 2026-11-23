@@ -50,7 +50,7 @@ describe('pi extension with a global file', () => {
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port, STARTER), warn: () => {} }));
     await fake.emit('session_start');
     const subagent = fake.tools.get('subagent')!;
-    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toBe('Delegate an isolated task. Await background tasks before using their results. Send a running or finished task more with subzero_continue.');
+    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toMatch(/^Delegate an isolated task\. Await background tasks with subzero_await before using their results\. When the user gives information/);
     expect(await subagent.execute('call', { task: 'x' }, undefined, undefined, fake.context as any)).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/enabled: false/) }] });
     expect(started).toHaveLength(0);
   });
@@ -411,6 +411,28 @@ describe('pi subzero_continue and early end of a wait', () => {
     const text = textOf(await pending);
     expect(text).toMatch(/new turn: turn 2/);
     expect(text).toMatch(/turn two answer/);
+    expect(text).not.toMatch(/this mode waits/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: in print mode a subzero_continue that sets async and opens a new turn says that this mode waits', async () => {
+    const { runs, fake, run, settledTask } = await session('print');
+    const id = await settledTask();
+    const pending = run('subzero_continue', { task: id, message: 'go on', async: true });
+    await until(() => runs.length === 2);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle({ lastAssistantText: 'turn two answer' });
+    const text = textOf(await pending);
+    expect(text).toMatch(/turn two answer/);
+    expect(text).toMatch(/notice: this mode waits for the result/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: the subagent description tells the parent model when subzero_continue sends a follow-up message', async () => {
+    const { fake } = await session();
+    const description = fake.tools.get('subagent')!.prepareLoadout?.({} as any)?.descriptions?.subagent ?? '';
+    expect(description).toMatch(/subzero_await/);
+    expect(description).toMatch(/when the user gives information that a running or finished task needs, subzero_continue sends that task a follow-up message, written self-contained/i);
     await fake.emit('session_shutdown', { reason: 'quit' });
   });
 });

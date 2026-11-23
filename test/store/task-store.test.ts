@@ -287,5 +287,41 @@ describe('TaskStore', () => {
       store.writeStopReason('sz-ffffff', 2, 'session_end');
       expect(store.readTurns('sz-ffffff')[1]).toMatchObject({ turn: 2, message: 'now', replayed: ['old one', 'old two'], enqueuedAt: 't', startedAt: 'start', stopReason: 'session_end' });
     });
+    it('lists a record of an earlier version, whose index line has no turn number, as turn 1', () => {
+      const { root, store } = setup();
+      mkdirSync(path.join(store.taskDir('sz-oldold'), 'turns'), { recursive: true });
+      writeFileSync(path.join(store.taskDir('sz-oldold'), 'turns', '1.json'), JSON.stringify(result('sz-oldold')));
+      appendFileSync(store.indexPath, JSON.stringify({ taskId: 'sz-oldold', agent: 'helper', status: 'completed', childSession: 'sz-oldold', createdAt: 't', updatedAt: 't' }) + '\n');
+      const fresh = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
+      expect(fresh.list().find((t) => t.taskId === 'sz-oldold')).toMatchObject({ status: 'completed', turn: 1 });
+    });
+
+    it('lets a session file stand in for a prompt sent event only in a record of an earlier version', () => {
+      const { root, store, create } = setup();
+      create('sz-newnew');
+      mkdirSync(store.sessionsFolder, { recursive: true });
+      writeFileSync(path.join(store.sessionsFolder, '2026_sz-newnew.jsonl'), '');
+      writeFileSync(path.join(store.sessionsFolder, '2026_sz-oldold.jsonl'), '');
+      // This version's record: the driver made the session file before its prompt, which proves nothing.
+      expect(store.promptWasSent('sz-newnew')).toBe(false);
+      store.appendEvent('sz-newnew', { kind: 'prompt_sent' }, 1);
+      expect(store.promptWasSent('sz-newnew')).toBe(true);
+      // A record of an earlier version has a bare turn file and no prompt sent event.
+      mkdirSync(path.join(store.taskDir('sz-oldold'), 'turns'), { recursive: true });
+      writeFileSync(path.join(store.taskDir('sz-oldold'), 'turns', '1.json'), JSON.stringify(result('sz-oldold')));
+      expect(new TaskStore(root).promptWasSent('sz-oldold')).toBe(true);
+    });
+
+    it('marks a turn released with the brief as its prompt, and a stopped turn as reported, in files that are never removed', () => {
+      const { store, create } = setup();
+      create('sz-bbbbbb');
+      store.writeBriefPrompt('sz-bbbbbb', 1);
+      expect(store.readTurns('sz-bbbbbb')[0]).toMatchObject({ turn: 1, briefPrompt: true });
+      store.claimTurn('sz-bbbbbb', 2, { message: 'm', enqueuedAt: 't', briefPrompt: true });
+      expect(store.readTurns('sz-bbbbbb')[1]).toMatchObject({ turn: 2, message: 'm', briefPrompt: true });
+      store.markReported('sz-bbbbbb', 2);
+      store.markReported('sz-bbbbbb', 2);
+      expect(store.isReported('sz-bbbbbb', 2)).toBe(true);
+    });
   });
 });

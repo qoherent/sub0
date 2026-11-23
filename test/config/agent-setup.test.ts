@@ -734,7 +734,7 @@ describe('AgentSetup scopes', () => {
     mkdirSync(path.dirname(shared));
     writeFileSync(shared, GLOBAL_FULL);
     const project = previewChanges(root, [setMedium], STARTER, 'project');
-    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the global file; run guided init with the every-project choice/) }]);
+    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the global file \(.*\); run guided init with the every-project choice/) }]);
     expect(project.nothingToChange).toBe(true);
     expect(() => applyChanges(root, [setMedium], project.fingerprint, STARTER, 'project')).toThrow(SetupRefusedError);
     expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_FULL);

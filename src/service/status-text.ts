@@ -11,7 +11,14 @@ export function formatProgress(agent: string, latest: string, elapsedMs: number)
   return `${agent} · ${latest} · ${formatElapsed(elapsedMs)}`;
 }
 
+const UNIDENTIFIED_LINE = 'note: this conversation could not be identified, so the task cannot be continued';
+
 export function describeTaskReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now = Date.now()): string {
+  const text = describeReply(reply, view, tools, now);
+  return 'continuable' in reply && reply.continuable === false ? `${text}\n${UNIDENTIFIED_LINE}` : text;
+}
+
+function describeReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now: number): string {
   if (reply.kind === 'result') {
     const results = 'results' in reply && reply.results !== undefined ? reply.results : [reply.result];
     const sections = results.map((r, i) => (i === results.length - 1 && reply.openedTurn !== undefined ? `${formatResult(r)}\n${openedLine(reply.openedTurn)}` : formatResult(r)));
@@ -19,7 +26,7 @@ export function describeTaskReply(reply: DelegateReply | CollectReply, view: { a
   }
   if (reply.kind === 'results') {
     const sections = reply.results.map((r) => (r.openedTurn !== undefined ? `${formatResult(r.result)}\n${openedLine(r.openedTurn)}` : formatResult(r.result)));
-    if (reply.then !== undefined) sections.push(describeTaskReply(reply.then, view, tools, now));
+    if (reply.then !== undefined) sections.push(describeReply(reply.then, view, tools, now));
     return sections.join('\n\n');
   }
   if (reply.kind === 'delivered') return `task: ${reply.taskId} · turn ${reply.turn} already reached you (${reply.status}); read it again with ${tools.collect === 'await' ? 'tasks' : tools.collect}`;
@@ -32,8 +39,7 @@ export function describeTaskReply(reply: DelegateReply | CollectReply, view: { a
     : reply.kind === 'queued'
       ? formatStatusLine({ state: 'queued', model: reply.model, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt }, now)
       : formatStatusLine(statusFacts({ ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}), ...(reply.model !== undefined ? { model: reply.model } : {}), createdAt: reply.enqueuedAt }), now);
-  const unidentified = 'continuable' in reply && reply.continuable === false ? '; this conversation could not be identified, so the task cannot be continued' : '';
-  if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}${unidentified}`;
+  if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
   if (reply.kind === 'other_process') return `${lead} · ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
   return `${lead} · ${line}`;
 }
@@ -53,7 +59,7 @@ export function describeContinueReply(
   const lead = view !== undefined ? `task: ${reply.taskId} · ${view.agent}` : `task: ${reply.taskId}`;
   switch (reply.kind) {
     case 'not_delivered':
-      return `${lead} · not delivered: ${reply.reason}`;
+      return `${lead} · not delivered: ${reply.reason}${reply.status !== undefined ? `; ${reply.status}` : ''}`;
     case 'steered':
       return `${lead} · steered: your message joined turn ${reply.turn}, which is still running; its single result will include it (collect it with ${tools.collect})`;
     case 'queued':
@@ -115,13 +121,14 @@ export type StatusFacts =
   | { state: 'running'; startedAt: string };
 
 /** A task with a start time is running; a task without one has not launched, whatever its stored status says. */
-export function statusFacts(task: { startedAt?: string; model?: string; queuePlace?: number; createdAt: string }): StatusFacts {
+export function statusFacts(task: { startedAt?: string; model?: string; queuePlace?: number; createdAt: string; enqueuedAt?: string }): StatusFacts {
   if (task.startedAt !== undefined) return { state: 'running', startedAt: task.startedAt };
   return {
     state: 'queued',
     ...(task.model !== undefined ? { model: task.model } : {}),
     ...(task.queuePlace !== undefined ? { place: task.queuePlace } : {}),
-    enqueuedAt: task.createdAt,
+    // The time waited counts from the enqueue time of the latest turn, which is the creation time for turn 1.
+    enqueuedAt: task.enqueuedAt ?? task.createdAt,
   };
 }
 

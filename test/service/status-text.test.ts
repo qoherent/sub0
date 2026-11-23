@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { completionNotice, describeContinueReply, describeTaskReply, formatElapsed, formatResult, stopNotice } from '../../src/service/status-text.js';
+import { completionNotice, describeContinueReply, describeTaskReply, formatElapsed, formatResult, statusFacts, stopNotice } from '../../src/service/status-text.js';
 
 describe('status text', () => {
   it('formats elapsed time', () => {
@@ -43,6 +43,24 @@ describe('status text', () => {
   it('says a task started with no conversation cannot be continued', () => {
     const line = describeTaskReply({ kind: 'started', taskId: 'sz-aaaaaa', startedAt: new Date().toISOString(), continuable: false }, undefined, { collect: 'await', cancel: 'cancel' });
     expect(line).toMatch(/conversation could not be identified, so the task cannot be continued/);
+  });
+
+  it('adds the line that the task cannot be continued to a waited result too', () => {
+    const text = describeTaskReply({ kind: 'result', result: { taskId: 'sz-aaaaaa', agent: 'helper', status: 'completed', summary: 'ok' }, continuable: false }, undefined, { collect: 'await', cancel: 'cancel' });
+    expect(text.split('\n')[0]).toBe('task: sz-aaaaaa · helper · status: completed');
+    expect(text.split('\n').at(-1)).toMatch(/conversation could not be identified, so the task cannot be continued/);
+  });
+
+  it('gives the status line or first result line of a task a continuation did not reach', () => {
+    const tools = { collect: 'await', cancel: 'cancel' };
+    expect(describeContinueReply({ kind: 'not_delivered', taskId: 'sz-aaaaaa', reason: 'this task belongs to another conversation', status: 'task: sz-aaaaaa · helper · status: completed' }, tools)).toBe(
+      'task: sz-aaaaaa · not delivered: this task belongs to another conversation; task: sz-aaaaaa · helper · status: completed',
+    );
+  });
+
+  it('counts the time waited from the enqueue time of the latest turn', () => {
+    expect(statusFacts({ createdAt: '2026-01-01T00:00:00.000Z', enqueuedAt: '2026-01-01T01:00:00.000Z' })).toMatchObject({ state: 'queued', enqueuedAt: '2026-01-01T01:00:00.000Z' });
+    expect(statusFacts({ createdAt: '2026-01-01T00:00:00.000Z' })).toMatchObject({ enqueuedAt: '2026-01-01T00:00:00.000Z' });
   });
 
   it('names turn 2 in a completion notice and lists no turn for turn 1', () => {

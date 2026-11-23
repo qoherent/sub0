@@ -77,6 +77,8 @@ describe('AgentConfig load', () => {
     const init = '; run /subzero:init in Claude Code or /subzero init in pi';
     expect(() => loadAgentFile(makeProject(complete.replace('    medium: { host: pi, model: r9700/Qwen3.8, thinking: low }\n', '')))).toThrow(`the medium tier is required in models.tiers${init}`);
     expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`))).toThrow(`the general agent is required${init}`);
+    const named = makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`);
+    expect(() => loadAgentFile(named)).toThrow(path.join(named, '.agents', 'subzero.yaml'));
     expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${GENERAL}`))).toThrow(`the fallback agent is required${init}`);
   });
   it('loads a valid agent on the default tier with absolute skill folders', () => {
@@ -676,7 +678,8 @@ describe('AgentConfig global file', () => {
     const spec: StarterSpec = { host: 'pi', model: 'local/new', thinking: 'low', timeout: 30, generalTools: ['read'], fallbackTools: ['read'] };
     const err = errorOf(() => addStarterEntries(root, spec));
     expect(err).toBeInstanceOf(LoadError);
-    expect(err.message).toMatch(/this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder/);
+    expect(err.message).toContain(shared);
+    expect(err.message).toMatch(/this project's file is the global file \(.*\); run guided init with the every-project choice, or open the tool in a project folder/);
     expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_TIERS);
     // The same refusal when the file does not exist yet.
     const bare = tempDir('subzero-home-');

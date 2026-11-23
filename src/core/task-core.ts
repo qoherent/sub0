@@ -199,9 +199,19 @@ export class Turn {
         // The child session is gone: start again with the brief, and hold the message that opened the turn.
         this.held.unshift(this.prompt.message);
         this.prompt = { kind: 'brief' };
+        this.markBriefPrompt();
       }
     }
     return port.start(request, onEvent);
+  }
+
+  /** The turn file of a turn released with the brief as its prompt says so. */
+  markBriefPrompt(): void {
+    try {
+      this.task.core.store.writeBriefPrompt(this.task.taskId, this.number);
+    } catch (err) {
+      this.task.core.warn(`could not record the prompt of ${this.task.taskId}: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -488,7 +498,7 @@ export class Task {
     const enqueuedAt = new Date().toISOString();
     let claimed: boolean;
     try {
-      claimed = this.core.store.claimTurn(this.taskId, number, { message, replayed, enqueuedAt });
+      claimed = this.core.store.claimTurn(this.taskId, number, { message, replayed, enqueuedAt, ...(this.promptEver ? {} : { briefPrompt: true as const }) });
     } catch (err) {
       this.core.warn(`could not open turn ${number} of ${this.taskId}: ${(err as Error).message}`);
       return this.answer(message, 'not_delivered', ended.number);
@@ -538,6 +548,11 @@ export class TaskCore {
     this.store = options.store;
     this.warn = options.warn ?? ((m) => process.stderr.write(`subzero: ${m}\n`));
     this.onTurnOpened = options.onTurnOpened;
+  }
+
+  /** Record that the stop of a turn was reported to the parent model, so that no front end reports it twice. */
+  recordStopReported(taskId: string, turn: number): void {
+    this.store.markReported(taskId, turn);
   }
 
   /**

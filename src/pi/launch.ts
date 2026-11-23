@@ -78,8 +78,8 @@ export function childRpcArgs(piExtensions: readonly string[] = []): string[] {
 }
 
 /**
- * The exact flag set of a child run. --session is never added: pi 0.87 exits when
- * it is combined with --session-id.
+ * The exact flag set of a child run. --session is never added: pi exits when it is
+ * combined with --session-id.
  */
 export function launchArgs({ taskId, agent, overlaySkills, sessionsFolder, piExtensions = [] }: LaunchInputs): string[] {
   return [

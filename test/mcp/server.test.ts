@@ -740,6 +740,22 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
     expect(text).toContain('the second answer');
   });
 
+  it('covers R16: a waited continue sends progress notifications naming the task agent, as a waited delegate does', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
+    await settled(h, 0, id);
+    const messages: string[] = [];
+    const pending = h.call('continue', { task: id, message: 'go on' }, { onprogress: (p) => messages.push(p.message ?? '') });
+    await until(() => h.started.length === 2);
+    await until(() => messages.length > 0);
+    expect(messages[0]).toMatch(/free/);
+    const mark = messages.length;
+    await sleep(500); // the heartbeat repeats the latest line every 200 ms
+    expect(messages.length).toBeGreaterThan(mark);
+    h.started[1]!.settle({ lastAssistantText: 'the second answer' });
+    expect(h.textOf(await pending)).toContain('the second answer');
+  });
+
   it('covers R14: a waited await over two running tasks returns their status lines when the user types, leaves both running and arms a wake marker for each', async () => {
     const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
     const one = await directTask(h, 'one');

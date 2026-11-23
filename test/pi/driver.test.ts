@@ -407,6 +407,17 @@ describe('PiDriver', () => {
       expect(exits(events)).toHaveLength(1);
     });
 
+    it('counts a steer that pi handled at once as delivered, and reports no unread steer', async () => {
+      const { start, fake } = setup({ steerDisposition: 'handled', turn: [{ sleep: 400 }, { emit: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop' } } }, ...settle] });
+      const run = start();
+      await until(() => promptSent(fake));
+      expect(await run.steer!('now')).toBe('delivered');
+      const outcome = await run.outcome;
+      expect(outcome.status).toBe('completed');
+      expect(outcome.unreadSteers).toBeUndefined();
+      expect(steersSent(fake)).toEqual(['now']);
+    });
+
     it('answers settled to a steer after agent_settled and sends nothing to pi', async () => {
       const { start, fake } = setup();
       const run = start();

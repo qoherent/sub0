@@ -149,8 +149,8 @@ export class ProjectDisabledError extends MissingAgentFileError {
 
 /** The one load error that `init` repairs by adding the medium tier. */
 export class MissingDefaultTierError extends LoadError {
-  constructor() {
-    super(`the medium tier is required in models.tiers${RUN_INIT}`);
+  constructor(agentFile?: string) {
+    super(`the medium tier is required in models.tiers${RUN_INIT}${agentFile !== undefined ? ` (agent file ${agentFile})` : ''}`);
     this.name = 'MissingDefaultTierError';
   }
 }
@@ -270,8 +270,9 @@ export function isSameFile(a: string, b: string): boolean {
   }
 }
 
-/** Why a project-scope write is refused when the project file is the global file. */
-export const PROJECT_IS_GLOBAL = "this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder";
+/** Why a project-scope write is refused when the project file is the global file; it names the shared file. */
+export const projectIsGlobal = (file: string): string =>
+  `this project's file is the global file (${file}); run guided init with the every-project choice, or open the tool in a project folder`;
 
 /** The starter tools of a child host, or undefined when its driver offers none. */
 export type StarterAgents = (host: string) => StarterTools | undefined;
@@ -463,12 +464,12 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
 
   const medium = tiers.get(DEFAULT_TIER);
   if (options.allowMissingStarter !== true && medium === undefined) {
-    throw project === null ? new MissingAgentFileError(agentFile) : new MissingDefaultTierError();
+    throw project === null ? new MissingAgentFileError(agentFile) : new MissingDefaultTierError(agentFile);
   }
   if (medium !== undefined && options.starterAgents !== undefined) fillBuiltInAgents(entries, medium.host, options.starterAgents);
   if (options.allowMissingStarter !== true) {
-    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
-    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT} (agent file ${agentFile})`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT} (agent file ${agentFile})`);
   }
 
   return {
@@ -859,7 +860,7 @@ export interface StarterResult {
  */
 export function addStarterEntries(projectRoot: string, spec: StarterSpec): StarterResult {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  if (isSameFile(agentFile, globalFile())) throw new LoadError(PROJECT_IS_GLOBAL);
+  if (isSameFile(agentFile, globalFile())) throw new LoadError(projectIsGlobal(globalFile()));
   const text = readTextOrNull(agentFile);
 
   // Parsed as the layer it is, so a file guided init wrote (a lone tier, a null removal) is never refused by a single-file rule.

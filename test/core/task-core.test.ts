@@ -451,4 +451,49 @@ describe('TaskCore follow-up messages', () => {
     expect(await original.followUp('mine')).toMatchObject({ outcome: 'not_delivered', taken: true });
     expect(original.turns).toHaveLength(1);
   });
+  it('marks the brief as the prompt in the turn file of a turn released with the brief, and in no other', async () => {
+    const { task, runs, store } = prompted();
+    await task.cancel();
+    const reply = await task.followUp('start it now');
+    expect(store.readTurns(task.taskId)[1]).toMatchObject({ turn: 2, message: 'start it now', briefPrompt: true });
+    reply.turn!.release();
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle();
+    await reply.turn!.result;
+    const next = await task.followUp('later');
+    expect(store.readTurns(task.taskId)[2]).toMatchObject({ turn: 3, message: 'later' });
+    expect(store.readTurns(task.taskId)[2]!.briefPrompt).toBeUndefined();
+    expect(next.outcome).toBe('new_turn');
+  });
+
+  it('marks the brief as the prompt in the turn file when the child session is gone', async () => {
+    const { root, task: original, runs: originalRuns } = prompted();
+    original.release();
+    originalRuns[0]!.emit({ kind: 'prompt_sent' });
+    originalRuns[0]!.settle();
+    await original.result;
+    const store = new TaskStore(root, { warn: () => {} });
+    const { port } = manualPort({
+      steers: true,
+      resume: (request) => {
+        throw new SessionMissingError(request.taskId);
+      },
+    });
+    const loaded = new TaskCore({ projectRoot: root, store, warn: () => {} }).load(original.taskId, port)!;
+    const reply = await loaded.followUp('after the loss');
+    expect(store.readTurns(original.taskId)[1]!.briefPrompt).toBeUndefined();
+    reply.turn!.release();
+    expect(store.readTurns(original.taskId)[1]).toMatchObject({ turn: 2, message: 'after the loss', briefPrompt: true });
+  });
+
+  it('records for a front end that the stop of a turn was reported, once', async () => {
+    const { core, task, runs, store } = prompted();
+    task.release();
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    await task.cancel('session_end');
+    expect(store.isReported(task.taskId, 1)).toBe(false);
+    core.recordStopReported(task.taskId, 1);
+    core.recordStopReported(task.taskId, 1);
+    expect(store.isReported(task.taskId, 1)).toBe(true);
+  });
 });

@@ -15,8 +15,8 @@ import {
 import { Task, TaskCore, type Turn } from '../core/task-core.js';
 import { ENDED_STATES, type ChildHostOptions, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
 import type { Kernel } from '../kernel/kernel.js';
-import { TaskStore, type StopReason, type TaskStoreOptions, type TaskView, type TurnFile } from '../store/task-store.js';
-import { completionNotice, stopNotice } from './status-text.js';
+import { TaskStore, type StopReason, type TaskRecord, type TaskStoreOptions, type TaskView, type TurnFile } from '../store/task-store.js';
+import { completionNotice, formatResult, formatStatusLine, statusFacts, stopNotice } from './status-text.js';
 
 /** The request of a front end. */
 export interface Delegation {
@@ -97,7 +97,8 @@ export type DelegateReply = (
 export type ContinueReply =
   | { kind: 'steered' | 'queued'; taskId: string; turn: number }
   | { kind: 'new_turn'; taskId: string; turn: number; replayed?: number; status: DelegateReply }
-  | { kind: 'not_delivered'; taskId: string; reason: string };
+  /** `status` is the status line of the task, or the first line of its result text; none when the conversation is unknown. */
+  | { kind: 'not_delivered'; taskId: string; reason: string; status?: string };
 
 /**
  * A turn that no call opened: held messages or unread steers opened it. The sink hears when it
@@ -551,22 +552,23 @@ export class DelegationService {
 
   private async continueNow(request: Continuation, options: ContinueOptions, opening: Opening, retried: boolean): Promise<ContinueReply> {
     const { taskId, parentSessionId } = request;
-    const refuse = (reason: string): ContinueReply => ({ kind: 'not_delivered', taskId, reason });
+    const refuse = (reason: string, status?: string): ContinueReply => ({ kind: 'not_delivered', taskId, reason, ...(status !== undefined ? { status } : {}) });
     const { store, core } = await this.connect();
     if (opening.cancelled) return refuse('the conversation was cancelled while the message was being delivered');
     store.sweep();
+    this.dropTakenOver(store);
     if (parentSessionId === undefined || parentSessionId === '') return refuse('this conversation could not be identified');
     const record = store.readTask(taskId);
-    if (record === null) return refuse('no such task');
+    if (record === null) throw new Error(`no task ${taskId}`);
     if (record.parentSessionId === undefined) return refuse('this conversation could not be identified: the task has no conversation recorded');
-    if (record.parentSessionId !== parentSessionId) return refuse('this task belongs to another conversation');
+    if (record.parentSessionId !== parentSessionId) return refuse('this task belongs to another conversation', this.undeliveredStatus(record));
 
     let task = this.registry.get(taskId);
     if (task === undefined) {
       const latest = record.turns[record.turns.length - 1];
       // Only the owner of a running turn holds its child, so a turn running in a live process is not ours to take.
       if (latest !== undefined && latest.result === undefined && record.status === 'running' && latest.owner !== null && !store.isOwner(latest.owner) && store.ownerAlive(latest.owner) === true) {
-        return refuse(`its latest turn is running in another process (pid ${latest.owner.pid}); wait for its result`);
+        return refuse(`its latest turn is running in another process (pid ${latest.owner.pid}); wait for its result`, this.undeliveredStatus(record));
       }
       if (record.task === null) return refuse('its task record is missing');
       let port;
@@ -616,6 +618,23 @@ export class DelegationService {
     }
   }
 
+  /** The status line of a task whose latest turn has no result, or the first line of the result text of one that settled. */
+  private undeliveredStatus(record: TaskRecord): string {
+    if (record.result !== null) return formatResult(record.result).split('\n')[0]!;
+    if (record.status === 'abandoned') return 'abandoned: its owner process died, so it has no result';
+    const live = this.registry.get(record.taskId);
+    const queuePlace = live !== undefined ? this.limiter.place(live.latest) : null;
+    return formatStatusLine(statusFacts({ ...record, ...(queuePlace !== null ? { queuePlace } : {}) }));
+  }
+
+  /** A task of this process whose latest turn another process now owns is read from the task record, not held here. */
+  private dropTakenOver(store: TaskStore): void {
+    for (const taskId of [...this.registry.keys()]) {
+      const owner = store.latestTurn(taskId)?.owner;
+      if (owner !== null && owner !== undefined && !store.isOwner(owner)) this.registry.delete(taskId);
+    }
+  }
+
   /** Why a message reached no child, from the state of the task. */
   private undeliveredReason(task: Task): string {
     const { state } = task;
@@ -634,6 +653,7 @@ export class DelegationService {
   async collect(taskId: string, options: { onlyNew?: boolean; mark?: boolean } = {}): Promise<CollectReply> {
     const { store } = await this.connect();
     store.sweep();
+    this.dropTakenOver(store);
     const live = this.registry.get(taskId);
     const record = store.readTask(taskId);
     if (record === null) return { kind: 'not_found', taskId };
@@ -702,6 +722,7 @@ export class DelegationService {
   async cancel(taskId: string): Promise<CollectReply> {
     const { store } = await this.connect();
     store.sweep();
+    this.dropTakenOver(store);
     const live = this.registry.get(taskId);
     if (live !== undefined && live.settledResult === undefined) return { kind: 'result', result: await live.cancel() };
     // A settled task returns its stored result unchanged; nothing is signalled.
@@ -760,6 +781,7 @@ export class DelegationService {
   async list(parentSessionId?: string): Promise<TaskListing[]> {
     const { store } = await this.connect();
     store.sweep();
+    this.dropTakenOver(store);
     return store.list(parentSessionId).map((view) => {
       const live = this.registry.get(view.taskId);
       const place = live !== undefined ? this.limiter.place(live.latest) : null;

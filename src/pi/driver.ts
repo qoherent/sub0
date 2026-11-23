@@ -87,7 +87,7 @@ const QUIET_EVENTS = new Set([
   'summarization_retry_attempt_start',
   'summarization_retry_finished',
   'bash_execution_update',
-  // Emitted by pi 0.87 for each session entry, though rpc.md does not list it.
+  // Emitted by pi for each session entry, though rpc.md does not list it.
   'entry_appended',
 ]);
 const DIALOG_METHODS = new Set(['select', 'confirm', 'input', 'editor']);

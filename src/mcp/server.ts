@@ -428,7 +428,10 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           if (message === undefined || message.trim() === '') return text('continue needs a message', true);
           await service.start();
           // A new turn waits unless asked not to; a steered or queued message always replies at once.
-          const wait = options.nonInteractive === true || args.wait !== false;
+          // Forced to true where the wait of a delegate call is: a non-interactive or unknown mode, or
+          // no known parent session id while wake markers are in use.
+          const wait = options.nonInteractive === true || args.wait !== false ||
+            (options.wakeDataDir !== undefined && currentSession === undefined);
           let ownTask: string | undefined = task;
           const onAbort = () => {
             if (Date.now() - startedAt < 120_000 && currentSession !== undefined) void service.cancelSession(currentSession);
@@ -439,10 +442,27 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             else extra.signal.addEventListener('abort', onAbort, { once: true });
           }
           const typing = wait ? watchTyping(currentSession, startedAt, request.params._meta?.['claudecode/toolUseId']) : { stop() {} };
+          // A waited continue reports progress as a waited delegate does.
+          const progressToken = request.params._meta?.progressToken;
+          const reporter = wait && progressToken !== undefined
+            ? new ProgressReporter(
+                (await service.list().catch(() => [])).find((view) => view.taskId === task)?.agent ?? 'general',
+                (progress, message) => void extra
+                  .sendNotification({ method: 'notifications/progress', params: { progressToken, progress, message } })
+                  .catch(() => undefined),
+                options.progress,
+              )
+            : null;
           try {
             const reply = await service.continue(
               { taskId: task, message, ...(currentSession !== undefined ? { parentSessionId: currentSession } : {}) },
-              { wait, ...(typing.signal ? { until: typing.signal } : {}), ...(options.nonInteractive === true ? { followOn: true } : {}), onState: () => watchSessions() },
+              {
+                wait,
+                ...(typing.signal ? { until: typing.signal } : {}),
+                ...(options.nonInteractive === true ? { followOn: true } : {}),
+                ...(reporter ? { onEvent: (event) => reporter.onEvent(event) } : {}),
+                onState: (state) => { reporter?.onState(state); watchSessions(); },
+              },
             );
             if (reply.kind === 'new_turn' && reply.status.kind !== 'result' && currentSession !== undefined) {
               try { armWake(currentSession, task, reply.turn); } catch { /* A marker failure must not lose a continuation. */ }
@@ -453,6 +473,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           } finally {
             typing.stop();
             extra.signal.removeEventListener('abort', onAbort);
+            reporter?.stop();
           }
         }
 

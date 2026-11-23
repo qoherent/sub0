@@ -7,7 +7,7 @@ import { kernelWithPort, makeProject, manualPort, TIERED_YAML, until } from '../
 const textOf = (reply: { content: { type: string; text?: string }[] }) => reply.content[0]!.text!;
 const idOf = (text: string) => /sz-[a-z2-7]{6}/.exec(text)![0];
 const stopped = (fake: ReturnType<typeof fakePi>) =>
-  (fake.messages as [{ customType: string; content: string }, unknown][]).filter(([message]) => message.customType === 'subzero-stopped').map(([message]) => message.content);
+  (fake.messages as [{ customType: string; content: string }, unknown][]).filter(([message]) => message.customType === 'subzero-reload-report').map(([message]) => message.content);
 
 describe('pi session lifecycle', () => {
   it('cancels a background task when the session switches', async () => {
@@ -63,8 +63,15 @@ describe('pi session lifecycle', () => {
     await Promise.all(['one', 'two', 'three'].map((task) => execute(task, { task }, undefined, undefined, fake.context as any)));
     await fake.emit('agent_settled', { aborted: true });
     expect((await service.list('pi-session')).map((task) => task.status)).toEqual(['cancelled', 'cancelled', 'cancelled']);
-    expect(fake.messages).toHaveLength(1);
-    expect(fake.messages[0]).toMatchObject([{ content: expect.stringMatching(/3.*stopped/) }, { triggerTurn: false, deliverAs: 'nextTurn' }]);
+    // One stop notice for each stopped task, none of them a turn trigger.
+    const ids = (await service.list('pi-session')).map((task) => task.taskId);
+    expect(fake.messages).toHaveLength(3);
+    for (const id of ids) {
+      expect((fake.messages as [{ content: string }, unknown][]).filter(([message]) => message.content.includes(id))).toHaveLength(1);
+    }
+    for (const message of fake.messages) {
+      expect(message).toMatchObject([{ customType: 'subzero-stopped', content: expect.stringMatching(/was stopped; no action is needed/) }, { triggerTurn: false, deliverAs: 'nextTurn' }]);
+    }
   });
 
   it('cancels all session children when an await is aborted', async () => {
@@ -129,8 +136,15 @@ describe('pi session lifecycle', () => {
     controller.abort();
     await Promise.all([foreground, fake.emit('agent_settled', { aborted: true })]);
     expect((await service.list('pi-session')).map((task) => task.status)).toEqual(['cancelled', 'cancelled', 'cancelled']);
-    expect(fake.messages).toHaveLength(1);
-    expect(fake.messages[0]).toMatchObject([{ content: expect.stringMatching(/3.*stopped/) }, { triggerTurn: false, deliverAs: 'nextTurn' }]);
+    // One stop notice for each stopped task, none of them a turn trigger.
+    const ids = (await service.list('pi-session')).map((task) => task.taskId);
+    expect(fake.messages).toHaveLength(3);
+    for (const id of ids) {
+      expect((fake.messages as [{ content: string }, unknown][]).filter(([message]) => message.content.includes(id))).toHaveLength(1);
+    }
+    for (const message of fake.messages) {
+      expect(message).toMatchObject([{ customType: 'subzero-stopped', content: expect.stringMatching(/was stopped; no action is needed/) }, { triggerTurn: false, deliverAs: 'nextTurn' }]);
+    }
   });
 
   it('cancels idle children from the command without waking the model', async () => {
@@ -199,7 +213,7 @@ describe('pi reload report of stopped turns', () => {
     const [report] = stopped(second.fake);
     expect(report).toContain(ids[1]);
     expect(report).toContain('the lost message');
-    expect(second.fake.messages[0]).toMatchObject([{ customType: 'subzero-stopped' }, { triggerTurn: false, deliverAs: 'nextTurn' }]);
+    expect(second.fake.messages[0]).toMatchObject([{ customType: 'subzero-reload-report' }, { triggerTurn: false, deliverAs: 'steer' }]);
     await second.fake.emit('session_start', { reason: 'reload' });
     expect(stopped(second.fake)).toHaveLength(1);
     const third = await process_(root, 'reload');

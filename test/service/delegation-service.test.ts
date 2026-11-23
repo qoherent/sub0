@@ -656,6 +656,9 @@ describe('DelegationService continue', () => {
     const { svc, taskId, started } = await settledTask();
     const reply = await svc.continue({ taskId, message: 'hello', parentSessionId: 'B' }, { wait: false });
     expect(reply).toMatchObject({ kind: 'not_delivered', taskId, reason: expect.stringMatching(/another conversation/) });
+    // The first line of the result text, never the result itself.
+    expect((reply as { status?: string }).status).toBe(`task: ${taskId} · helper · status: completed`);
+    expect(JSON.stringify(reply)).not.toContain('turn one answer');
     expect(started).toHaveLength(1);
     expect(svc.store.readTurns(taskId)).toHaveLength(1);
   });
@@ -669,6 +672,55 @@ describe('DelegationService continue', () => {
       kind: 'not_delivered',
       reason: expect.stringMatching(/could not be identified/),
     });
+  });
+
+  it('names an unknown task id in the error of a continuation', async () => {
+    const { svc } = await settledTask();
+    await expect(svc.continue({ taskId: 'sz-nosuch', message: 'm', parentSessionId: 'A' }, { wait: false })).rejects.toThrow(/sz-nosuch/);
+  });
+
+  it('covers R4: drops a task whose latest turn another process now owns, and reads it from the task record', async () => {
+    const root = makeProject();
+    const { port, started } = live();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: kernelWithPort(port),
+      store: { probe: { startTime: (pid) => (pid === process.pid ? 'now' : pid === 4242 ? 'other' : null) }, owner: { pid: process.pid, startTime: 'now' } },
+    });
+    const reply = await svc.delegate({ agent: 'helper', briefText: 'first', parentSessionId: 'A' }, { wait: false });
+    const taskId = ids(reply);
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await until(() => svc.store.readTask(taskId)?.status === 'completed');
+    const other = new TaskStore(root, { warn: () => {}, owner: { pid: 4242, startTime: 'other' } });
+    expect(other.claimTurn(taskId, 2, { message: 'from elsewhere', enqueuedAt: new Date().toISOString() })).toBe(true);
+    const registry = (svc as unknown as { registry: Map<string, unknown> }).registry;
+    expect(registry.has(taskId)).toBe(true);
+    // A listing drops it, and the next read comes from the task record, whose latest turn runs in the other process.
+    await svc.list('A');
+    expect(registry.has(taskId)).toBe(false);
+    expect(await svc.collect(taskId)).toMatchObject({ kind: 'results', then: { kind: 'other_process' } });
+    const refused = await svc.continue({ taskId, message: 'mine', parentSessionId: 'A' }, { wait: false });
+    expect(refused).toMatchObject({ kind: 'not_delivered', reason: expect.stringMatching(/running in another process/) });
+    expect(svc.store.readTurns(taskId)).toHaveLength(2);
+    expect(started).toHaveLength(1);
+  });
+
+  it('gives the status line of a task whose latest turn runs in another live process', async () => {
+    const root = makeProject();
+    const other = new TaskStore(root, { warn: () => {}, owner: { pid: 4242, startTime: 'other' } });
+    const agent = (await import('../../src/config/agent-config.js')).getAgent(root, 'helper');
+    other.createTaskRecord({ taskId: 'sz-runnng', agent, brief: 'b', model: agent.model, parentSessionId: 'A', createdAt: new Date().toISOString() });
+    const { port } = live();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: kernelWithPort(port),
+      store: { probe: { startTime: (pid) => (pid === process.pid ? 'now' : pid === 4242 ? 'other' : null) }, owner: { pid: process.pid, startTime: 'now' } },
+    });
+    const refused = await svc.continue({ taskId: 'sz-runnng', message: 'no', parentSessionId: 'A' }, { wait: false });
+    expect(refused).toMatchObject({ kind: 'not_delivered', status: expect.stringMatching(/^queued, not launched yet: .*waiting/) });
   });
 
   it('covers R4: takes over a settled task whose owner process is alive elsewhere, and refuses a running turn in a live other owner', async () => {
