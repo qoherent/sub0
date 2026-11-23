@@ -496,4 +496,23 @@ describe('TaskCore follow-up messages', () => {
     core.recordStopReported(task.taskId, 1);
     expect(store.isReported(task.taskId, 1)).toBe(true);
   });
+
+  it('covers R10: every message of a turn that held messages opened is replayed when that turn dies before its prompt', async () => {
+    const { root, task, runs } = prompted();
+    task.release();
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle({ unreadSteers: ['unread one', 'unread two'] });
+    await until(() => runs.length === 2);
+    // Turn 2 never sends its prompt, and its process is gone; a later process takes the task over.
+    const store = new TaskStore(root, { warn: () => {} });
+    const { port, runs: laterRuns } = steering();
+    const loaded = new TaskCore({ projectRoot: root, store, warn: () => {} }).load(task.taskId, port)!;
+    const reply = await loaded.followUp('third');
+    expect(reply).toMatchObject({ outcome: 'new_turn', replayed: 2 });
+    reply.turn!.release();
+    expect(laterRuns[0]).toMatchObject({ kind: 'resume', prompt: 'unread one' });
+    laterRuns[0]!.emit({ kind: 'prompt_sent' });
+    await until(() => laterRuns[0]!.steers.length === 2);
+    expect(laterRuns[0]!.steers).toEqual(['unread two', 'third']);
+  });
 });

@@ -483,7 +483,7 @@ export class Task {
     if (events.some((e) => e.kind === 'prompt_sent' && e.turn === ended.number)) return [];
     const file = this.core.store.readTurns(this.taskId).find((t) => t.turn === ended.number);
     const queued = events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === ended.number && e.outcome === 'queued' ? [e.text] : []));
-    return [...(file?.replayed ?? []), ...(file?.message !== undefined ? [file.message] : []), ...queued];
+    return [...(file?.replayed ?? []), ...(file?.message !== undefined ? [file.message] : []), ...(file?.heldMessages ?? []), ...queued];
   }
 
   /** Open the next turn for a message, after a turn that ended. */
@@ -521,7 +521,7 @@ export class Task {
     const enqueuedAt = new Date().toISOString();
     let claimed = false;
     try {
-      claimed = this.core.store.claimTurn(this.taskId, number, { viaHeld: true, message: messages[0]!, enqueuedAt });
+      claimed = this.core.store.claimTurn(this.taskId, number, { viaHeld: true, message: messages[0]!, heldMessages: messages.slice(1), enqueuedAt });
     } catch (err) {
       this.core.warn(`could not open turn ${number} of ${this.taskId}: ${(err as Error).message}`);
     }

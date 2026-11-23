@@ -749,7 +749,7 @@ export class DelegationService {
    * A turn the user cancelled has no stop reason and is never listed. Undefined when nothing is new.
    */
   async reloadReport(parentSessionId: string): Promise<string | undefined> {
-    const { store } = await this.connect();
+    const { store, core } = await this.connect();
     store.sweep();
     const lines: string[] = [];
     for (const view of store.list(parentSessionId)) {
@@ -764,11 +764,11 @@ export class DelegationService {
         const prompted = events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn);
         const lost = prompted
           ? []
-          : [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []))];
+          : [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []))];
         const named = turn.turn >= 2 ? `${view.taskId} (turn ${turn.turn})` : view.taskId;
         lines.push(`- ${named} · ${view.agent} · stopped${lost.length > 0 ? `; it never received ${lost.map((m) => JSON.stringify(m)).join(', ')}` : ''}`);
         try {
-          store.markReported(view.taskId, turn.turn);
+          core.recordStopReported(view.taskId, turn.turn);
         } catch (err) {
           this.warn(`could not mark a turn of ${view.taskId} reported: ${(err as Error).message}`);
         }

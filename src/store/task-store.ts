@@ -47,6 +47,8 @@ export interface TurnFile {
   message?: string;
   /** Messages of an abandoned turn that never sent its prompt, replayed before `message`, in order. */
   replayed?: string[];
+  /** The messages after `message` that were held for a turn that opened for several, in order. */
+  heldMessages?: string[];
   /** When the turn opened; for turn 1 the creation time of the task. */
   enqueuedAt: string;
   /** True when messages held for the turn before it settled opened this turn by themselves. */
@@ -73,6 +75,7 @@ export interface OpenedTurn {
   viaHeld?: true;
   message?: string;
   replayed?: string[];
+  heldMessages?: string[];
   /** Set when the turn is released with the brief as its prompt. */
   briefPrompt?: true;
   enqueuedAt: string;
@@ -327,6 +330,7 @@ export class TaskStore implements TaskRecordWriter {
       ...(opened.briefPrompt === true ? { briefPrompt: true as const } : {}),
       ...(opened.message !== undefined ? { message: opened.message } : {}),
       ...(opened.replayed !== undefined && opened.replayed.length > 0 ? { replayed: opened.replayed } : {}),
+      ...(opened.heldMessages !== undefined && opened.heldMessages.length > 0 ? { heldMessages: opened.heldMessages } : {}),
       enqueuedAt: opened.enqueuedAt,
     };
     const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
