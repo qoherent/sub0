@@ -78,7 +78,7 @@ export function buildRoutingText(tiers: RoutableTier[], taskMode: boolean | null
       : `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
     `A task whose result an await reply does not show must be read with ${TASKS_TOOL}(task) before it is used.`,
     'In a non-interactive or unidentified session, delegate waits and returns the result even when asked not to wait.',
-    'A queued task has not launched yet: no child is running and it starts when its endpoint has room. A task\'s launch time is its `started` time; the time it waited does not count.',
+    'A queued task has not launched yet: no child is running and it starts when its model has room. A task\'s launch time is its `started` time; the time it waited does not count.',
     `If ${DELEGATE_TOOL} is refused or returns a tool error and made no task, pass that subagent back: call Agent with the same prompt and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails; never pass it back.`,
   );
   return lines.join('\n');

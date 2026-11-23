@@ -23,7 +23,7 @@ describe('SigilWiring', () => {
     expect(tiers.get('low')).toEqual({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low' });
     expect(tiers.get('control')).toEqual({ host: 'pi', model: 'anthropic/claude-sonnet-5-5', thinking: 'high' });
     const qwen = getAgent(EXAMPLE, 'sigil-interpreter');
-    expect(qwen).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'high', endpoint: 'r9700', parallel: 1 });
+    expect(qwen).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'high', parallel: 1 });
     expect(qwen.tools).toEqual(['read', 'grep', 'find', 'ls', 'write']);
     expect(qwen.skills.map((s) => s.folder)).toEqual([path.join(EXAMPLE, 'skills', 'sigil-understand'), path.join(EXAMPLE, 'skills', 'sigil-egglog')]);
     expect(getAgent(EXAMPLE, 'sigil-interpreter-low')).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low', parallel: 1 });

@@ -49,7 +49,7 @@ to the Claude model that arm A's interpreters use, and log pi into Anthropic.
   id.
 - **A parallel limit holds only among the child runs of one process.** A
   terminal `subzero run` or a second session is not counted against it. A model
-  endpoint with no entry in `endpoints:`, such as a Claude model, has no parallel
+  with no entry in `models.parallel`, such as a Claude model, has no parallel
   limit.
 - **The command line has no cancel.** A task started with `subzero run` ends
   only by Ctrl-C in its terminal; while it runs, the server reports it as running

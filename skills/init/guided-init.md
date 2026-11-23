@@ -23,7 +23,8 @@ These hold for the whole run.
 Run **show**.
 
 - `refused`: show the error unchanged. Tell the user to fix the file by hand or move it aside, then stop. When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the global file by hand.
-- `repairable`: say what `problem` names and that the apply repairs it.
+- `repairable`: say what `problem` names and that the apply repairs it. When `endpoints` lists entries, the file holds the old `endpoints:` map, which `models.parallel` replaced: each old limit now belongs to the models it covered. Step 2a repairs it.
+- `repair-other-first`: the file of the other scope holds `endpoints:`. Say so, naming `repairFirst.file`; step 2a repairs it first.
 - `no-file`: this project has no file of its own.
 - `ok`: the current tiers and limits, each marked as coming from the global file or from this project, are the defaults for every question below, with one exception once the scope is known: see "Defaults under the global scope" in step 4.
 
@@ -35,11 +36,19 @@ Ask: "Should these models apply to every project or only this one?" Offer "every
 - When there is no global file, "every project" creates it. This first-time global setup uses the global scope, and every project then runs subzero on these models without a file of its own.
 - Every later **preview** and **apply** carries the scope you chose here.
 
+### 2a. Repair `endpoints:` first
+
+Skip this step when **show** lists no `endpoints`. Each entry gives the old limit (`parallel`), its `file`, its `scope` and the `models` that limit covered. A limit now belongs to one whole model, shared by every tier that names it, so a limit that covered several models is asked again for each of them.
+
+1. **The file the chosen scope does not write.** When an entry's `scope` is not the chosen scope, repair that file first, in a step of its own with its own preview and its own confirmation: for each model of its entries ask "How many children may run at once on `<model>`?", with the old limit as the default and "no limit" as the other answer. Then run **preview** with that entry's scope and a `setLimit` (or `clearLimit`) change for each model, and **apply** it after the confirmation, as steps 8 and 9 say. The preview removes the `endpoints:` map from that file and shows the removal in its diff. The change is checked without the load errors that only the chosen scope's own file still has, which the next steps repair. **show** again afterwards, and go on.
+2. **The file the chosen scope writes.** Its `endpoints:` map is removed by the preview of the steps below. Step 6 asks the limit of each model with the old limit as the default.
+3. **When the user declines a repair step**, nothing is written and the init ends: say so, and that the file keeps failing to load until it is repaired, which guided init does again on the next run.
+
 ### 3. List the models
 
 Run **models**. If it fails, relay the message and stop. When no models are listed, the user needs to set up a provider in pi first, which is outside this flow.
 
-Print the full list as compact text, grouped by endpoint (the part of the name before the first slash). For each model, give the name, context window, thinking levels and input/output cost. The question options can hold only a few models, so this list is how the user sees the rest.
+Print the full list as compact text, grouped by provider (the part of the name before the first slash). For each model, give the name, context window, thinking levels and input/output cost. The question options can hold only a few models, so this list is how the user sees the rest.
 
 ### 4. Choose a model for each tier
 
@@ -65,14 +74,14 @@ Ask about `medium` first, because it is required. Then ask about `small` and `la
 
 Offer only the levels the model lists. If the only level is `off`, use it without asking. A kept model keeps its current level. Under the global scope, a kept model keeps the level of its `global` value; a tier marked `source: project` with no `global` value counts as not set, so ask its level like a new tier.
 
-### 6. Ask a parallel limit for each endpoint in use
+### 6. Ask a parallel limit for each model in use
 
-For each endpoint the chosen tiers use, ask one question that names the tiers and models on it: "How many children may run at once on `local`, used by small (local/qwen3-4b) and medium (local/qwen3-coder-30b)?"
+For each model the chosen tiers use, ask one question that names the tiers on it: "How many children may run at once on `local/qwen3-coder-30b`, used by medium and large?" Tiers that name the same model share one limit, so ask once per model.
 
 - Answers are a whole number of 1 or more, or "no limit". The current limit is the default. Under the global scope, the default of a limit marked `source: project` is its `global` parallel; with no `global` value it counts as not set, so do not offer the project's value.
-- A single-GPU local server usually wants 1.
-- Skip endpoints that only an agent's tier override uses. Their limits stay as they are.
-- Two pi providers that point at the same server still count as two endpoints.
+- **A model the old `endpoints:` map covered** defaults to the old limit of that entry, from **show**'s `endpoints` (its `models`), when it has no limit of its own yet. A limit that covered several models is offered to each of them, which can give each model its own value.
+- A model on a single-GPU local server usually wants 1. A server that runs several models at once on one GPU needs a limit for each of them.
+- Skip models that only an agent's tier override names. Their limits stay as they are, and a model of an `endpoints:` entry that only an override names gets its old limit from the preview.
 
 ### 7. Offer the reachability check
 
@@ -82,12 +91,12 @@ If the user says yes, run **check** for each new or changed tier's model and thi
 
 ### 8. Preview and confirm
 
-Run **preview** with the scope and every change: tiers set or removed, and limits set or cleared.
+Run **preview** with the scope and every change: tiers set or removed, and limits set or cleared. When the file of the scope still holds `endpoints:`, the preview removes it and shows that in the diff.
 
 - If it lists refusals or reports the result as invalid, explain them and go back to the step that needs a different answer.
 - If there is nothing to change, say so and stop.
 - For the global scope, read out the preview's `overridden` list: for each tier or limit on it, say that this project keeps its own, so the change does not apply here, before you ask to confirm.
-- For the global scope, also say that the change is checked against this project only: "this is checked against this project only; another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed."
+- For the global scope, also say that the change is checked against this project only: "this is checked against this project only; another project whose agents use a tier you remove, or whose own limit belongs to a model you move away from, may fail to load until it is fixed."
 
 Otherwise show the diff and the summary unchanged, then ask: "Write this to `<file>`?", naming the global file or `.agents/subzero.yaml` as the scope says. Offer three options: write it, change something, or cancel.
 

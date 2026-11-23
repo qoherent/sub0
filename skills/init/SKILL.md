@@ -55,8 +55,8 @@ If the arguments above are empty, run the guided setup.
    `<changes>` is any mix of these flags:
    - `--tier <tier>=<model>:<thinking>`, for example `--tier medium=ollama/qwen2.5-coder:7b:medium`; the thinking level is always last;
    - `--unset <tier>`;
-   - `--limit <endpoint>=<n>`;
-   - `--no-limit <endpoint>`.
+   - `--limit <model>=<n>`, for example `--limit local/qwen-coder:30b=2`; the limit is the digits after the last `=`;
+   - `--no-limit <model>`.
 
 3. After a write that created the file, or added or removed a tier, tell the user to start a new Claude Code session. Claude's routing text is built once per session, so the new tiers route only from the next session. A write of the global file also needs a new session in every other open project.
 

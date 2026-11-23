@@ -1,13 +1,15 @@
 // @sigil implements design/agent-config.sigil AgentConfig (guided setup editor)
 //
-// Reads the tiers, endpoint limits and tier dependents of the layered agent files for
+// Reads the tiers, model limits and tier dependents of the layered agent files for
 // guided init, previews a change set to one of them, and applies a previewed change
 // set. The scope picks the file: the project's .agents/subzero.yaml or the global
 // file. Edits splice the existing text, so every line a change does not touch keeps
 // its bytes, and setup never adds an agent. A preview is bound to its apply by a
 // fingerprint over the layers' text, the change set and the scope; the result is
 // validated with the load rules delegation uses and written atomically, because
-// running delegations re-read the files on every call.
+// running delegations re-read the files on every call. A file that still holds the old
+// `endpoints:` map is repaired by a preview of its scope: the map goes and each model
+// it covered gets a limit of its own, pre-filled with the old value.
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, fchmodSync, mkdirSync, openSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -24,7 +26,6 @@ import {
   isSameFile,
   isThinkingLevel,
   LoadError,
-  modelEndpoint,
   PLACEHOLDER_STARTER_AGENTS,
   PROJECT_IS_GLOBAL,
   ProjectDisabledError,
@@ -54,10 +55,10 @@ export type SetupScope = 'global' | 'project';
 export type Change =
   | { op: 'setTier'; tier: string; model: string; thinking: ThinkingLevel }
   | { op: 'unsetTier'; tier: string }
-  | { op: 'setLimit'; endpoint: string; parallel: number }
-  | { op: 'clearLimit'; endpoint: string };
+  | { op: 'setLimit'; model: string; parallel: number }
+  | { op: 'clearLimit'; model: string };
 
-/** A change set that cannot be previewed at all: a malformed change, or two changes to one tier or endpoint. */
+/** A change set that cannot be previewed at all: a malformed change, or two changes to one tier or model. */
 export class ChangeSetError extends Error {
   readonly code = 'invalid_change_set';
   constructor(message: string) {
@@ -112,7 +113,6 @@ export interface TierState {
   host: string;
   model: string;
   thinking: ThinkingLevel;
-  endpoint: string;
   /** The file the tier comes from. */
   source: SetupScope;
   /** Agents of this project that name this tier through `tier:` or a `tiers.<t>` override, in file order. */
@@ -126,21 +126,35 @@ export interface TierState {
 }
 
 export interface LimitState {
-  endpoint: string;
+  /** The full model id the limit belongs to. */
+  model: string;
   parallel: number;
   /** The file the limit comes from. */
   source: SetupScope;
-  /** Tiers whose model belongs to the endpoint. */
+  /** Tiers that name the model. */
   tiers: string[];
-  /** No tier uses the endpoint, an agent override model does: the limit is kept and not asked about. */
+  /** No tier names the model, an agent override does: the limit is kept and not asked about. */
   overrideOnly: boolean;
-  /** No model belongs to the endpoint: setup drops the limit. */
+  /** No tier and no override names the model: setup drops the limit. */
   unused: boolean;
-  /** The global file's own limit of this endpoint, present only when this project overrides a limit that file also holds. */
+  /** The global file's own limit of this model, present only when this project overrides a limit that file also holds. */
   global?: { parallel: number };
 }
 
-/** The tier and endpoint names this project's agent file names, as an override or a removal of the global file's. */
+/** One limit of an old `endpoints:` map that a file still holds, with the models it covered. */
+export interface EndpointState {
+  endpoint: string;
+  /** The old limit; null when the entry has none. */
+  parallel: number | null;
+  /** The file that holds the map. */
+  file: string;
+  /** Which scope writes that file. */
+  scope: SetupScope;
+  /** The models the old limit covered: the merged configuration's for the agent file, the global file's own tiers' for the global file. */
+  models: string[];
+}
+
+/** The tier and model names this project's agent file names, as an override or a removal of the global file's. */
 export interface Overridden {
   tiers: string[];
   limits: string[];
@@ -155,16 +169,20 @@ export interface SetupSnapshot {
   /** The project scope lists the merged tiers, the global scope the global file's. */
   tiers: TierState[];
   limits: LimitState[];
-  /** Endpoints that only agent override models use. */
-  overrideOnlyEndpoints: string[];
+  /** Models that only agent overrides name. */
+  overrideOnlyModels: string[];
+  /** Each `endpoints:` entry either file still holds, global file first; empty when none does. */
+  endpoints: EndpointState[];
   /** The tiers and limits of the global file that this project's agent file overrides or removes. */
   overridden: Overridden;
 }
 
 export type SetupState =
   | ({ status: 'ok' | 'no-file' } & SetupSnapshot)
-  /** The file fails to load only for what setup repairs: a limit no model uses. */
+  /** The file of the scope fails to load only for what setup repairs: an `endpoints:` map or a limit no model uses. */
   | ({ status: 'repairable'; problem: string } & SetupSnapshot)
+  /** The other scope's file holds `endpoints:`: setup repairs it first, in a step of its own, before the chosen scope. */
+  | ({ status: 'repair-other-first'; problem: string; repairFirst: { scope: SetupScope; file: string } } & SetupSnapshot)
   /** Any other load error, unchanged; the user fixes the file by hand. */
   | { status: 'refused'; agentFile: string; error: string };
 
@@ -193,8 +211,12 @@ export interface SetupPreview {
   /** The normalized change set the fingerprint covers. */
   changes: Change[];
   refusals: Refusal[];
-  /** Endpoints whose limit is removed because no model uses them after the change. */
+  /** Models whose limit is removed because no tier or override uses them after the change. */
   droppedLimits: string[];
+  /** Limits a repair pre-fills from the old `endpoints:` values, for the models the change set leaves alone. */
+  prefilled: PrefilledLimit[];
+  /** The `endpoints:` entries this preview removes from the file; empty when the file holds none. */
+  repairs: EndpointState[];
   /** For a global-scope preview, what this project's agent file overrides: the change does not apply here. */
   overridden: Overridden;
   /** The file text after the write; the refused changes are left out. */
@@ -208,6 +230,13 @@ export interface SetupPreview {
   invalid?: string;
   /** Hand back to applyChanges to write exactly this preview. */
   fingerprint: string;
+}
+
+export interface PrefilledLimit {
+  model: string;
+  parallel: number;
+  /** The old endpoint whose limit gave the value. */
+  endpoint: string;
 }
 
 export interface SetupApplyResult extends SetupPreview {
@@ -237,17 +266,21 @@ function readLayers(projectRoot: string): Layers {
 const targetPath = (l: Layers, scope: SetupScope) => (scope === 'global' ? l.globalPath : l.agentFile);
 const targetText = (l: Layers, scope: SetupScope) => (scope === 'global' ? l.globalText : l.projectText);
 
-/** Load text as the layers it is; a missing medium tier, general or fallback is not a problem setup repairs. */
-function catalogOf(l: Layers, global: string | null, project: string | null, lenient: boolean): AgentCatalog {
+/**
+ * Load text as the layers it is; a missing medium tier, general or fallback is not a problem setup repairs.
+ * An `endpoints:` map is read and reported in the catalog unless `legacy` is false, which makes it the load error.
+ */
+function catalogOf(l: Layers, global: string | null, project: string | null, lenient: boolean, legacy = true): AgentCatalog {
   return buildCatalog(global, project, {
     agentFile: l.agentFile,
     globalFile: l.globalPath,
     allowMissingStarter: true,
     ...(lenient ? { allowUnusedLimits: true } : {}),
+    ...(legacy ? { allowLegacyEndpoints: true } : {}),
   });
 }
 
-/** Load text with the rules delegation uses: a null tiers or models map, an unused own limit and a missing medium tier are errors. */
+/** Load text with the rules delegation uses: a null tiers or models map, an unused own limit, an `endpoints:` map and a missing medium tier are errors. */
 function strictCatalogOf(l: Layers, global: string | null, project: string | null): AgentCatalog {
   return buildCatalog(global, project, { agentFile: l.agentFile, globalFile: l.globalPath, starterAgents: PLACEHOLDER_STARTER_AGENTS });
 }
@@ -267,6 +300,7 @@ function loadsStrictly(l: Layers): boolean {
 /** What one file names, before merging: a tier or limit with a value, or a removal entry. */
 interface Named {
   tiers: Map<string, boolean>;
+  /** The models.parallel entries by full model id; null is a removal entry. */
   limits: Map<string, number | null>;
 }
 
@@ -281,17 +315,15 @@ function namedIn(text: string | null): Named {
   if (!isRecord(doc)) return out;
   const tiers = isRecord(doc.models) && isRecord(doc.models.tiers) ? doc.models.tiers : {};
   for (const [name, raw] of Object.entries(tiers)) out.tiers.set(name, raw !== null);
-  const endpoints = isRecord(doc.endpoints) ? doc.endpoints : {};
-  for (const [endpoint, raw] of Object.entries(endpoints)) {
-    out.limits.set(endpoint, isRecord(raw) && typeof raw.parallel === 'number' ? raw.parallel : null);
-  }
+  const parallel = isRecord(doc.models) && isRecord(doc.models.parallel) ? doc.models.parallel : {};
+  for (const [model, raw] of Object.entries(parallel)) out.limits.set(model, typeof raw === 'number' ? raw : null);
   return out;
 }
 
 /** The parallel limits a file sets as numbers, leaving out removal entries. */
 function numericLimits(text: string | null): Map<string, number> {
   const out = new Map<string, number>();
-  for (const [endpoint, parallel] of namedIn(text).limits) if (parallel !== null) out.set(endpoint, parallel);
+  for (const [model, parallel] of namedIn(text).limits) if (parallel !== null) out.set(model, parallel);
   return out;
 }
 
@@ -337,27 +369,27 @@ function viewOf(l: Layers, scope: SetupScope, global: string | null, project: st
 }
 
 function emptyCatalog(agentFile: string): AgentCatalog {
-  return { agentFile, entries: new Map(), tiers: new Map(), routing: { hook: true }, limits: new Map(), childHostOptions: {} };
+  return { agentFile, entries: new Map(), tiers: new Map(), routing: { hook: true }, limits: new Map(), legacyEndpoints: [], childHostOptions: {} };
 }
 
 function dependentsOf(catalog: AgentCatalog, tier: string): string[] {
   return [...catalog.entries.values()].filter((e) => e.tier === tier || e.overrides.has(tier)).map((e) => e.name);
 }
 
-function overrideEndpoints(catalog: AgentCatalog): Set<string> {
+function overrideModels(catalog: AgentCatalog): Set<string> {
   const out = new Set<string>();
   for (const entry of catalog.entries.values()) {
-    for (const override of entry.overrides.values()) if (override.model !== undefined) out.add(modelEndpoint(override.model));
+    for (const override of entry.overrides.values()) if (override.model !== undefined) out.add(override.model);
   }
   return out;
 }
 
-/** Endpoints that this project's models use beyond the tiers the scope lists: agent overrides, and its own tiers when editing the global file. */
-function extraEndpoints(view: View, scope: SetupScope): Set<string> {
+/** Models that this project names beyond the tiers the scope lists: agent overrides, and its own tiers when editing the global file. */
+function extraModels(view: View, scope: SetupScope): Set<string> {
   if (view.project === null) return new Set();
-  const out = overrideEndpoints(view.project);
+  const out = overrideModels(view.project);
   if (scope === 'global') {
-    for (const [name, tier] of view.project.tiers) if (view.projectNamed.tiers.get(name) === true) out.add(modelEndpoint(tier.model));
+    for (const [name, tier] of view.project.tiers) if (view.projectNamed.tiers.get(name) === true) out.add(tier.model);
   }
   return out;
 }
@@ -366,9 +398,30 @@ function extraEndpoints(view: View, scope: SetupScope): Set<string> {
 function overriddenIn(global: Named, project: Named): Overridden {
   return {
     tiers: [...global.tiers.keys()].filter((t) => project.tiers.has(t)),
-    limits: [...global.limits.keys()].filter((e) => project.limits.has(e)),
+    limits: [...global.limits.keys()].filter((m) => project.limits.has(m)),
   };
 }
+
+/** The `endpoints:` entries both files still hold, global file first, with the scope that writes each file. */
+function legacyOf(l: Layers): EndpointState[] {
+  let catalog: AgentCatalog;
+  try {
+    catalog = catalogOf(l, l.globalText, l.projectText, true);
+  } catch (err) {
+    if (!(err instanceof ProjectDisabledError)) throw err;
+    catalog = catalogOf(l, l.globalText, null, true);
+  }
+  return catalog.legacyEndpoints.map((e) => ({
+    endpoint: e.endpoint,
+    parallel: e.parallel,
+    file: e.file,
+    scope: e.file === l.globalPath ? 'global' : 'project',
+    models: e.models,
+  }));
+}
+
+const otherScope = (scope: SetupScope): SetupScope => (scope === 'global' ? 'project' : 'global');
+const endpointsKeyText = (e: EndpointState) => `${e.endpoint} (${e.parallel === null ? 'no limit' : `limit ${e.parallel}`}) covers ${e.models.length === 0 ? 'no model' : e.models.join(', ')}`;
 
 /**
  * The tiers, limits and tier dependents at a scope, or "no file". A file that fails to
@@ -408,7 +461,6 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
       host: t.host,
       model: t.model,
       thinking: t.thinking,
-      endpoint: modelEndpoint(t.model),
       source: fromProject(own),
       dependents: dependentsOf(project, tier),
       otherHost: options.host !== undefined && t.host !== options.host,
@@ -416,15 +468,15 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
       ...(global !== undefined ? { global: { host: global.host, model: global.model, thinking: global.thinking } } : {}),
     };
   });
-  const byOverride = extraEndpoints(view, scope);
-  const tierEndpoints = new Set(tiers.map((t) => t.endpoint));
-  const limits: LimitState[] = [...view.limits].map(([endpoint, parallel]) => {
-    const using = tiers.filter((t) => t.endpoint === endpoint).map((t) => t.tier);
-    const overrideOnly = using.length === 0 && byOverride.has(endpoint);
-    const own = typeof view.projectNamed.limits.get(endpoint) === 'number';
-    const global = scope === 'project' && own ? globalLimits.get(endpoint) : undefined;
+  const byOverride = extraModels(view, scope);
+  const tierModels = new Set(tiers.map((t) => t.model));
+  const limits: LimitState[] = [...view.limits].map(([model, parallel]) => {
+    const using = tiers.filter((t) => t.model === model).map((t) => t.tier);
+    const overrideOnly = using.length === 0 && byOverride.has(model);
+    const own = typeof view.projectNamed.limits.get(model) === 'number';
+    const global = scope === 'project' && own ? globalLimits.get(model) : undefined;
     return {
-      endpoint,
+      model,
       parallel,
       source: fromProject(own),
       tiers: using,
@@ -434,16 +486,38 @@ export function readSetupState(projectRoot: string, options: SetupStateOptions =
     };
   });
   const unused = limits.find((l) => l.unused);
-  const problem = view.problem ?? (unused === undefined ? undefined : `endpoint "${unused.endpoint}": no model of a tier or of a tier override belongs to it in ${agentFile}`);
+  const problem =
+    view.problem ?? (unused === undefined ? undefined : `model "${unused.model}": no tier or tier override uses it, so it cannot have a parallel limit in ${agentFile}`);
+  const endpoints = legacyOf(layers);
   const snapshot: SetupSnapshot = {
     agentFile,
     scope,
     fileFingerprint: text === null ? null : sha256(text),
     tiers,
     limits,
-    overrideOnlyEndpoints: [...byOverride].filter((e) => !tierEndpoints.has(e)),
+    overrideOnlyModels: [...byOverride].filter((m) => !tierModels.has(m)),
     overridden: overriddenIn(globalNamed, view.projectNamed),
+    endpoints,
   };
+  const elsewhere = endpoints.filter((e) => e.scope !== scope);
+  if (elsewhere.length > 0) {
+    const file = elsewhere[0]!.file;
+    const what = elsewhere.map(endpointsKeyText).join('; ');
+    return {
+      status: 'repair-other-first',
+      problem: `${file} holds "endpoints:", which "models.parallel" replaced (${what}): repair it first, in a step of its own`,
+      repairFirst: { scope: otherScope(scope), file },
+      ...snapshot,
+    };
+  }
+  const own = endpoints.filter((e) => e.scope === scope);
+  if (own.length > 0) {
+    return {
+      status: 'repairable',
+      problem: `${agentFile} holds "endpoints:", which "models.parallel" replaced (${own.map(endpointsKeyText).join('; ')}): setup removes it and gives each model a limit, pre-filled with the old value`,
+      ...snapshot,
+    };
+  }
   if (problem !== undefined) return { status: 'repairable', problem, ...snapshot };
   return { status: text === null ? 'no-file' : 'ok', ...snapshot };
 }
@@ -462,8 +536,8 @@ function tierRank(tier: string): number {
 
 /**
  * Validate a change set and put it in its canonical order: tiers small, medium, large,
- * then the rest by name, then limits by endpoint. Two changes to one tier or one
- * endpoint are rejected, as is a limit that is not a positive whole number.
+ * then the rest by name, then limits by model. Two changes to one tier or one
+ * model are rejected, as is a limit that is not a positive whole number.
  */
 export function normalizeChangeSet(changes: readonly Change[]): Change[] {
   if (!Array.isArray(changes)) throw new ChangeSetError('a change set must be a list of changes');
@@ -493,19 +567,19 @@ export function normalizeChangeSet(changes: readonly Change[]): Change[] {
         break;
       }
       case 'setLimit': {
-        const endpoint = nonEmpty(raw.endpoint, 'an endpoint name');
+        const model = nonEmpty(raw.model, 'a model name');
         const parallel = raw.parallel;
         if (typeof parallel !== 'number' || !Number.isSafeInteger(parallel) || parallel < 1) {
-          throw new ChangeSetError(`endpoint "${endpoint}": parallel must be a positive whole number`);
+          throw new ChangeSetError(`model "${model}": parallel must be a positive whole number`);
         }
-        once(`endpoint:${endpoint}`, `endpoint "${endpoint}"`);
-        out.push({ op: 'setLimit', endpoint, parallel });
+        once(`model:${model}`, `model "${model}"`);
+        out.push({ op: 'setLimit', model, parallel });
         break;
       }
       case 'clearLimit': {
-        const endpoint = nonEmpty(raw.endpoint, 'an endpoint name');
-        once(`endpoint:${endpoint}`, `endpoint "${endpoint}"`);
-        out.push({ op: 'clearLimit', endpoint });
+        const model = nonEmpty(raw.model, 'a model name');
+        once(`model:${model}`, `model "${model}"`);
+        out.push({ op: 'clearLimit', model });
         break;
       }
       default:
@@ -513,7 +587,7 @@ export function normalizeChangeSet(changes: readonly Change[]): Change[] {
     }
   }
   const key = (c: Change): [number, number, string] =>
-    'tier' in c ? [0, tierRank(c.tier), c.tier] : [1, 0, c.endpoint];
+    'tier' in c ? [0, tierRank(c.tier), c.tier] : [1, 0, c.model];
   return out.sort((x, y) => {
     const [a, b] = [key(x), key(y)];
     return a[0] - b[0] || a[1] - b[1] || (a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0);
@@ -571,6 +645,8 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
       changes,
       refusals: [{ change: null, message: PROJECT_IS_GLOBAL }],
       droppedLimits: [],
+      prefilled: [],
+      repairs: [],
       overridden: { tiers: [], limits: [] },
       text: l.globalText ?? '',
       diff: '',
@@ -585,7 +661,12 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   // The project scope inherits the global file's entries, and writes a removal entry for one it removes.
   const inherited = scope === 'project' ? namedIn(l.globalText) : namedIn(null);
   const inheritsTier = (tier: string) => inherited.tiers.get(tier) === true;
-  const inheritsLimit = (endpoint: string) => typeof inherited.limits.get(endpoint) === 'number';
+  const inheritsLimit = (model: string) => typeof inherited.limits.get(model) === 'number';
+  const hasLimit = (model: string) => typeof own.limits.get(model) === 'number';
+  // A file that holds `endpoints:` is repaired by this preview: the map goes and its models get limits of their own.
+  const repairs = legacyOf(l).filter((e) => e.file === agentFile);
+  const repairing = repairs.length > 0;
+  const changesTiers = changes.some((c) => 'tier' in c);
 
   const refusals: Refusal[] = [];
   const summary: string[] = [];
@@ -625,109 +706,126 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
       }
     }
   }
-  // The project scope counts the inherited medium tier; the global scope the project's own.
+  // The project scope counts the inherited medium tier; the global scope the project's own. A repair that sets no tier leaves a missing medium tier to the next step.
   const noMediumTier = !finalTiers.has(DEFAULT_TIER) && !(scope === 'global' && view.projectNamed.tiers.get(DEFAULT_TIER) === true);
-  if (noMediumTier) refusals.push({ change: null, message: 'the medium tier is required: choose a model for it' });
+  const mediumPending = noMediumTier && repairing && !changesTiers;
+  if (noMediumTier && !mediumPending) refusals.push({ change: null, message: 'the medium tier is required: choose a model for it' });
 
-  // Every limit either file holds, whether or not a model uses it now: a tier that moves onto its endpoint makes an inherited limit count.
+  // Every limit either file holds, whether or not a tier or override uses its model now: a tier that moves onto the model makes an inherited limit count.
   const allLimits = new Map<string, number>();
-  for (const [endpoint, parallel] of [...(scope === 'project' ? inherited.limits : []), ...own.limits]) {
-    if (parallel === null) allLimits.delete(endpoint);
-    else allLimits.set(endpoint, parallel);
+  for (const [model, parallel] of [...(scope === 'project' ? inherited.limits : []), ...own.limits]) {
+    if (parallel === null) allLimits.delete(model);
+    else allLimits.set(model, parallel);
   }
-  const used = extraEndpoints(view, scope);
-  for (const t of finalTiers.values()) used.add(modelEndpoint(t.model));
+  const used = extraModels(view, scope);
+  for (const t of finalTiers.values()) used.add(t.model);
+  // The old limit of an `endpoints:` entry goes to each model it covered that the change set leaves alone and the file has no limit of its own for; one model several entries cover keeps the smallest.
+  const prefilled = new Map<string, PrefilledLimit>();
+  const named = new Set(changes.flatMap((c) => (c.op === 'setLimit' || c.op === 'clearLimit' ? [c.model] : [])));
+  for (const entry of repairs) {
+    if (entry.parallel === null) continue;
+    for (const model of entry.models) {
+      const before = prefilled.get(model);
+      if (named.has(model) || hasLimit(model) || !used.has(model) || (before !== undefined && before.parallel <= entry.parallel)) continue;
+      prefilled.set(model, { model, parallel: entry.parallel, endpoint: entry.endpoint });
+    }
+  }
+  const limitChanges: Change[] = [...changes, ...[...prefilled.values()].map((p): Change => ({ op: 'setLimit', model: p.model, parallel: p.parallel }))];
   const finalLimits = new Map(allLimits);
   const setLimits = new Map<string, number>();
   const clearedLimits: string[] = [];
   const droppedLimits: string[] = [];
-  for (const change of changes) {
+  for (const change of limitChanges) {
     if (change.op === 'setLimit') {
-      if (!used.has(change.endpoint)) {
+      if (!used.has(change.model)) {
         refusals.push({
           change,
-          message: `endpoint "${change.endpoint}": no model of a tier or of a tier override belongs to it, so it cannot have a limit`,
+          message: `model "${change.model}": no tier or tier override uses it, so it cannot have a parallel limit`,
         });
         continue;
       }
-      const before = allLimits.get(change.endpoint);
+      const before = allLimits.get(change.model);
       if (before === change.parallel) continue;
+      const from = prefilled.get(change.model);
+      const why = from === undefined ? '' : ` (the old limit of endpoint ${from.endpoint})`;
       summary.push(
         before === undefined
-          ? `endpoint ${change.endpoint}: parallel limit ${change.parallel}`
-          : `endpoint ${change.endpoint}: parallel limit ${before} -> ${change.parallel}`,
+          ? `model ${change.model}: parallel limit ${change.parallel}${why}`
+          : `model ${change.model}: parallel limit ${before} -> ${change.parallel}${why}`,
       );
-      setLimits.set(change.endpoint, change.parallel);
-      finalLimits.set(change.endpoint, change.parallel);
-    } else if (change.op === 'clearLimit' && allLimits.has(change.endpoint)) {
-      summary.push(`endpoint ${change.endpoint}: remove the parallel limit`);
-      clearedLimits.push(change.endpoint);
-      finalLimits.delete(change.endpoint);
+      setLimits.set(change.model, change.parallel);
+      finalLimits.set(change.model, change.parallel);
+    } else if (change.op === 'clearLimit' && allLimits.has(change.model)) {
+      summary.push(`model ${change.model}: remove the parallel limit`);
+      clearedLimits.push(change.model);
+      finalLimits.delete(change.model);
     }
   }
-  for (const endpoint of allLimits.keys()) {
-    if (!finalLimits.has(endpoint) || used.has(endpoint)) continue;
-    finalLimits.delete(endpoint);
+  for (const model of allLimits.keys()) {
+    if (!finalLimits.has(model) || used.has(model)) continue;
+    finalLimits.delete(model);
     // A limit only the global file holds is ignored where no model uses it, so the project file has nothing to remove.
-    if (typeof own.limits.get(endpoint) !== 'number') continue;
-    summary.push(`endpoint ${endpoint}: remove the parallel limit, no model uses it any more`);
-    droppedLimits.push(endpoint);
+    if (typeof own.limits.get(model) !== 'number') continue;
+    summary.push(`model ${model}: remove the parallel limit, no tier or override uses it any more`);
+    droppedLimits.push(model);
   }
+  for (const entry of repairs) summary.push(`remove endpoints.${entry.endpoint}${entry.parallel === null ? '' : ` (limit ${entry.parallel})`}, which models.parallel replaced`);
 
   // Pass 1 edits the original in place: replace tier fields and limits, remove entries.
   const hasTier = (name: string) => own.tiers.get(name) === true;
-  const hasLimit = (endpoint: string) => typeof own.limits.get(endpoint) === 'number';
   const original = text ?? '';
   const first = createSplicer(original);
   const edits: Edit[] = [];
   for (const [name, tier] of setTiers) if (hasTier(name)) edits.push(...replaceTier(first.doc, name, tier));
   // An entry the file holds is deleted when removed, or when a removal entry gives way to a value; the project scope then writes a removal entry for an inherited tier.
   const goneTiers = [...unsetTiers.filter((t) => own.tiers.has(t)), ...[...setTiers.keys()].filter((t) => own.tiers.get(t) === false)];
+  const goneLimits = [...clearedLimits, ...droppedLimits, ...[...setLimits.keys()].filter((m) => own.limits.has(m) && !hasLimit(m))].filter((m) => own.limits.has(m));
   // A whole-file flow map keeps its sections: a section created again would land after its closing brace, and an emptied flow map is a valid empty map.
   const blockRoot = isMap(first.doc.contents) && first.doc.contents.flow !== true;
-  if (blockRoot && goneTiers.length > 0 && [...own.tiers.keys()].every((t) => goneTiers.includes(t))) {
-    // A tiers map left with no entry would be an empty value, which the loader rejects: it goes whole, and an emptied models with it. New tiers then create it again.
-    const models = first.doc.get('models', true);
-    const onlyTiers = isMap(models) && models.items.length === 1;
-    edits.push(...(onlyTiers ? deleteEntries(first, [], ['models']) : deleteEntries(first, ['models'], ['tiers'])));
-  } else {
-    edits.push(...deleteEntries(first, ['models', 'tiers'], goneTiers));
+  // A tiers or parallel map left with no entry would be an empty value, which the loader rejects: it goes whole, and an emptied models with it. New entries then create them again.
+  const tiersGoneAll = blockRoot && goneTiers.length > 0 && [...own.tiers.keys()].every((t) => goneTiers.includes(t));
+  const limitsGoneAll = blockRoot && goneLimits.length > 0 && [...own.limits.keys()].every((m) => goneLimits.includes(m));
+  const emptied = [...(tiersGoneAll ? ['tiers'] : []), ...(limitsGoneAll ? ['parallel'] : [])];
+  const modelsNode = first.doc.get('models', true);
+  const wholeModels = emptied.length > 0 && isMap(modelsNode) && modelsNode.items.length === emptied.length;
+  if (wholeModels) edits.push(...deleteEntries(first, [], ['models']));
+  else {
+    edits.push(...deleteEntries(first, ['models'], emptied));
+    if (!tiersGoneAll) edits.push(...deleteEntries(first, ['models', 'tiers'], goneTiers));
+    if (!limitsGoneAll) edits.push(...deleteEntries(first, ['models', 'parallel'], goneLimits));
   }
-  const goneLimits = [...clearedLimits, ...droppedLimits, ...[...setLimits.keys()].filter((e) => own.limits.has(e) && !hasLimit(e))].filter((e) => own.limits.has(e));
-  const keptLimits = [...own.limits.keys()].filter((e) => !goneLimits.includes(e));
-  if (goneLimits.length > 0) {
-    // A map left with no entry goes whole; new limits then create it again.
-    edits.push(...(keptLimits.length === 0 && blockRoot ? deleteEntries(first, [], ['endpoints']) : deleteEntries(first, ['endpoints'], goneLimits)));
+  for (const [model, parallel] of setLimits) {
+    if (hasLimit(model)) edits.push(replaceScalar(first.doc, ['models', 'parallel', model], parallel));
   }
-  for (const [endpoint, parallel] of setLimits) {
-    if (hasLimit(endpoint)) edits.push(replaceScalar(first.doc, ['endpoints', endpoint, 'parallel'], parallel));
-  }
+  // The old map goes with the comment lines attached to it.
+  if (repairing) edits.push(...deleteEntries(first, [], ['endpoints']));
   // Pass 2 adds new entries to the edited text.
   const second = edits.length === 0 ? first : createSplicer(applyEdits(original, edits));
   const newTiers: Record<string, ModelTier | null> = Object.fromEntries([...setTiers].filter(([name]) => !hasTier(name)));
   for (const tier of unsetTiers) if (scope === 'project' && inheritsTier(tier)) newTiers[tier] = null;
-  spliceTiers(second, newTiers);
-  const newLimits: Record<string, number | null> = Object.fromEntries([...setLimits].filter(([e]) => !hasLimit(e)));
-  for (const endpoint of clearedLimits) if (scope === 'project' && inheritsLimit(endpoint)) newLimits[endpoint] = null;
-  spliceLimits(second, newLimits);
+  const newLimits: Record<string, number | null> = Object.fromEntries([...setLimits].filter(([m]) => !hasLimit(m)));
+  for (const model of clearedLimits) if (scope === 'project' && inheritsLimit(model)) newLimits[model] = null;
+  spliceModels(second, newTiers, newLimits);
   const next = second.result();
 
   let invalid: string | undefined;
-  if (!noMediumTier) {
+  if (!noMediumTier || mediumPending) {
     // A file that loads with delegation's rules now must still load with them: setup does not write what stops delegation. A file already broken stays checked as before.
+    // A repair of a file with `endpoints:` leaves the other file's map, a missing medium tier and an unused limit to the next step.
     const strictBefore = loadsStrictly(l);
+    const legacy = repairing;
     try {
       if (scope === 'project') {
-        const result = catalogOf(l, l.globalText, next, false);
+        const result = catalogOf(l, l.globalText, next, false, legacy);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(result.limits, finalLimits)) invalid = MISMATCH;
         if (invalid === undefined && strictBefore) strictCatalogOf(l, l.globalText, next);
       } else {
-        const result = catalogOf(l, next, null, false);
+        const result = catalogOf(l, next, null, false, legacy);
         if (!sameTiers(result.tiers, finalTiers) || !sameLimits(numericLimits(next), finalLimits)) invalid = MISMATCH;
         // The change must leave this project loading, with its own limits counted as delegation counts them.
         if (invalid === undefined && view.project !== null) {
           if (strictBefore) strictCatalogOf(l, next, l.projectText);
-          else catalogOf(l, next, l.projectText, true);
+          else catalogOf(l, next, l.projectText, true, legacy);
         }
       }
     } catch (err) {
@@ -740,7 +838,7 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
   if (scope === 'global') {
     const named = view.projectNamed;
     overridden.tiers = [...setTiers.keys(), ...unsetTiers].filter((t) => named.tiers.has(t));
-    overridden.limits = [...setLimits.keys(), ...clearedLimits].filter((e) => named.limits.has(e));
+    overridden.limits = [...setLimits.keys(), ...clearedLimits].filter((m) => named.limits.has(m));
   }
 
   const fingerprint = sha256(JSON.stringify({ file: text, other, changes, scope, host: starter.host }));
@@ -751,6 +849,8 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
     changes,
     refusals,
     droppedLimits,
+    prefilled: [...prefilled.values()].filter((p) => setLimits.get(p.model) === p.parallel),
+    repairs,
     overridden,
     text: next,
     diff: next === original ? '' : unifiedDiff(text, next, scope === 'global' ? agentFile : AGENT_FILE),
@@ -771,7 +871,7 @@ function sameTiers(got: Map<string, ModelTier>, want: Map<string, ModelTier>): b
 }
 
 function sameLimits(got: Map<string, number>, want: Map<string, number>): boolean {
-  return got.size === want.size && [...want].every(([e, n]) => got.get(e) === n);
+  return got.size === want.size && [...want].every(([m, n]) => got.get(m) === n);
 }
 
 interface Edit {
@@ -913,19 +1013,51 @@ function deleteBlockEntry(text: string, keyStart: number, key: string): Edit {
   return { start, end, text: '' };
 }
 
-/** Plan new limits into endpoints, creating it when missing. */
-function spliceLimits(s: Splicer, limits: Record<string, number | null>): void {
-  if (Object.keys(limits).length === 0) return;
-  const entries = Object.fromEntries(Object.entries(limits).map(([e, n]) => [e, n === null ? null : { parallel: n }]));
-  if (s.insertInline(['endpoints'], entries)) return;
-  const at = s.mapAt(['endpoints']);
-  const lines = (indent: string) =>
+/**
+ * Plan new tiers into models.tiers and new limits into models.parallel, creating models and either map when
+ * missing. When models.tiers and models.parallel are both new they are created in one edit, so the
+ * text never gets two `models` keys or two inserts at one spot.
+ */
+function spliceModels(s: Splicer, tiers: Record<string, ModelTier | null>, limits: Record<string, number | null>): void {
+  if (Object.keys(limits).length === 0) return spliceTiers(s, tiers);
+  const limitLines = (indent: string) =>
     Object.entries(limits)
-      .map(([e, n]) => (n === null ? `${indent}${yamlKey(e)}:\n` : `${indent}${yamlKey(e)}:\n${indent}  parallel: ${n}\n`))
+      .map(([m, n]) => `${indent}${yamlKey(m)}:${n === null ? '' : ` ${n}`}\n`)
       .join('');
-  if (at !== undefined) s.insert(at.end, lines(at.indent));
-  else if (s.doc.has('endpoints')) throw new LoadError('agent file: endpoints must be a map for setup to add a limit to it');
-  else s.append(`endpoints:\n${lines('  ')}`);
+  const tierLines = (indent: string) =>
+    Object.entries(tiers)
+      .map(([name, tier]) => `${indent}${yamlKey(name)}:${tier === null ? '' : ` ${flowYaml({ host: tier.host, model: tier.model, thinking: tier.thinking })}`}\n`)
+      .join('');
+  const bothNew = Object.keys(tiers).length > 0 && !s.doc.hasIn(['models', 'tiers']) && !s.doc.hasIn(['models', 'parallel']);
+  if (!bothNew) {
+    // New tiers go after the last tier and a new parallel map to the end of models: one spot when tiers is the last key, so one edit, because two edits at one spot would nest the second under the first.
+    if (Object.keys(tiers).length > 0 && s.doc.hasIn(['models', 'tiers']) && !s.doc.hasIn(['models', 'parallel'])) {
+      const blockAt = (keys: string[]) => {
+        const node = s.doc.getIn(keys, true);
+        return isMap(node) && node.flow !== true && node.items.length > 0 ? s.mapAt(keys) : undefined;
+      };
+      const tiersAt = blockAt(['models', 'tiers']);
+      const models = blockAt(['models']);
+      if (tiersAt !== undefined && models !== undefined && tiersAt.end === models.end) {
+        s.insert(tiersAt.end, `${tierLines(tiersAt.indent)}${models.indent}parallel:\n${limitLines(`${models.indent}  `)}`);
+        return;
+      }
+    }
+    spliceTiers(s, tiers);
+    if (s.insertInline(['models', 'parallel'], limits)) return;
+    if (!s.doc.hasIn(['models', 'parallel']) && s.insertInline(['models'], { parallel: limits })) return;
+    const at = s.mapAt(['models', 'parallel']);
+    const models = at === undefined ? s.mapAt(['models']) : undefined;
+    if (at !== undefined) s.insert(at.end, limitLines(at.indent));
+    else if (models !== undefined) s.insert(models.end, `${models.indent}parallel:\n${limitLines(`${models.indent}  `)}`);
+    else if (s.doc.has('models')) throw new LoadError('agent file: models must be a map for setup to add a limit to it');
+    else s.append(`models:\n  parallel:\n${limitLines('    ')}`);
+    return;
+  }
+  if (s.insertInline(['models'], { tiers, parallel: limits })) return;
+  const models = s.mapAt(['models']);
+  if (models !== undefined) s.insert(models.end, `${models.indent}tiers:\n${tierLines(`${models.indent}  `)}${models.indent}parallel:\n${limitLines(`${models.indent}  `)}`);
+  else s.append(`models:\n  tiers:\n${tierLines('    ')}  parallel:\n${limitLines('    ')}`);
 }
 
 function splitLines(text: string): string[] {

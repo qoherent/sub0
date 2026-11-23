@@ -42,8 +42,8 @@ The init tools are on only for this run, and they switch off when the run ends. 
 - **models**: \`subzero_init_models\`.
 - **ask**: \`subzero_init_ask\` with \`question\` and, for a choice, \`options\`. Use it for the scope question, "every project or only this one", too. It shows a pick list with an "${OTHER}" entry for a typed answer, or a text box when there are no options, and returns the user's answer.
 - **check**: \`subzero_init_check\` with \`models\`, a list of \`{ model, thinking }\`.
-- **preview**: \`subzero_init_preview\` with the \`scope\` (\`global\` for every project, \`project\` for this one) and \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", endpoint, parallel }\` and \`{ op: "clearLimit", endpoint }\`.
-- **apply**: \`subzero_init_apply\` with the same \`scope\`, the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 8 show the preview, then call apply instead of asking "Write this?" with ask. For the global scope, read out the preview's \`overridden\` list before calling apply: this project keeps its own of each tier or limit on it, so the change does not apply here. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
+- **preview**: \`subzero_init_preview\` with the \`scope\` (\`global\` for every project, \`project\` for this one) and \`changes\`, a list of \`{ op: "setTier", tier, model, thinking }\`, \`{ op: "unsetTier", tier }\`, \`{ op: "setLimit", model, parallel }\` and \`{ op: "clearLimit", model }\`, where \`model\` is the full model id.
+- **apply**: \`subzero_init_apply\` with the same \`scope\`, the preview's \`fingerprint\` and the same \`changes\`. It shows subzero's diff and summary to the user and asks for confirmation itself, so in step 8 show the preview, then call apply instead of asking "Write this?" with ask. For the global scope, read out the preview's \`overridden\` list before calling apply: this project keeps its own of each tier or limit on it, so the change does not apply here. If the user declines, nothing is written and the init tools switch off; tell the user to run \`/subzero init\` again to change something. This holds for a repair step of step 2a too: declining it ends the init with nothing written. After a repair step is written the init tools stay on for the step of the chosen scope. If apply returns the stale preview error, the file or the changes differ from the preview: preview again and call apply again. Any other refusal, the write error and the load error included, ends the init: nothing is written, the init tools switch off, and you tell the user what was refused and that they can run \`/subzero init\` again once it is fixed.
 
 In step 9: pi refreshes the \`subagent\` tool's tier text right after the write, so no new session is needed in this session. A write of the global file also needs a new session in other open projects.`;
 
@@ -147,7 +147,6 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
     tier: Type.Optional(Type.String()),
     model: Type.Optional(Type.String()),
     thinking: Type.Optional(Type.String()),
-    endpoint: Type.Optional(Type.String()),
     parallel: Type.Optional(Type.Number()),
   });
   // Registered inactive: only `/subzero init`, which only the user can run, turns them on.
@@ -155,13 +154,13 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
 
   pi.registerTool({
     ...tool, name: 'subzero_init_show', label: 'subzero init: show',
-    description: "Guided subzero init: the merged current state (global file plus this project's file): each tier and limit marked by `source` (global or project), with the global file's own value as `global` on a tier or limit this project overrides, the `overridden` list of what this project keeps its own, the status and the large-tier warning. It takes no scope.",
+    description: "Guided subzero init: the merged current state (global file plus this project's file): each tier and limit marked by `source` (global or project), with the global file's own value as `global` on a tier or limit this project overrides, the `overridden` list of what this project keeps its own, the `endpoints` entries of an old `endpoints:` map that either file still holds (each with its old limit, file, scope and covered models), the status and the large-tier warning. It takes no scope.",
     parameters: Type.Object({}),
     execute: () => run(async () => ({ ok: true, ...(await service().show()) })),
   });
   pi.registerTool({
     ...tool, name: 'subzero_init_models', label: 'subzero init: models',
-    description: 'Guided subzero init: the models a subzero child can use, with endpoint, thinking levels, context window and cost.',
+    description: 'Guided subzero init: the models a subzero child can use, with provider, thinking levels, context window and cost.',
     parameters: Type.Object({}),
     execute: () => run(async () => ({ ok: true, ...(await service().models()) })),
   });
@@ -231,8 +230,16 @@ export function registerPiInit(pi: ExtensionAPI, options: PiInitOptions): PiInit
         }
         const { text: _text, diff: _diff, ...applied } = svc.apply(changes, args.fingerprint, scope);
         options.refreshTierText();
-        turnOff();
-        return { ok: true, ...applied, note: 'pi refreshed the subagent tier text; no new session is needed. The init tools are now off.' };
+        // A step that repaired an `endpoints:` map is followed by the step of the chosen scope, so the tools stay on; they switch off when the run ends.
+        const repaired = applied.repairs.length > 0;
+        if (!repaired) turnOff();
+        return {
+          ok: true,
+          ...applied,
+          note: repaired
+            ? 'pi refreshed the subagent tier text. The init tools stay on for the next step.'
+            : 'pi refreshed the subagent tier text; no new session is needed. The init tools are now off.',
+        };
       }, (err) => {
         // Only a stale preview lets the guided init preview again. Any other refusal, the write
         // error and the load error included, ends it with the init tools off and nothing written.
