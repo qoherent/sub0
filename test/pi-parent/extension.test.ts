@@ -13,7 +13,7 @@ describe('pi extension', () => {
     const fake = fakePi(root);
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
     await fake.emit('session_start');
-    expect([...fake.tools.keys()].sort()).toEqual(['subagent', 'subzero_await', 'subzero_cancel', 'subzero_tasks']);
+    expect([...fake.tools.keys()].sort()).toEqual(['subagent', 'subzero_await', 'subzero_cancel', 'subzero_continue', 'subzero_tasks']);
     const subagent = fake.tools.get('subagent')!;
     expect(subagent.executionMode).toBe('parallel');
     expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toMatch(/cheapest capable \(small\).*model: "small"/);
@@ -50,7 +50,7 @@ describe('pi extension with a global file', () => {
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port, STARTER), warn: () => {} }));
     await fake.emit('session_start');
     const subagent = fake.tools.get('subagent')!;
-    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toBe('Delegate an isolated task. Await background tasks before using their results.');
+    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toBe('Delegate an isolated task. Await background tasks before using their results. Send a running or finished task more with subzero_continue.');
     expect(await subagent.execute('call', { task: 'x' }, undefined, undefined, fake.context as any)).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/enabled: false/) }] });
     expect(started).toHaveLength(0);
   });

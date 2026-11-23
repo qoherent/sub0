@@ -15,12 +15,12 @@ describe('status text', () => {
   it('reports the completed task and other live tasks without including results', () => {
     const now = Date.parse('2026-01-01T00:00:10Z');
     const live = [{ taskId: 'two', agent: 'reviewer', status: 'running' as const, createdAt: '2026-01-01T00:00:00Z', enqueuedAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', startedAt: '2026-01-01T00:00:00Z' }];
-    const notice = completionNotice('one', 'completed', live, 'subzero_await', now);
+    const notice = completionNotice('one', 'completed', live, 'subzero_await', undefined, now);
     expect(notice).toMatch(/one.*completed/);
     expect(notice).toContain('subzero_await');
     expect(notice).toMatch(/two.*running, started/);
     expect(notice).toMatch(/wait/i);
-    expect(completionNotice('one', 'failed', [], 'subzero_await', now)).not.toMatch(/wait for/i);
+    expect(completionNotice('one', 'failed', [], 'subzero_await', undefined, now)).not.toMatch(/wait for/i);
     expect(stopNotice('one')).toMatch(/stopped.*no action/i);
   });
 });

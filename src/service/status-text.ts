@@ -5,14 +5,24 @@
 // here, so that no front end imports another front end for it.
 import type { StarterResult } from '../config/agent-config.js';
 import { isUnavailable, type DomainEvent, type Measure, type Result, type SessionUsage } from '../core/types.js';
-import type { CollectReply, DelegateReply, TaskListing } from './delegation-service.js';
+import type { CollectReply, ContinueReply, DelegateReply, TaskListing } from './delegation-service.js';
 
 export function formatProgress(agent: string, latest: string, elapsedMs: number): string {
   return `${agent} · ${latest} · ${formatElapsed(elapsedMs)}`;
 }
 
 export function describeTaskReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now = Date.now()): string {
-  if (reply.kind === 'result') return formatResult(reply.result);
+  if (reply.kind === 'result') {
+    const results = 'results' in reply && reply.results !== undefined ? reply.results : [reply.result];
+    const sections = results.map((r, i) => (i === results.length - 1 && reply.openedTurn !== undefined ? `${formatResult(r)}\n${openedLine(reply.openedTurn)}` : formatResult(r)));
+    return sections.join('\n\n');
+  }
+  if (reply.kind === 'results') {
+    const sections = reply.results.map((r) => (r.openedTurn !== undefined ? `${formatResult(r.result)}\n${openedLine(r.openedTurn)}` : formatResult(r.result)));
+    if (reply.then !== undefined) sections.push(describeTaskReply(reply.then, view, tools, now));
+    return sections.join('\n\n');
+  }
+  if (reply.kind === 'delivered') return `task: ${reply.taskId} · turn ${reply.turn} already reached you (${reply.status}); read it again with ${tools.collect === 'await' ? 'tasks' : tools.collect}`;
   const id = `task: ${reply.taskId}`;
   const lead = view !== undefined ? `${id} · ${view.agent}` : id;
   if (reply.kind === 'abandoned') return `${lead} · abandoned: its owner process died, so it has no result`;
@@ -22,9 +32,39 @@ export function describeTaskReply(reply: DelegateReply | CollectReply, view: { a
     : reply.kind === 'queued'
       ? formatStatusLine({ state: 'queued', model: reply.model, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt }, now)
       : formatStatusLine(statusFacts({ ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}), ...(reply.model !== undefined ? { model: reply.model } : {}), createdAt: reply.enqueuedAt }), now);
-  if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
+  const unidentified = 'continuable' in reply && reply.continuable === false ? '; this conversation could not be identified, so the task cannot be continued' : '';
+  if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}${unidentified}`;
   if (reply.kind === 'other_process') return `${lead} · ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
   return `${lead} · ${line}`;
+}
+
+/** The one line a result carries when messages held for its turn opened another turn. */
+function openedLine(turn: number): string {
+  return `note: a message queued for this turn opened turn ${turn}; its result follows when it settles`;
+}
+
+/** What `continue` answers: the delivery outcome first, with the task id leading the line. */
+export function describeContinueReply(
+  reply: ContinueReply,
+  tools: { collect: string; cancel: string },
+  view?: { agent: string; createdAt: string },
+  now = Date.now(),
+): string {
+  const lead = view !== undefined ? `task: ${reply.taskId} · ${view.agent}` : `task: ${reply.taskId}`;
+  switch (reply.kind) {
+    case 'not_delivered':
+      return `${lead} · not delivered: ${reply.reason}`;
+    case 'steered':
+      return `${lead} · steered: your message joined turn ${reply.turn}, which is still running; its single result will include it (collect it with ${tools.collect})`;
+    case 'queued':
+      return `${lead} · queued: the child has not started turn ${reply.turn}, so your message is held and delivered right after its prompt (collect with ${tools.collect})`;
+    case 'new_turn': {
+      const replay = reply.replayed !== undefined ? `, after ${reply.replayed} earlier message${reply.replayed === 1 ? '' : 's'} that never reached the child` : '';
+      const head = `${lead} · new turn: turn ${reply.turn} started from your message${replay}`;
+      if (reply.status.kind === 'result') return `${head}\n${describeTaskReply(reply.status, view, tools, now)}`;
+      return `${head}; ${describeTaskReply(reply.status, undefined, tools, now).replace(/^task: \S+ · /, '')}`;
+    }
+  }
 }
 
 export function formatElapsed(ms: number): string {
@@ -54,10 +94,13 @@ export function formatUsage(usage: SessionUsage): string {
 
 /** The task id comes first so it survives compaction of the parent's history. */
 export function formatResult(result: Result): string {
-  const head = [`task: ${result.taskId}`, result.agent, `status: ${result.status}`];
+  const head = [`task: ${result.taskId}`, ...(result.turn !== undefined ? [`turn ${result.turn}`] : []), result.agent, `status: ${result.status}`];
   if (result.failureKind !== undefined) head.push(`failure: ${result.failureKind}`);
   const lines = [head.join(' · ')];
   if (result.message !== undefined) lines.push(`message: ${result.message}`);
+  if (result.heldNotDelivered !== undefined) {
+    lines.push(`note: ${result.heldNotDelivered} follow-up message${result.heldNotDelivered === 1 ? '' : 's'} held for this turn did not reach the child`);
+  }
   if (result.summary !== undefined) lines.push('summary:', result.summary === '' ? '(empty)' : result.summary);
   if (result.usage !== undefined) {
     const duration = result.durationMs !== undefined ? ` · duration ${Math.round(result.durationMs / 1000)}s` : '';
@@ -109,8 +152,9 @@ export function listingStatus(t: TaskListing, now = Date.now()): string {
   return t.status === 'running' ? formatStatusLine(statusFacts(t), now) : t.status;
 }
 
-export function completionNotice(taskId: string, status: string, live: TaskListing[], collectTool: string, now = Date.now()): string {
-  const lines = [`task ${taskId} ${status}; collect its result with ${collectTool}.`];
+export function completionNotice(taskId: string, status: string, live: TaskListing[], collectTool: string, turn?: number, now = Date.now()): string {
+  const named = turn !== undefined && turn >= 2 ? `task ${taskId} turn ${turn}` : `task ${taskId}`;
+  const lines = [`${named} ${status}; collect its result with ${collectTool}.`];
   if (live.length > 0) {
     lines.push('Still running:');
     for (const task of live) lines.push(`- ${task.taskId} · ${task.agent} · ${listingStatus(task, now)}`);

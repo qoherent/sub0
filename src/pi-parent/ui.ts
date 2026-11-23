@@ -32,7 +32,7 @@ export class SessionWidget {
     const revision = ++this.revision;
     const tasks = await this.service.listLiveSession(this.sessionId);
     if (this.closed || revision !== this.revision) return;
-    const rows = tasks.map((task) => `${task.taskId} · ${task.agent} · ${task.tier ?? 'unknown'} · ${task.model ?? 'unknown'} · ${listingStatus(task)}`);
+    const rows = tasks.map((task) => `${task.taskId}${task.turn !== undefined && task.turn >= 2 ? ` turn ${task.turn}` : ''} · ${task.agent} · ${task.tier ?? 'unknown'} · ${task.model ?? 'unknown'} · ${listingStatus(task)}`);
     this.ctx.ui.setWidget('subzero', rows.length ? rows : undefined);
     if (rows.length && !this.timer) {
       this.timer = setInterval(() => void this.refresh(), 1000);

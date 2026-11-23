@@ -10,7 +10,9 @@ import { isTaskId } from '../core/ids.js';
 import type { ChildRunState } from '../core/types.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { EmptyBriefError, type DelegationService } from '../service/delegation-service.js';
-import { describeReply, formatAwaitWithShown, formatListing, REPLY_BUDGET_CHARS } from './format.js';
+import { describeContinueReply } from '../service/status-text.js';
+import { deliveredTurns, describeReply, formatAwaitWithShown, formatListing, REPLY_BUDGET_CHARS } from './format.js';
+import { readCallMarker, readPromptMarker } from './parent-session.js';
 import { ProgressReporter, type ProgressOptions } from './progress.js';
 import { SubzeroTaskStore } from './task-store.js';
 import { WakeMarkers } from './wake-markers.js';
@@ -19,6 +21,7 @@ export const SERVER_INSTRUCTIONS = [
   'Use the delegate tool to hand a task to a child on another model, naming an agent, a model tier, both or neither.',
   'Write a self-contained brief: the goal, the relevant file paths, the constraints and the output you expect.',
   'The child cannot see this conversation; it sees only the brief.',
+  'When the user tells you something a running child needs, or you want a finished child to go on, use the continue tool with its task id and a self-contained message: it steers a running child, holds the message for one that has not started, and starts a new turn on one that finished.',
 ].join(' ');
 
 export const MAX_AWAIT_SECONDS = 600;
@@ -64,6 +67,20 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: true },
     _meta: { 'anthropic/alwaysLoad': true },
+  },
+  {
+    name: 'continue',
+    description:
+      'Send a follow-up message to a task of this conversation. A running child is steered, one that has not started holds the message, and a finished child starts a new turn in the same session. Write the message self-contained: the child sees nothing else. The reply says which happened.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'The task id' },
+        message: { type: 'string', description: 'A self-contained message for the child' },
+        wait: { type: 'boolean', description: 'For a new turn: wait for its result; defaults to true' },
+      },
+      required: ['task', 'message'],
+    },
   },
   {
     name: 'cancel',
@@ -122,6 +139,49 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
   );
   let lastSession: string | undefined;
   let watcher: NodeJS.Timeout | undefined;
+  const wakeKey = (taskId: string, turn: number) => (turn >= 2 ? `${taskId}#${turn}` : taskId);
+  const wakeMarkers = (): WakeMarkers | undefined =>
+    options.wakeDataDir !== undefined && service.projectRoot !== undefined ? new WakeMarkers(options.wakeDataDir, service.projectRoot) : undefined;
+  /** Tell the Stop hook to wake Claude with the result of one turn, whatever the task mode. */
+  const armWake = (session: string, taskId: string, turn: number): void => {
+    const markers = wakeMarkers();
+    const done = service.resultOfTurn(taskId, turn);
+    if (markers === undefined || done === undefined) return;
+    const key = wakeKey(taskId, turn);
+    try { markers.start(session, key); } catch { return; /* A marker for this turn already waits. */ }
+    void done.then(async (result) => {
+      if (result.status === 'cancelled') { markers.clear(session, key); return; }
+      const body = `${describeReply({ kind: 'result', result })}\n\n${await service.notice(taskId, result.status, session, 'await', turn)}`;
+      markers.finish(session, key, JSON.stringify({ notice: body, collectedMarker: service.collectedMarkerPath(taskId, turn) }));
+    }).catch(() => { try { markers.clear(session, key); } catch { /* The marker may already be gone. */ } });
+  };
+  // A turn that held messages opened reports through a wake marker: no call is waiting for it.
+  const stopSink = service.onNotice((notice) => {
+    if (notice.parentSessionId === undefined) return;
+    if (notice.phase === 'opened') armWake(notice.parentSessionId, notice.taskId, notice.turn);
+  });
+  /**
+   * Ends a waited call when the user types: the prompt hook writes a prompt marker for the
+   * session, and only a call that the PreToolUse hook marked as made by the main conversation
+   * (a marker with no agent id) may end. A subagent call, or one with no marker, keeps waiting.
+   */
+  const watchTyping = (session: string | undefined, startedAtMs: number, toolUseId: unknown): { signal?: AbortSignal; stop: () => void } => {
+    const dir = options.wakeDataDir;
+    const root = service.projectRoot;
+    if (dir === undefined || root === undefined || session === undefined || typeof toolUseId !== 'string') return { stop() {} };
+    const controller = new AbortController();
+    const timer = setInterval(() => {
+      try {
+        const call = readCallMarker(dir, root, toolUseId);
+        if (call === undefined || call.agentId !== undefined) return;
+        const at = readPromptMarker(dir, root, session);
+        if (at !== undefined && at > startedAtMs) { controller.abort(); clearInterval(timer); }
+      } catch { /* An unreadable marker never ends a wait. */ }
+    }, 200);
+    timer.unref();
+    return { signal: controller.signal, stop: () => clearInterval(timer) };
+  };
+  const typedNote = 'note: the user sent a message, so this call stopped waiting; the child keeps running and its result wakes you when it settles';
   const syncSession = async (): Promise<string | undefined> => {
     await service.start();
     const current = options.parentSessionId();
@@ -141,7 +201,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
     watcher = setInterval(() => void syncSession().catch(() => undefined).finally(stopWatchingIfIdle), 5000);
     watcher.unref();
   };
-  server.onclose = () => { if (watcher) clearInterval(watcher); watcher = undefined; taskStore.cleanup(); };
+  server.onclose = () => { if (watcher) clearInterval(watcher); watcher = undefined; stopSink(); taskStore.cleanup(); };
 
   // The delegate description names the tiers the agent file holds now, read at each listing.
   async function delegateDescription(): Promise<string> {
@@ -251,6 +311,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
                   const withNotice = reply.notice === undefined ? result : { ...result, notice: reply.notice };
                   const body = `${describeReply(withNotice)}${notice ? `\n\n${notice}` : ''}`;
                   await store.storeTaskResult(task.taskId, result.kind === 'result' && result.result.status === 'failed' ? 'failed' : 'completed', text(body));
+                  if (result.kind === 'result') service.markDelivered(result.result.taskId, result.result.turn ?? 1);
                 } finally { taskStore.release(task.taskId); }
               })();
               if (args.wait === true || options.nonInteractive === true) {
@@ -274,6 +335,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             else extra.signal.addEventListener('abort', onAbort, { once: true });
           }
 
+          const typing = wait && !request.params.task ? watchTyping(parentSessionId, startedAt, request.params._meta?.['claudecode/toolUseId']) : { stop() {} };
           try {
             const reply = await service.delegate(
               delegation,
@@ -283,22 +345,20 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
                   ownTask = taskId;
                   if (wait && (cancelOwnWhenCreated || (extra.signal.aborted && Date.now() - startedAt < 120_000))) void service.cancel(taskId);
                 },
+                ...(typing.signal ? { until: typing.signal } : {}),
+                ...(options.nonInteractive === true ? { followOn: true } : {}),
                 ...(reporter ? { onEvent: (e) => reporter.onEvent(e) } : {}),
                 onState,
               },
             );
-            if (!wait && reply.kind !== 'result' && parentSessionId !== undefined && options.wakeDataDir !== undefined && service.projectRoot !== undefined) {
-              const markers = new WakeMarkers(options.wakeDataDir, service.projectRoot);
-              try {
-                markers.start(parentSessionId, reply.taskId);
-                void service.waitForCompletion(reply.taskId).then(async (done) => {
-                  if (done.kind !== 'result' || done.result.status === 'cancelled') markers.clear(parentSessionId, reply.taskId);
-                  else markers.finish(parentSessionId, reply.taskId, `${describeReply(done)}\n\n${await service.notice(reply.taskId, done.result.status, parentSessionId, 'await')}`);
-                }).catch(() => { try { markers.clear(parentSessionId, reply.taskId); } catch {} });
-              } catch { /* A marker failure must not lose a delegation. */ }
+            // A background task, or a waited one the user's message ended, reports through a wake marker.
+            const endedEarly = wait && typing.signal?.aborted === true && reply.kind !== 'result';
+            if ((!wait || endedEarly) && reply.kind !== 'result' && parentSessionId !== undefined) {
+              try { armWake(parentSessionId, reply.taskId, service.runningTurn(reply.taskId) ?? 1); } catch { /* A marker failure must not lose a delegation. */ }
             }
-            return text(describeReply(reply));
+            return text(endedEarly ? `${describeReply(reply)}\n${typedNote}` : describeReply(reply));
           } finally {
+            typing.stop();
             extra.signal.removeEventListener('abort', onAbort);
             reporter?.stop();
           }
@@ -312,8 +372,9 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             const view = views.find((v) => v.taskId === task);
             if (view === undefined) return text(`task: ${task} · no such task`);
             const reply = await service.collect(task);
-            if (reply.kind === 'result' && view.parentSessionId !== undefined && options.wakeDataDir && service.projectRoot) {
-              try { new WakeMarkers(options.wakeDataDir, service.projectRoot).clear(view.parentSessionId, task); } catch {}
+            const markers = wakeMarkers();
+            if (markers !== undefined && view.parentSessionId !== undefined) {
+              for (const turn of deliveredTurns(reply)) try { markers.clear(view.parentSessionId, wakeKey(turn.taskId, turn.turn)); } catch {}
             }
             return text(describeReply(reply, view));
           }
@@ -332,20 +393,67 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           };
           if (extra.signal.aborted) onAbort();
           else extra.signal.addEventListener('abort', onAbort, { once: true });
+          const typing = watchTyping(currentSession, startedAt, request.params._meta?.['claudecode/toolUseId']);
           let replies;
-          try { replies = await Promise.all(ids.map((id) => service.waitFor(id, seconds * 1000))); }
-          finally { extra.signal.removeEventListener('abort', onAbort); }
+          try { replies = await Promise.all(ids.map((id) => service.waitFor(id, seconds * 1000, typing.signal ? { until: typing.signal } : {}))); }
+          finally { extra.signal.removeEventListener('abort', onAbort); typing.stop(); }
           const formatted = formatAwaitWithShown(replies);
-          if (formatted.shown.length && options.wakeDataDir && service.projectRoot) {
-            const markers = new WakeMarkers(options.wakeDataDir, service.projectRoot);
+          const markers = wakeMarkers();
+          if (formatted.shown.length && markers !== undefined) {
             const owners = await service.list().catch(() => []);
-            for (const id of formatted.shown) {
-              const owner = owners.find((task) => task.taskId === id)?.parentSessionId;
-              if (owner !== undefined) try { markers.clear(owner, id); } catch {}
+            for (const { taskId, turn } of formatted.shown) {
+              const owner = owners.find((task) => task.taskId === taskId)?.parentSessionId;
+              if (owner !== undefined) try { markers.clear(owner, wakeKey(taskId, turn)); } catch {}
+            }
+          }
+          // A wait the user's message ended leaves each unsettled task to a wake marker.
+          const endedEarly = typing.signal?.aborted === true;
+          if (endedEarly && currentSession !== undefined) {
+            for (const reply of replies) {
+              const pending = reply.kind === 'results' ? reply.then : reply;
+              if (pending !== undefined && (pending.kind === 'running' || pending.kind === 'queued')) {
+                const turn = service.runningTurn(pending.taskId);
+                if (turn !== undefined) try { armWake(currentSession, pending.taskId, turn); } catch {}
+              }
             }
           }
           // Whole results while they fit, the first always; a later one that does not fit is deferred, never cut.
-          return text(formatted.body);
+          return text(endedEarly ? `${formatted.body}\n\n${typedNote}` : formatted.body);
+        }
+
+        case 'continue': {
+          const task = stringArg(args, 'task');
+          const message = stringArg(args, 'message');
+          if (task === undefined || !isTaskId(task)) return text(`"${task ?? ''}" is not a task id`, true);
+          if (message === undefined || message.trim() === '') return text('continue needs a message', true);
+          await service.start();
+          // A new turn waits unless asked not to; a steered or queued message always replies at once.
+          const wait = options.nonInteractive === true || args.wait !== false;
+          let ownTask: string | undefined = task;
+          const onAbort = () => {
+            if (Date.now() - startedAt < 120_000 && currentSession !== undefined) void service.cancelSession(currentSession);
+            else if (ownTask) void service.cancel(ownTask);
+          };
+          if (wait) {
+            if (extra.signal.aborted) onAbort();
+            else extra.signal.addEventListener('abort', onAbort, { once: true });
+          }
+          const typing = wait ? watchTyping(currentSession, startedAt, request.params._meta?.['claudecode/toolUseId']) : { stop() {} };
+          try {
+            const reply = await service.continue(
+              { taskId: task, message, ...(currentSession !== undefined ? { parentSessionId: currentSession } : {}) },
+              { wait, ...(typing.signal ? { until: typing.signal } : {}), ...(options.nonInteractive === true ? { followOn: true } : {}), onState: () => watchSessions() },
+            );
+            if (reply.kind === 'new_turn' && reply.status.kind !== 'result' && currentSession !== undefined) {
+              try { armWake(currentSession, task, reply.turn); } catch { /* A marker failure must not lose a continuation. */ }
+            }
+            const endedEarly = reply.kind === 'new_turn' && wait && typing.signal?.aborted === true && reply.status.kind !== 'result';
+            const body = describeContinueReply(reply, { collect: 'await', cancel: 'cancel' });
+            return text(endedEarly ? `${body}\n${typedNote}` : body);
+          } finally {
+            typing.stop();
+            extra.signal.removeEventListener('abort', onAbort);
+          }
         }
 
         case 'cancel': {

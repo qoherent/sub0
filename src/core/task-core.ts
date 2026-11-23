@@ -129,6 +129,9 @@ export class Turn {
     return this.finalResult;
   }
 
+  /** Whether this turn was opened by messages held for the one before it. */
+  viaHeld = false;
+
   /** Whether the child of this turn was sent its prompt. */
   get sentPrompt(): boolean {
     return this.promptSent;
@@ -339,6 +342,11 @@ export class Task {
   /** True once any child of the task was sent its prompt, which means the task has a child session. */
   promptEver = false;
 
+  /** The child host options the next start hands the port; the service sets them before it releases a turn. */
+  setChildHostOptions(options: ChildHostOptions): void {
+    this.childHostOptions = options;
+  }
+
   constructor(
     readonly core: TaskCore,
     taskId: string,
@@ -346,7 +354,7 @@ export class Task {
     private readonly brief: string,
     readonly port: ChildPort,
     createdAt: string,
-    private readonly childHostOptions: ChildHostOptions = {},
+    private childHostOptions: ChildHostOptions = {},
   ) {
     this.taskId = taskId;
     this.agent = agent;
@@ -498,7 +506,7 @@ export class Task {
     const enqueuedAt = new Date().toISOString();
     let claimed = false;
     try {
-      claimed = this.core.store.claimTurn(this.taskId, number, { message: messages[0]!, replayed: messages.slice(0, 0), enqueuedAt });
+      claimed = this.core.store.claimTurn(this.taskId, number, { viaHeld: true, message: messages[0]!, enqueuedAt });
     } catch (err) {
       this.core.warn(`could not open turn ${number} of ${this.taskId}: ${(err as Error).message}`);
     }
@@ -507,6 +515,7 @@ export class Task {
       return;
     }
     const turn = new Turn(this, number, enqueuedAt, { kind: 'resume', message: messages[0]! }, messages.slice(1));
+    turn.viaHeld = true;
     this.turns.push(turn);
     if (this.core.onTurnOpened !== undefined) this.core.onTurnOpened(this, turn);
     else turn.release();

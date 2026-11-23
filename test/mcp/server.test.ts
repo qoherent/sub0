@@ -96,10 +96,10 @@ describe('ClaudeMcpServer', () => {
     expect(textOf(result)).toMatch(/missing.*subzero init.*Agent tool.*passback/s);
     expect(await service.list()).toEqual([]);
   });
-  it('exposes four tools and only delegate and await are always loaded', async () => {
+  it('exposes five tools and only delegate and await are always loaded', async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['await', 'cancel', 'delegate', 'tasks']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['await', 'cancel', 'continue', 'delegate', 'tasks']);
     for (const tool of tools) expect(Boolean(tool._meta?.['anthropic/alwaysLoad'])).toBe(tool.name === 'delegate' || tool.name === 'await');
     expect(client.getInstructions()).toMatch(/self-contained brief/);
     expect(client.getInstructions()).toMatch(/cannot see this conversation/);
@@ -496,7 +496,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     const { client, root } = await connect({}, null, undefined, TIERED_YAML);
     const delegateText = async () => {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual(['await', 'cancel', 'delegate', 'tasks']);
+      expect(tools.map((t) => t.name).sort()).toEqual(['await', 'cancel', 'continue', 'delegate', 'tasks']);
       return tools.find((t) => t.name === 'delegate')!.description!;
     };
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'agents: [');

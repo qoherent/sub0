@@ -6,26 +6,27 @@ import { configuredTierNames } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
 import type { Kernel } from '../kernel/kernel.js';
 import type { DelegationService, TaskListing } from '../service/delegation-service.js';
-import { describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
+import { describeContinueReply, describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
 import { INIT_SYNTAX, registerPiInit } from './init.js';
 import { mapPiRequest } from './request.js';
 import { sendCompletion, sendStopped } from './notices.js';
 import { clashWarning, SessionWidget } from './ui.js';
 
 const names = { collect: 'subzero_await', cancel: 'subzero_cancel' };
+const TYPED_NOTE = 'note: you sent a message, so this call stopped waiting; the child keeps running and its result arrives as a completion notice';
 const result = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) });
 const describe = (reply: Parameters<typeof describeTaskReply>[0]) =>
   withNotice(describeTaskReply(reply, undefined, names), 'notice' in reply ? reply.notice : undefined);
 const formatSessionListing = (tasks: TaskListing[]) =>
   tasks.length ? tasks.map((task) => `${task.taskId} · ${task.agent} · ${listingStatus(task)}`).join('\n') : 'no tasks';
 const USAGE = `Usage: /subzero [attach <id> | cancel [id] | ${INIT_SYNTAX}]`;
-const BASE_DESCRIPTION = 'Delegate an isolated task. Await background tasks before using their results.';
+const BASE_DESCRIPTION = 'Delegate an isolated task. Await background tasks before using their results. Send a running or finished task more with subzero_continue.';
 
 /** The `subagent` description: each tier phrase, configured or not, from the project's agent file. */
 function tierDescription(root: string): string {
   try {
     const tiers = configuredTierNames(root);
-    return ['Delegate an isolated task. Await background tasks with subzero_await before using their results.',
+    return ['Delegate an isolated task. Await background tasks with subzero_await before using their results. Send a running or finished task more with subzero_continue.',
       ...TIER_WORDS.map(({ tier, phrase }) => tiers.includes(tier)
         ? `${phrase} (${tier}): pass model: "${tier}".`
         : `${phrase} (${tier}): not configured, omit model.`),
@@ -44,6 +45,25 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
   let widget: SessionWidget | undefined;
   let warning: string | undefined;
   let description = BASE_DESCRIPTION;
+  let stopNotices: (() => void) | undefined;
+  /** The waited calls a message typed mid-turn may end, each by its own signal. */
+  const waits = new Set<AbortController>();
+  const startWait = (): { until: AbortSignal; done: () => void; ended: () => boolean } => {
+    const controller = new AbortController();
+    waits.add(controller);
+    return { until: controller.signal, done: () => waits.delete(controller), ended: () => controller.signal.aborted };
+  };
+  /** Send the completion notice of one turn once it settles, unless it was cancelled or the session closed. */
+  const notifyWhenSettled = (svc: DelegationService, taskId: string, turn: number, parentSessionId: string): void => {
+    const activeSession = session;
+    const done = svc.resultOfTurn(taskId, turn);
+    if (done === undefined) return;
+    void done.then(async (settled) => {
+      if (settled.status === 'cancelled' || activeSession.closed) return;
+      const notice = await svc.notice(taskId, settled.status, parentSessionId, 'subzero_await', turn);
+      if (!activeSession.closed) sendCompletion(pi, notice);
+    }).catch(() => {});
+  };
   const getService = () => {
     if (!service) throw new Error('subzero session has not started');
     return service;
@@ -64,14 +84,30 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     })().finally(() => { stopping = undefined; });
     return stopping;
   };
-  pi.on('session_start', async (_event, ctx) => {
+  pi.on('session_start', async (event, ctx) => {
+    stopNotices?.();
     service = createService(ctx);
     sessionId = ctx.sessionManager.getSessionId();
     projectRoot = ctx.cwd;
     session = { closed: false };
+    const activeSession = session;
     widget = new SessionWidget(service, sessionId, ctx);
     description = BASE_DESCRIPTION;
     await service.start();
+    // A turn that held messages opened reports here, since no call waits for it.
+    const svc = service;
+    stopNotices = svc.onNotice((notice) => {
+      if (notice.phase !== 'settled' || notice.parentSessionId !== sessionId || notice.result.status === 'cancelled' || activeSession.closed) return;
+      void svc.notice(notice.taskId, notice.result.status, sessionId, 'subzero_await', notice.turn).then((text) => {
+        if (!activeSession.closed) sendCompletion(pi, text);
+      });
+    });
+    if (event?.reason === 'reload' || event?.reason === 'resume') {
+      try {
+        const report = await svc.reloadReport(sessionId);
+        if (report !== undefined) sendStopped(pi, report);
+      } catch { /* A report that cannot be built must not stop the session from starting. */ }
+    }
     description = tierDescription(ctx.cwd);
     pi.setActiveTools(pi.getActiveTools());
     warning = clashWarning(pi, ownFile);
@@ -86,10 +122,18 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     session.closed = true;
     widget?.close();
     const count = (await svc.listLiveSession(sessionId)).length;
-    void svc.cancelSession(sessionId);
+    stopNotices?.();
+    stopNotices = undefined;
+    // The session ends here, so each stopped turn is recorded as stopped by a session end.
+    void svc.cancelSession(sessionId, 'session_end');
     if (!(await svc.shutdown())) killRemaining();
     service = undefined;
     if (count && ctx.hasUI) ctx.ui.notify(`${count} subzero tasks cancelled`);
+  });
+  // A message typed while the parent is blocked in a wait ends that wait, cancelling nothing.
+  pi.on('input', (event) => {
+    if (event.streamingBehavior === 'steer') for (const controller of waits) controller.abort();
+    return { action: 'continue' as const };
   });
   pi.on('agent_settled', async (event, ctx) => {
     if (!event.aborted || !service) return;
@@ -120,9 +164,12 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
           if (signal.aborted) throw new Error('task was stopped; no action is needed');
           signal.addEventListener('abort', abort, { once: true });
         }
+        const typing = wait && !forced ? startWait() : undefined;
         const response = svc.delegate(mapped.delegation, {
           wait,
           ...(wait && signal ? { signal } : {}),
+          ...(typing ? { until: typing.until } : {}),
+          ...(forced ? { followOn: true } : {}),
           onState: (state) => {
             void activeWidget?.refresh();
             if (wait) return;
@@ -130,15 +177,20 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
             queueMicrotask(() => void (async () => {
               const dispatched = await response;
               const id = dispatched.kind === 'result' ? dispatched.result.taskId : dispatched.taskId;
-              const collected = await svc.collect(id);
-              if (collected.kind !== 'result' || collected.result.status === 'cancelled' || activeSession.closed) return;
-              const notice = await svc.notice(id, collected.result.status, mapped.delegation.parentSessionId!, 'subzero_await');
+              if (dispatched.kind === 'result') return;
+              const settled = await svc.resultOfTurn(id, 1);
+              if (settled === undefined || settled.status === 'cancelled' || activeSession.closed) return;
+              const notice = await svc.notice(id, settled.status, mapped.delegation.parentSessionId!, 'subzero_await');
               if (!activeSession.closed) sendCompletion(pi, notice);
             })().catch(() => {}));
           },
         });
-        const reply = await response.finally(() => signal?.removeEventListener('abort', abort));
+        const reply = await response.finally(() => { signal?.removeEventListener('abort', abort); typing?.done(); });
         let text = describe(reply);
+        if (typing?.ended() && reply.kind !== 'result') {
+          text += `\n${TYPED_NOTE}`;
+          notifyWhenSettled(svc, reply.taskId, svc.runningTurn(reply.taskId) ?? 1, mapped.delegation.parentSessionId!);
+        }
         if (mapped.notice) text = withNotice(text, mapped.notice);
         if (forced && args.async === true) text += '\nnotice: this mode waits for the result.';
         return text;
@@ -156,10 +208,59 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         const abort = () => void stopSession(svc, ctx);
         if (signal?.aborted) abort();
         else signal?.addEventListener('abort', abort, { once: true });
+        const typing = startWait();
         try {
-          return (await Promise.all(args.tasks.map((id) => svc.waitFor(id, seconds * 1000)))).map(describe).join('\n\n');
+          const replies = await Promise.all(args.tasks.map((id) => svc.waitFor(id, seconds * 1000, { until: typing.until })));
+          let text = replies.map(describe).join('\n\n');
+          if (typing.ended()) {
+            text += `\n\n${TYPED_NOTE}`;
+            for (const reply of replies) {
+              const pending = reply.kind === 'results' ? reply.then : reply;
+              if (pending !== undefined && (pending.kind === 'running' || pending.kind === 'queued')) {
+                const turn = svc.runningTurn(pending.taskId);
+                if (turn !== undefined) notifyWhenSettled(svc, pending.taskId, turn, sessionId);
+              }
+            }
+          }
+          return text;
         } finally {
           signal?.removeEventListener('abort', abort);
+          typing.done();
+        }
+      });
+    },
+  });
+  pi.registerTool({
+    name: 'subzero_continue', label: 'Continue a subzero task',
+    description:
+      'Send a follow-up message to a task of this session. A running child is steered, one that has not started holds the message, and a finished child starts a new turn in the same session. Write the message self-contained: the child sees nothing else.',
+    parameters: Type.Object({ task: Type.String(), message: Type.String(), async: Type.Optional(Type.Boolean()) }),
+    async execute(_id, args, signal, _update, ctx) {
+      return respond(async () => {
+        const svc = getService();
+        const forced = ctx.mode === 'print' || ctx.mode === 'json';
+        const wait = forced || args.async === false;
+        const abort = () => void stopSession(svc, ctx);
+        if (wait && signal) {
+          if (signal.aborted) throw new Error('task was stopped; no action is needed');
+          signal.addEventListener('abort', abort, { once: true });
+        }
+        const typing = wait && !forced ? startWait() : undefined;
+        try {
+          const reply = await svc.continue(
+            { taskId: args.task, message: args.message, parentSessionId: sessionId },
+            { wait, ...(typing ? { until: typing.until } : {}), ...(forced ? { followOn: true } : {}), onState: () => void widget?.refresh() },
+          );
+          let text = describeContinueReply(reply, names);
+          if (reply.kind === 'new_turn' && reply.status.kind !== 'result') {
+            if (typing?.ended()) text += `\n${TYPED_NOTE}`;
+            // A new turn nobody waits for reports by completion notice.
+            notifyWhenSettled(svc, args.task, reply.turn, sessionId);
+          }
+          return text;
+        } finally {
+          signal?.removeEventListener('abort', abort);
+          typing?.done();
         }
       });
     },

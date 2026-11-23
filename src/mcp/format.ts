@@ -42,16 +42,23 @@ export function formatAwait(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, 
   return formatAwaitWithShown(replies, limit, now).body;
 }
 
+/** The turns of a reply whose results it gives whole: what a collect delivered. */
+export function deliveredTurns(reply: DelegateReply | CollectReply): { taskId: string; turn: number }[] {
+  if (reply.kind === 'result') return [{ taskId: reply.result.taskId, turn: reply.result.turn ?? 1 }];
+  if (reply.kind === 'results') return [...reply.results.map((r) => ({ taskId: r.result.taskId, turn: r.result.turn ?? 1 })), ...(reply.then !== undefined ? deliveredTurns(reply.then) : [])];
+  return [];
+}
+
 /** The complete result sections actually included in an await response. */
-export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): { body: string; shown: string[] } {
+export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): { body: string; shown: { taskId: string; turn: number }[] } {
   const sections: string[] = [];
-  const shown: string[] = [];
+  const shown: { taskId: string; turn: number }[] = [];
   let length = 0;
   for (const reply of replies) {
     const whole = describeReply(reply, undefined, now);
     const joined = length + (sections.length > 0 ? 2 : 0) + whole.length;
     const section = reply.kind === 'result' && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
-    if (reply.kind === 'result' && section === whole) shown.push(reply.result.taskId);
+    if (section === whole) shown.push(...deliveredTurns(reply));
     length += (sections.length > 0 ? 2 : 0) + section.length;
     sections.push(section);
   }

@@ -49,6 +49,8 @@ export interface TurnFile {
   replayed?: string[];
   /** When the turn opened; for turn 1 the creation time of the task. */
   enqueuedAt: string;
+  /** True when messages held for the turn before it settled opened this turn by themselves. */
+  viaHeld?: true;
   /** When the caller released its child run. */
   startedAt?: string;
   stopReason?: StopReason;
@@ -61,6 +63,8 @@ export type LoggedEvent = DomainEvent & { ts: string; turn?: number };
 
 /** What the caller gives when it opens a turn. */
 export interface OpenedTurn {
+  /** Set when held messages opened the turn, with no call of the caller behind it. */
+  viaHeld?: true;
   message?: string;
   replayed?: string[];
   enqueuedAt: string;
@@ -233,6 +237,21 @@ export class TaskStore implements TaskRecordWriter {
     return this.taskDir(taskId);
   }
 
+  /**
+   * Whether the process of an owner is alive with the start time it was recorded with: true,
+   * false, or undefined when the probe cannot tell.
+   */
+  ownerAlive(owner: OwnerProcess): boolean | undefined {
+    const startTime = this.probe.startTime(owner.pid);
+    if (startTime === undefined) return undefined;
+    return startTime !== null && (startTime === owner.startTime || owner.startTime === 'unknown');
+  }
+
+  /** True when the owner is this process. */
+  isOwner(owner: OwnerProcess): boolean {
+    return owner.pid === this.owner.pid && owner.startTime === this.owner.startTime;
+  }
+
   private get owner(): OwnerProcess {
     if (this.ownerProcess === undefined) {
       this.ownerProcess = { pid: process.pid, startTime: this.probe.startTime(process.pid) ?? 'unknown' };
@@ -292,6 +311,7 @@ export class TaskStore implements TaskRecordWriter {
     const body: TurnFile = {
       turn,
       owner: this.owner,
+      ...(opened.viaHeld === true ? { viaHeld: true as const } : {}),
       ...(opened.message !== undefined ? { message: opened.message } : {}),
       ...(opened.replayed !== undefined && opened.replayed.length > 0 ? { replayed: opened.replayed } : {}),
       enqueuedAt: opened.enqueuedAt,
@@ -358,6 +378,28 @@ export class TaskStore implements TaskRecordWriter {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
+  }
+
+  private reportedPath(taskId: string, turn: number): string {
+    return path.join(this.taskDir(taskId), 'turns', `${turn}.reported`);
+  }
+
+  /** Mark that a stopped turn was named in a reload report. A marker is never removed. */
+  markReported(taskId: string, turn: number): void {
+    try {
+      writeFileSync(this.reportedPath(taskId, turn), '', { flag: 'wx', mode: 0o600 });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+
+  isReported(taskId: string, turn: number): boolean {
+    return existsSync(this.reportedPath(taskId, turn));
+  }
+
+  /** Where the collected marker of a turn lives, so a front end can name it for another process to create. */
+  collectedMarkerPath(taskId: string, turn: number): string {
+    return this.collectedPath(taskId, turn);
   }
 
   isCollected(taskId: string, turn: number): boolean {
