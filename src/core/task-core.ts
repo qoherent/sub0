@@ -129,6 +129,11 @@ export class Turn {
     return this.finalResult;
   }
 
+  /** How many state listeners are attached; a settled turn the limiter watched holds none of its own. */
+  get stateListenerCount(): number {
+    return this.stateListeners.size;
+  }
+
   /** Whether this turn was opened by messages held for the one before it. */
   viaHeld = false;
 

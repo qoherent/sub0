@@ -54,7 +54,11 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     return { until: controller.signal, done: () => waits.delete(controller), ended: () => controller.signal.aborted };
   };
   /** Send the completion notice of one turn once it settles, unless it was cancelled or the session closed. */
+  const notified = new Set<string>();
   const notifyWhenSettled = (svc: DelegationService, taskId: string, turn: number, parentSessionId: string): void => {
+    // A turn reports once, whichever call ended its wait or started it in the background.
+    if (notified.has(`${taskId}:${turn}`)) return;
+    notified.add(`${taskId}:${turn}`);
     const activeSession = session;
     const done = svc.resultOfTurn(taskId, turn);
     if (done === undefined) return;
@@ -177,11 +181,8 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
             queueMicrotask(() => void (async () => {
               const dispatched = await response;
               const id = dispatched.kind === 'result' ? dispatched.result.taskId : dispatched.taskId;
-              if (dispatched.kind === 'result') return;
-              const settled = await svc.resultOfTurn(id, 1);
-              if (settled === undefined || settled.status === 'cancelled' || activeSession.closed) return;
-              const notice = await svc.notice(id, settled.status, mapped.delegation.parentSessionId!, 'subzero_await');
-              if (!activeSession.closed) sendCompletion(pi, notice);
+              if (dispatched.kind === 'result' || activeSession.closed) return;
+              notifyWhenSettled(svc, id, 1, mapped.delegation.parentSessionId!);
             })().catch(() => {}));
           },
         });

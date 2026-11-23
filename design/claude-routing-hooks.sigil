@@ -76,7 +76,10 @@ component ClaudeRoutingHooks {
     A *wake marker* is a plugin data folder entry for one background task of a
     parent session id, or for one turn of such a task that opened without a
     call to wait for it. The *wake hook* is an asyncRewake Stop hook that watches
-    only those entries, never the store folder.
+    only those entries and never reads the store folder. A wake marker names the
+    path of the collected marker of its turn, which the wake hook creates, as an
+    empty file by exclusive create, once it has delivered the turn's result, so
+    that no other path delivers that result again; an error there is ignored.
 
     The *prompt hook* is a UserPromptSubmit hook, which Claude Code runs when
     the user submits a message, also while a tool call blocks. A

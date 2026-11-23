@@ -26,6 +26,32 @@ describe('pi session UI', () => {
     await fake.emit('session_shutdown', { reason: 'quit' });
   });
 
+  it('shows turn 2 in the widget row of a continued task and no turn number on turn 1', async () => {
+    const root = makeProject(TIERED_YAML);
+    const { port, runs } = manualPort({ steers: true, resume: true });
+    const fake = fakePi(root);
+    const service = new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} });
+    registerPiExtension(fake.api, () => service);
+    await fake.emit('session_start');
+    const run = (name: string, args: Record<string, unknown>) => fake.tools.get(name)!.execute('call', args, undefined, undefined, fake.context as any);
+    const reply = await run('subagent', { task: 'x' });
+    const id = /sz-[a-z2-7]{6}/.exec((reply.content[0] as { text: string }).text)![0];
+    await until(() => (fake.widgets.at(-1)?.length ?? 0) === 1);
+    expect(fake.widgets.at(-1)![0]).toContain(id);
+    expect(fake.widgets.at(-1)![0]).not.toMatch(/turn \d/);
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle();
+    await until(() => fake.widgets.at(-1) === undefined);
+    await run('subzero_continue', { task: id, message: 'again', async: true });
+    await until(() => runs.length === 2);
+    await until(() => /turn 2/.test(fake.widgets.at(-1)?.[0] ?? ''));
+    expect(fake.widgets.at(-1)![0]).toMatch(new RegExp(`${id} turn 2 · `));
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle();
+    await until(() => fake.widgets.at(-1) === undefined);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
   it('warns when pi-subagents still supplies a command', async () => {
     const root = makeProject(TIERED_YAML);
     const fake = fakePi(root);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { completionNotice, describeTaskReply, formatElapsed, stopNotice } from '../../src/service/status-text.js';
+import { completionNotice, describeContinueReply, describeTaskReply, formatElapsed, formatResult, stopNotice } from '../../src/service/status-text.js';
 
 describe('status text', () => {
   it('formats elapsed time', () => {
@@ -22,5 +22,31 @@ describe('status text', () => {
     expect(notice).toMatch(/wait/i);
     expect(completionNotice('one', 'failed', [], 'subzero_await', undefined, now)).not.toMatch(/wait for/i);
     expect(stopNotice('one')).toMatch(/stopped.*no action/i);
+  });
+
+  it('names the turn from turn 2 on, with the task id first, and says when held messages did not reach the child', () => {
+    const base = { taskId: 'sz-aaaaaa', agent: 'helper', status: 'completed' as const, summary: 'ok' };
+    expect(formatResult(base).split('\n')[0]).toBe('task: sz-aaaaaa · helper · status: completed');
+    expect(formatResult({ ...base, turn: 2 }).split('\n')[0]).toBe('task: sz-aaaaaa · turn 2 · helper · status: completed');
+    expect(formatResult({ ...base, status: 'failed', heldNotDelivered: 2 })).toMatch(/note: 2 follow-up messages held for this turn did not reach the child/);
+  });
+
+  it('words each delivery outcome with the task id first', () => {
+    const tools = { collect: 'await', cancel: 'cancel' };
+    expect(describeContinueReply({ kind: 'steered', taskId: 'sz-aaaaaa', turn: 1 }, tools)).toMatch(/^task: sz-aaaaaa · steered: .*turn 1.*single result/);
+    expect(describeContinueReply({ kind: 'queued', taskId: 'sz-aaaaaa', turn: 1 }, tools)).toMatch(/^task: sz-aaaaaa · queued: .*held/);
+    expect(describeContinueReply({ kind: 'not_delivered', taskId: 'sz-aaaaaa', reason: 'no such task' }, tools)).toBe('task: sz-aaaaaa · not delivered: no such task');
+    const started = describeContinueReply({ kind: 'new_turn', taskId: 'sz-aaaaaa', turn: 3, replayed: 2, status: { kind: 'started', taskId: 'sz-aaaaaa', startedAt: new Date().toISOString() } }, tools);
+    expect(started).toMatch(/^task: sz-aaaaaa · new turn: turn 3 started from your message, after 2 earlier messages that never reached the child; running/);
+  });
+
+  it('says a task started with no conversation cannot be continued', () => {
+    const line = describeTaskReply({ kind: 'started', taskId: 'sz-aaaaaa', startedAt: new Date().toISOString(), continuable: false }, undefined, { collect: 'await', cancel: 'cancel' });
+    expect(line).toMatch(/conversation could not be identified, so the task cannot be continued/);
+  });
+
+  it('names turn 2 in a completion notice and lists no turn for turn 1', () => {
+    expect(completionNotice('sz-aaaaaa', 'completed', [], 'subzero_await', 2)).toMatch(/^task sz-aaaaaa turn 2 completed/);
+    expect(completionNotice('sz-aaaaaa', 'completed', [], 'subzero_await')).toMatch(/^task sz-aaaaaa completed/);
   });
 });
