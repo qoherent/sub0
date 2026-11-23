@@ -36,7 +36,7 @@ do, what it deferred, and how it was checked.
 | Guided init and the global config file | Built: `init` with no model in both parents, `~/.agents/subzero.yaml` under the project file, `enabled: false`, pi extensions for every pi run. |
 | Tiered subagent routing for compound-engineering | Built and accepted in the R17 live run and its probes. |
 | Plugin distribution (`subzero@qoherent`) | Built and tested locally. A previous `plugin` branch is published; these changes and the pi package branch have not been published. The release workflow, first tag and model-backed walkthroughs are still to do. |
-| Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing and no go/no-go decision has been written. |
+| Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing; the go decision for v0.2 is written (2026-11-23). |
 | v0.2 (`continue` with steering, parallel limits per model) | Decided (decisions 35–57) and written into the Sigil contracts; the implementation plan is not written yet. |
 | v0.3 and later (the rest of the task model, other hosts) | Not started. |
 
@@ -158,7 +158,7 @@ The distribution work added:
 - The manual review-quality table is empty.
 - In the plumbing checks, several live checks are still "pending": R3, the
   orphan check of R4, R5, the attach check of R7, and R9 and R10.
-- The go/no-go paragraph for v0.2 is empty. The user writes it.
+- The go/no-go decision for v0.2 is written: go, in the narrowed scope (2026-11-23).
 
 **Small loose end**
 - The demo files name the `r9700` endpoint on purpose. The R17 run used a

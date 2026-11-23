@@ -116,7 +116,34 @@ Plan: [docs/plans/2026-11-06-0953-feat-tiered-subagent-routing-plan.md](plans/20
 
 ## Decision
 
-_Written by the user, citing the table above: build subzero v0.2 or not, and why._
+**Go: build v0.2, in the narrowed scope of decisions 35–57 in [decisions.md](decisions.md)** (2026-11-23).
+The user made the decision; Claude drafted this text from the table above at the user's request.
+
+Why, from the table:
+
+- **Quality held where it could be scored.** B, with the interpreters on local Qwen3.8 through subzero, found
+  every planted problem in every pass where its anchor Facets were read (2/2, 2/2, 3/3, 3/3), the same as the one
+  A pass with Claude interpreters. A-cheap (Claude Haiku interpreters) missed one. B-low found the two problems it
+  read.
+- **The main conversation stayed clean.** Main-conversation tokens were about 64–66k in every arm, so delegating
+  the interpreters to pi added nothing to the main conversation (G2).
+- **The interpreter work left the paid model.** In B, 2.8–3.8M interpreter tokens ran on the local model instead
+  of Claude.
+- **The plumbing and routing work live.** The R17 acceptance run and its probes, the platform probes and the
+  2026-11-23 probes (pi 1.5.2 checks, the Claude Code prompt-hook probe) show the delegation, routing, queueing,
+  whole results and wake paths behave as designed.
+
+What argues for care, also from the table:
+
+- **B was slow and did not save evaluator tokens.** B passes took 2.2–3.4 hours against 4.5 minutes for A on one
+  local GPU (`parallel: 1`), and the Claude evaluator spent 2.3–3.6M tokens waiting and collecting against 1.2M in
+  A. The cost saving is in interpreter tokens only; wall time and evaluator overhead grew.
+- **The comparison is incomplete.** One A pass instead of three, no B-control pass, one B pass with unread
+  anchors, an empty manual review table, and plumbing checks R3–R5, R7, R9 and R10 still pending live.
+
+Long-running children like B's are where v0.2's `continue` with steering earns its place: a child that goes the
+wrong way can be corrected mid-run instead of cancelled and restarted. Parallel limits per model fit the
+one-GPU setup the spike used. The missing passes and live checks stay open, and v0.2 does not depend on them.
 
 ## Parent adapter platform probe (2026-11-12)
 
