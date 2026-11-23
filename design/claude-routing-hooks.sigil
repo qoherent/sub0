@@ -94,7 +94,11 @@ component ClaudeRoutingHooks {
     nothing and end the flow. When a file fails with a load error, add a
     one-line warning that names that file and says routing is off as the
     routing text, which ends the flow. When it loads with no routable tier
-    that a tier word maps to, add nothing and end the flow. Otherwise build
+    that a tier word maps to, add nothing and end the flow. When the
+    *lock utility* that the deny memory runs, lockf on macOS and flock on
+    Linux, cannot be started, add a one-line warning that names it and says
+    routing is off instead of the routing text, because the PreToolUse hook
+    then allows every Agent spawn, which ends the flow. Otherwise build
     the routing text from each routable tier that a tier word maps to and add
     it to Claude's context, which ends the flow.
 
@@ -365,8 +369,9 @@ component ClaudeRoutingHooks {
     Add the routing text to Claude's context at each session start, resume,
     /clear and compaction, built from the merged configuration under the
     project root that CLAUDE_PROJECT_DIR names, read at that moment, or a
-    one-line warning when a file that exists fails to load, or nothing when
-    the project is off or no routable tier that a tier word maps to.
+    one-line warning when a file that exists fails to load or the
+    lock utility cannot be started, or nothing when the project is off or no
+    routable tier that a tier word maps to.
 
     Answer each Agent spawn of the Agent tool through the PreToolUse hook with
     allow, or with deny and the deny reason that Claude sees, as its logic

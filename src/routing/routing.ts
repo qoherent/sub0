@@ -11,7 +11,7 @@ import path from 'node:path';
 import { AGENT_FILE, globalFile, getRouting, MissingAgentFileError, routableTiers, type RoutableTier } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
 import { liveReadinessMarkers } from '../mcp/parent-session.js';
-import { withDenyLock } from './deny-lock.js';
+import { lockAvailable, lockProgram, withDenyLock } from './deny-lock.js';
 
 /** The delegate tool as Claude Code names it for the plugin. */
 export const DELEGATE_TOOL = 'mcp__plugin_subzero_subzero__delegate';
@@ -90,17 +90,29 @@ export function buildWarning(detail: string, file: string = AGENT_FILE): string 
   return `subzero routing is off: the config file ${file} does not load (${flat}). Every subagent runs on Claude until it is fixed.`;
 }
 
+/** One line telling Claude that routing is off because the deny lock's utility is missing. */
+export function buildLockWarning(program: string = lockProgram()): string {
+  return `subzero routing is off: the ${program} utility is not installed, and the routing hook needs it to coordinate sessions. Every subagent runs on Claude until ${program} is installed.`;
+}
+
 /**
  * What SessionStart adds to Claude's context for a project, or undefined for nothing.
  * A project that is off (no medium tier in the merged config, or enabled: false), no
  * project root, no routable tier word and any error other than a load error all add
- * nothing (R13, R18).
+ * nothing (R13, R18). A project that would route, on a machine without the deny lock's
+ * utility, gets the lock warning instead of the routing text, because the hook then
+ * allows every spawn through.
  */
-export function routingContext(projectRoot: string | undefined, taskMode: boolean | null = false): string | undefined {
+export function routingContext(
+  projectRoot: string | undefined,
+  taskMode: boolean | null = false,
+  lockReady: () => boolean = lockAvailable,
+): string | undefined {
   if (projectRoot === undefined) return undefined;
   try {
     const tiers = wordTiers(routableTiers(projectRoot));
-    return tiers.length === 0 ? undefined : buildRoutingText(tiers, taskMode);
+    if (tiers.length === 0) return undefined;
+    return lockReady() ? buildRoutingText(tiers, taskMode) : buildLockWarning();
   } catch (err) {
     if (err instanceof MissingAgentFileError) return undefined;
     if ((err as { code?: unknown }).code === 'load_error') {

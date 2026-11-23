@@ -151,6 +151,18 @@ describe('routingContext', () => {
     expect(text).toContain('model local/gl');
   });
 
+  it('warns that routing is off, naming the utility, when the deny lock utility is missing', () => {
+    const routed = project(`models:\n  tiers:\n${tier('medium', 'local/m')}`);
+    const text = routingContext(routed, false, () => false);
+    expect(text).toMatch(/^subzero routing is off: the (lockf|flock) utility is not installed/);
+    expect(text).not.toContain(DELEGATE_TOOL);
+    expect(routingContext(routed, false, () => true)).toContain('tier: "medium"');
+  });
+
+  it('adds nothing for a project that is off, even when the deny lock utility is missing', () => {
+    expect(routingContext(project(), false, () => false)).toBeUndefined();
+  });
+
   it('returns nothing with no project file and no global medium', () => {
     useGlobalConfig(`models:\n  tiers:\n${tier('large', 'local/gl')}`);
     expect(routingContext(project())).toBeUndefined();

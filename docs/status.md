@@ -91,10 +91,6 @@ The distribution work added:
 
 ### 1. To finish the current work
 
-- Deny-memory cleanup uses per-session operating-system locks so it cannot
-  remove a denial while another hook uses that session. A missing `lockf`
-  (macOS) or `flock` (Linux) makes the hook allow the Agent call through.
-
 **Release (distribution plan U7 and the transfer)**
 - Stage 1 walkthrough: install from `dist-release/local-marketplace` on a clean
   profile and run `init`, `tasks` and a routed task. It needs a logged-in
@@ -179,6 +175,9 @@ These are listed on the install page and are not fixed:
 - The parallel limit and the queue are per Claude Code session.
 - If the MCP server fails to start, the session-start text still says routing is
   on, and every subagent runs on Claude.
+- The routing hook needs `lockf` (macOS) or `flock` (Linux) for its per-session
+  locks. Without it every Agent call goes through to Claude; the session-start
+  text then says routing is off and names the missing utility.
 - Worktree-isolated and fork spawns always stay on Claude.
 - The agent file is not gated by a trust step (design.md §4.2 asks for one).
 - pi is the only child host, Claude Code and pi are the only parents, and

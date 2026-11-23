@@ -57,7 +57,8 @@ Once your global file has a `medium` tier, subzero is on in every project; put
 - macOS or Linux. Windows is not supported in this preview.
 - The system `lockf` utility on macOS or `flock` on Linux. The Agent routing
   hook uses it to coordinate concurrent sessions; if it is unavailable, the
-  hook allows the Agent call through to Claude.
+  hook allows every Agent call through to Claude, and the text subzero adds at
+  session start says routing is off and names the missing utility.
 - `ps`, used to identify the parent session. Minimal Linux images may need the
   `procps` package.
 
