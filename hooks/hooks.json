@@ -12,11 +12,21 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Agent|Task",
+        "matcher": "Agent|Task|mcp__plugin_subzero_subzero__delegate|mcp__plugin_subzero_subzero__continue|mcp__plugin_subzero_subzero__await",
         "hooks": [
           {
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/subzero\" --bundle agent-hook"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/subzero\" --bundle prompt-hook"
           }
         ]
       }

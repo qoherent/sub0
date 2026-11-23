@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { repositoryUrl } from './repository.mjs';
 
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'prompt-hook', 'server', 'wake-hook'];
 
 // Named paths only: a new file never ships by accident.
 const ALLOWLIST = [

@@ -34,7 +34,7 @@ export function dataDir(env: NodeJS.ProcessEnv): string {
 }
 
 /** The name of a project's files and folders under the plugin data folder. */
-function projectKey(projectRoot: string): string {
+export function projectKey(projectRoot: string): string {
   return createHash('sha256').update(projectRoot).digest('hex').slice(0, 16);
 }
 
@@ -166,4 +166,87 @@ export function liveReadinessMarkers(dir: string, projectRoot: string): Readines
     }
   }
   return live;
+}
+
+// The prompt marker and the call markers: the UserPromptSubmit hook records when the
+// user last typed in a session, and the PreToolUse hook records, for each subzero tool
+// call, whether a subagent made it. The server reads both to tell a call it should end
+// early from one it should not. Each lives in its own file under the project's session
+// folder (`prompts/` and `calls/`), written by temp file and rename.
+
+/** A call marker not written for this long is deleted when a new one is written. */
+const CALL_TTL_MS = 3600 * 1000;
+
+function atomicWrite(file: string, text: string): void {
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { mode: 0o600 });
+  renameSync(tmp, file);
+}
+
+function promptFile(dir: string, projectRoot: string, sessionId: string): string {
+  return path.join(sessionFolder(dir, projectRoot), 'prompts', `${createHash('sha256').update(sessionId).digest('hex').slice(0, 32)}.json`);
+}
+
+/** Record when the user submitted a prompt in a session: `time` is epoch milliseconds. Holds no message text. */
+export function writePromptMarker(dir: string, projectRoot: string, sessionId: string, time: number = Date.now()): void {
+  atomicWrite(promptFile(dir, projectRoot, sessionId), JSON.stringify({ sessionId, at: time }) + '\n');
+}
+
+/** The epoch milliseconds of the session's last prompt, or undefined when there is no readable marker. */
+export function readPromptMarker(dir: string, projectRoot: string, sessionId: string): number | undefined {
+  try {
+    const value = JSON.parse(readFileSync(promptFile(dir, projectRoot, sessionId), 'utf8')) as { at?: unknown };
+    return typeof value.at === 'number' && Number.isFinite(value.at) ? value.at : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A tool-use id is a file name, so only plain id characters are accepted. */
+const TOOL_USE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+function callFile(dir: string, projectRoot: string, toolUseId: string): string | undefined {
+  return TOOL_USE_ID.test(toolUseId) ? path.join(sessionFolder(dir, projectRoot), 'calls', `${toolUseId}.json`) : undefined;
+}
+
+export interface CallMarker {
+  /** The subagent that made the call; absent when the main conversation made it. */
+  agentId?: string;
+}
+
+/**
+ * Record one subzero tool call under its tool-use id, with the id of the subagent that
+ * made it or none. Call markers older than an hour are deleted (best effort).
+ */
+export function writeCallMarker(dir: string, projectRoot: string, toolUseId: string, agentId?: string, now: number = Date.now()): void {
+  const file = callFile(dir, projectRoot, toolUseId);
+  if (file === undefined) return;
+  atomicWrite(file, JSON.stringify({ toolUseId, ...(agentId ? { agentId } : {}), at: now }) + '\n');
+  try {
+    const folder = path.dirname(file);
+    for (const name of readdirSync(folder)) {
+      const other = path.join(folder, name);
+      if (other === file) continue;
+      try {
+        if (now - statSync(other).mtimeMs > CALL_TTL_MS) rmSync(other, { force: true });
+      } catch {
+        // A file another process just removed is gone either way.
+      }
+    }
+  } catch {
+    // Nothing to prune.
+  }
+}
+
+/** The call marker of a tool-use id, or undefined when there is none. */
+export function readCallMarker(dir: string, projectRoot: string, toolUseId: string): CallMarker | undefined {
+  const file = callFile(dir, projectRoot, toolUseId);
+  if (file === undefined) return undefined;
+  try {
+    const value = JSON.parse(readFileSync(file, 'utf8')) as { agentId?: unknown };
+    return typeof value.agentId === 'string' && value.agentId !== '' ? { agentId: value.agentId } : {};
+  } catch {
+    return undefined;
+  }
 }

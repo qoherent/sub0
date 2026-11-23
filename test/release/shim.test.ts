@@ -25,7 +25,7 @@ function pluginTree(): string {
   mkdirSync(path.join(root, 'dist'));
   copyFileSync(SHIM_SOURCE, path.join(root, 'bin', 'subzero'));
   chmodSync(path.join(root, 'bin', 'subzero'), 0o755);
-  for (const name of ['cli', 'server', 'hook', 'agent-hook', 'wake-hook']) writeFileSync(path.join(root, 'dist', `${name}.js`), STUB_BUNDLE);
+  for (const name of ['cli', 'server', 'hook', 'agent-hook', 'wake-hook', 'prompt-hook']) writeFileSync(path.join(root, 'dist', `${name}.js`), STUB_BUNDLE);
   writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
   return root;
 }
@@ -149,6 +149,7 @@ describe('bin/subzero shim', () => {
       ['hook', 'hook.js'],
       ['agent-hook', 'agent-hook.js'],
       ['wake-hook', 'wake-hook.js'],
+      ['prompt-hook', 'prompt-hook.js'],
     ] as const) {
       const run = runShim(shim, ['--bundle', mode, 'one', '--two'], { PATH: REAL_NODE_PATH, STUB_STATUS: '4' });
       expect(record(run)).toEqual({ bundle: file, args: ['one', '--two'], projectDir: null });
@@ -171,7 +172,7 @@ describe('bin/subzero shim', () => {
     const root = pluginTree();
     const shim = path.join(root, 'bin', 'subzero');
     for (const env of [{ PATH: SYSTEM_PATH }, { PATH: `${stubNode('v18.0.0')}:${SYSTEM_PATH}` }]) {
-      for (const mode of ['hook', 'agent-hook']) {
+      for (const mode of ['hook', 'agent-hook', 'wake-hook', 'prompt-hook']) {
         const run = runShim(shim, ['--bundle', mode], env);
         expect(run.status).toBe(0);
         expect(run.stdout).toBe('');
@@ -204,13 +205,16 @@ describe('plugin launch configuration', () => {
 
   it('launches both hooks through the shim with the same matchers', () => {
     const hooks = json('hooks/hooks.json').hooks;
-    expect(Object.keys(hooks).sort()).toEqual(['PreToolUse', 'SessionStart', 'Stop']);
+    expect(Object.keys(hooks).sort()).toEqual(['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
     expect(hooks.SessionStart).toHaveLength(1);
     expect(hooks.SessionStart[0].matcher).toBeUndefined();
     expect(hooks.SessionStart[0].hooks).toEqual([{ type: 'command', command: `${SHIM} --bundle hook` }]);
     expect(hooks.PreToolUse).toHaveLength(1);
-    expect(hooks.PreToolUse[0].matcher).toBe('Agent|Task');
+    expect(hooks.PreToolUse[0].matcher).toBe('Agent|Task|mcp__plugin_subzero_subzero__delegate|mcp__plugin_subzero_subzero__continue|mcp__plugin_subzero_subzero__await');
     expect(hooks.PreToolUse[0].hooks).toEqual([{ type: 'command', command: `${SHIM} --bundle agent-hook` }]);
+    expect(hooks.UserPromptSubmit).toHaveLength(1);
+    expect(hooks.UserPromptSubmit[0].matcher).toBeUndefined();
+    expect(hooks.UserPromptSubmit[0].hooks).toEqual([{ type: 'command', command: `${SHIM} --bundle prompt-hook` }]);
     expect(hooks.Stop[0].hooks).toEqual([{ type: 'command', command: `${SHIM} --bundle wake-hook`, asyncRewake: true, timeout: 3600 }]);
   });
 });

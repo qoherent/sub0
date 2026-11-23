@@ -2,8 +2,8 @@
 # subzero launcher: the one way the plugin starts Node.
 #
 #   subzero <command> ...             run dist/cli.js (init, config, run, tasks, attach, show)
-#   subzero --bundle server|hook|agent-hook|wake-hook [args]
-#                                     run that bundle (MCP server and the two hooks)
+#   subzero --bundle server|hook|agent-hook|wake-hook|prompt-hook [args]
+#                                     run that bundle (MCP server and the hooks)
 #
 # Finds the plugin root from its own location (symlinks followed), checks that
 # node is version 22 or later, and otherwise prints one plain line on stderr.
@@ -31,9 +31,9 @@ if [ "${1:-}" = "--bundle" ]; then
   [ "$#" -ge 2 ] && shift 2 || shift "$#"
   case $bundle in
     server) ;;
-    hook | agent-hook | wake-hook) fail=0 ;;
+    hook | agent-hook | wake-hook | prompt-hook) fail=0 ;;
     *)
-      echo "subzero: unknown bundle \"$bundle\" (expected server, hook, agent-hook or wake-hook)" >&2
+      echo "subzero: unknown bundle \"$bundle\" (expected server, hook, agent-hook, wake-hook or prompt-hook)" >&2
       exit 2
       ;;
   esac

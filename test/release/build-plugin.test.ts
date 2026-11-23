@@ -7,7 +7,7 @@ import { tempDir } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const SCRIPT = path.join(REPO, 'scripts', 'build-plugin.mjs');
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'prompt-hook', 'server', 'wake-hook'];
 const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** Exactly what a release ships (KTD4): any other file in the staged plugin is a leak. */
@@ -115,6 +115,14 @@ describe('scripts/build-plugin.mjs', () => {
     for (const leak of ['src', 'test', 'bench', 'examples', 'design', 'docs', 'node_modules', '.agents', 'skills/review']) {
       expect(existsSync(path.join(run.stage, leak)), leak).toBe(false);
     }
+  });
+
+  it('contains the prompt-hook bundle, and the staged hooks.json registers it for UserPromptSubmit', () => {
+    const run = build(sourceTree('real'));
+    expect(run.status, run.stderr).toBe(0);
+    expect(existsSync(path.join(run.stage, 'dist', 'prompt-hook.js'))).toBe(true);
+    const hooks = json(path.join(run.stage, 'hooks', 'hooks.json')).hooks;
+    expect(JSON.stringify(hooks.UserPromptSubmit)).toContain('--bundle prompt-hook');
   });
 
   it('keeps bin/subzero executable in the staged directory, and the zip lists the same files', () => {

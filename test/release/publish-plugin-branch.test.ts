@@ -6,7 +6,7 @@ import { tempDir } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const SCRIPT = path.join(REPO, 'scripts', 'publish-plugin-branch.mjs');
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'prompt-hook', 'server', 'wake-hook'];
 const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** What the plugin branch holds: the staged plugin (the release allowlist) and its marketplace file. */
