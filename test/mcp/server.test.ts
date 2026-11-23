@@ -1,11 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { formatListing } from '../../src/mcp/format.js';
+import { writeCallMarker, writePromptMarker } from '../../src/mcp/parent-session.js';
 import { createSubzeroServer } from '../../src/mcp/server.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import type { TaskView } from '../../src/store/task-store.js';
@@ -32,21 +34,49 @@ async function connect(scenario: Record<string, unknown> = {}, env: NodeJS.Proce
   return { root, fake, service, client, call, textOf };
 }
 
+/** What `connectManual` can switch on: steering and resume ports, and a plugin data dir for wake and prompt markers. */
+interface ManualOptions {
+  steers?: boolean;
+  resume?: boolean;
+  /** Give the server a wake data dir, so it arms wake markers and watches the prompt marker. */
+  wake?: boolean;
+}
+
 /** A server whose children the test settles by hand, on an endpoint that runs one at a time. */
-async function connectManual(yaml?: string, sessionId?: string | (() => string | undefined)) {
+async function connectManual(yaml?: string, sessionId?: string | (() => string | undefined), extra: ManualOptions = {}) {
   const root = makeProject(yaml);
-  const { port, started } = manualPort();
+  const { port, started } = manualPort({ ...(extra.steers ? { steers: true } : {}), ...(extra.resume ? { resume: true } : {}) });
   const service = new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, roots: () => [], warn: () => {}, kernel: kernelWithPort(port) });
-  const server = createSubzeroServer({ service, parentSessionId: () => typeof sessionId === 'function' ? sessionId() : sessionId, progress: { minIntervalMs: 10, heartbeatMs: 200 } });
+  const wakeDataDir = extra.wake ? tempDir('subzero-wake-data-') : undefined;
+  const server = createSubzeroServer({
+    service,
+    parentSessionId: () => typeof sessionId === 'function' ? sessionId() : sessionId,
+    progress: { minIntervalMs: 10, heartbeatMs: 200 },
+    ...(wakeDataDir !== undefined ? { wakeDataDir } : {}),
+  });
   const client = new Client({ name: 'test', version: '1' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(a), client.connect(b)]);
+  if (wakeDataDir !== undefined) await service.start();
   const call = (name: string, args: Record<string, unknown>, options: Parameters<Client['callTool']>[2] = {}) =>
     client.callTool({ name, arguments: args }, CallToolResultSchema, options);
+  /** A call that carries the tool-use id Claude Code puts in the request's _meta. */
+  const callWithId = (toolUseId: string, name: string, args: Record<string, unknown>) =>
+    client.callTool({ name, arguments: args, _meta: { 'claudecode/toolUseId': toolUseId } }, CallToolResultSchema);
   const textOf = (r: any) => r.content.map((c: any) => c.text).join('\n') as string;
   const idIn = (text: string) => /sz-[a-z2-7]{6}/.exec(text)![0];
-  return { root, service, started, call, textOf, idIn };
+  return { root, service, started, call, callWithId, client, textOf, idIn, wakeDataDir };
 }
+
+const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+/** The folder of one wake marker: keyed by the task id for turn 1 and `taskId#N` for turn N. */
+const wakeFolder = (dataDir: string, root: string, session: string, key: string) => path.join(dataDir, 'wake', sha(root), sha(session), sha(key));
+const wakeStarted = (dataDir: string, root: string, session: string, key: string) => existsSync(wakeFolder(dataDir, root, session, key));
+/** The JSON a finished wake marker holds, read without claiming it; undefined while it has none. */
+function wakeDone(dataDir: string, root: string, session: string, key: string): { notice: string; collectedMarker: string } | undefined {
+  try { return JSON.parse(readFileSync(path.join(wakeFolder(dataDir, root, session, key), 'done'), 'utf8')); } catch { return undefined; }
+}
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe('ClaudeMcpServer', () => {
   it('cancels the previous session when a new session is observed on a request', async () => {
@@ -622,5 +652,250 @@ describe('ClaudeMcpServer process', () => {
     server.stdin.end();
     await exited;
     await until(() => !isAlive(pi) && (grandchild === undefined || !isAlive(grandchild)), 10_000);
+  });
+});
+
+describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
+  const SESSION = 'session-a';
+  type Manual = Awaited<ReturnType<typeof connectManual>>;
+
+  /** A task of this conversation that no server call made, so no wake marker exists for it yet. */
+  async function directTask(h: Manual, brief = 'one', session = SESSION): Promise<string> {
+    const reply = await h.service.delegate({ agent: 'free', briefText: brief, parentSessionId: session }, { wait: false });
+    if (reply.kind === 'result') throw new Error('expected a live task');
+    return reply.taskId;
+  }
+  /** Mark a call as made by the main conversation (or a subagent) and record that the user typed after `at`. */
+  function userTyped(h: Manual, toolUseId: string, options: { call?: boolean; agentId?: string; at?: number } = {}) {
+    if (options.call !== false) writeCallMarker(h.wakeDataDir!, h.service.projectRoot!, toolUseId, options.agentId);
+    writePromptMarker(h.wakeDataDir!, h.service.projectRoot!, SESSION, options.at ?? Date.now() + 5);
+  }
+  const started = (h: Manual, key: string) => wakeStarted(h.wakeDataDir!, h.service.projectRoot!, SESSION, key);
+  const done = (h: Manual, key: string) => wakeDone(h.wakeDataDir!, h.service.projectRoot!, SESSION, key);
+  /** Settle a run and wait until its task has no running turn. */
+  async function settled(h: Manual, index: number, taskId: string) {
+    h.started[index]!.settle();
+    await until(() => h.service.runningTurn(taskId) === undefined);
+  }
+  const awaitCall = (h: Manual, toolUseId: string, tasks: string[]) => {
+    const state = { returned: false };
+    const pending = h.callWithId(toolUseId, 'await', { tasks, timeout_s: 30 }).then((r) => { state.returned = true; return r; });
+    return { state, pending };
+  };
+
+  it('covers R16: the server instructions tell the parent when to use continue', async () => {
+    const { client } = await connect();
+    expect(client.getInstructions()).toMatch(/continue tool/);
+    expect(client.getInstructions()).toMatch(/steers a running child/);
+  });
+
+  it('covers R16: continue on a task of another conversation answers not delivered and names that', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = await directTask(h, 'theirs', 'session-b');
+    const text = h.textOf(await h.call('continue', { task: id, message: 'hello' }));
+    expect(text).toMatch(new RegExp(`^task: ${id} · not delivered: .*belongs to another conversation`));
+    expect(h.started[0]!.steers).toEqual([]);
+    h.started[0]!.settle();
+  });
+
+  it('covers R16: continue from a conversation that could not be identified answers not delivered and says so', async () => {
+    const h = await connectManual(TIERED_YAML, undefined, { steers: true, resume: true, wake: true });
+    const id = await directTask(h);
+    const text = h.textOf(await h.call('continue', { task: id, message: 'hello' }));
+    expect(text).toMatch(new RegExp(`^task: ${id} · not delivered: this conversation could not be identified`));
+    h.started[0]!.settle();
+  });
+
+  it('covers R16: continue with wait false on a settled task replies new turn, and the wake marker of turn 2 later names turn 2 and its collected marker', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
+    await settled(h, 0, id);
+    const text = h.textOf(await h.call('continue', { task: id, message: 'go on', wait: false }));
+    expect(text).toMatch(new RegExp(`^task: ${id} · new turn: turn 2 started from your message`));
+    expect(h.started).toHaveLength(2);
+    expect(started(h, `${id}#2`)).toBe(true);
+    expect(done(h, `${id}#2`)).toBeUndefined();
+    h.started[1]!.settle({ lastAssistantText: 'second answer' });
+    await until(() => done(h, `${id}#2`) !== undefined);
+    const marker = done(h, `${id}#2`)!;
+    expect(marker.notice).toMatch(/turn 2/);
+    expect(marker.notice).toContain('second answer');
+    expect(marker.collectedMarker).toBe(h.service.collectedMarkerPath(id, 2));
+    expect(marker.collectedMarker).toMatch(/turns[\\/]2\.collected$/);
+  });
+
+  it('covers R16: continue waits by default for the new turn and returns its result naming turn 2', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
+    await settled(h, 0, id);
+    let returned = false;
+    const pending = h.call('continue', { task: id, message: 'go on' }).then((r) => { returned = true; return r; });
+    await until(() => h.started.length === 2);
+    await sleep(60);
+    expect(returned).toBe(false);
+    h.started[1]!.settle({ lastAssistantText: 'the second answer' });
+    const text = h.textOf(await pending);
+    expect(text).toMatch(new RegExp(`^task: ${id} · new turn: turn 2 started`));
+    expect(text).toMatch(/task: sz-[a-z2-7]{6} · turn 2 · .* · status: completed/);
+    expect(text).toContain('the second answer');
+  });
+
+  it('covers R14: a waited await over two running tasks returns their status lines when the user types, leaves both running and arms a wake marker for each', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const one = await directTask(h, 'one');
+    const two = await directTask(h, 'two');
+    expect(started(h, one) || started(h, two)).toBe(false);
+    const { state, pending } = awaitCall(h, 'toolu_typed', [one, two]);
+    await sleep(60);
+    expect(state.returned).toBe(false);
+    userTyped(h, 'toolu_typed');
+    const text = h.textOf(await pending);
+    expect(text).toMatch(new RegExp(`task: ${one} · running, started`));
+    expect(text).toMatch(new RegExp(`task: ${two} · running, started`));
+    expect(text).toMatch(/the user sent a message/);
+    expect(h.service.runningTurn(one)).toBe(1);
+    expect(h.service.runningTurn(two)).toBe(1);
+    expect(started(h, one)).toBe(true);
+    expect(started(h, two)).toBe(true);
+    h.started[0]!.settle({ lastAssistantText: 'result one' });
+    h.started[1]!.settle({ lastAssistantText: 'result two' });
+    await until(() => done(h, one) !== undefined && done(h, two) !== undefined);
+    expect(done(h, one)!.notice).toContain('result one');
+    expect(done(h, two)!.notice).toContain('result two');
+  });
+
+  it('covers R15: the same await keeps waiting when the call marker carries an agent id', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const one = await directTask(h, 'one');
+    const two = await directTask(h, 'two');
+    const { state, pending } = awaitCall(h, 'toolu_sub', [one, two]);
+    userTyped(h, 'toolu_sub', { agentId: 'agent-7' });
+    await sleep(500);
+    expect(state.returned).toBe(false);
+    expect(started(h, one) || started(h, two)).toBe(false);
+    h.started[0]!.settle({ lastAssistantText: 'result one' });
+    h.started[1]!.settle({ lastAssistantText: 'result two' });
+    const text = h.textOf(await pending);
+    expect(text).toContain('result one');
+    expect(text).toContain('result two');
+    expect(text).not.toMatch(/the user sent a message/);
+  });
+
+  it('keeps a waited call waiting when the prompt marker changes and no call marker is found', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const one = await directTask(h, 'one');
+    const { state, pending } = awaitCall(h, 'toolu_unmarked', [one]);
+    userTyped(h, 'toolu_unmarked', { call: false });
+    await sleep(500);
+    expect(state.returned).toBe(false);
+    expect(started(h, one)).toBe(false);
+    h.started[0]!.settle({ lastAssistantText: 'late result' });
+    expect(h.textOf(await pending)).toContain('late result');
+  });
+
+  it('does not end a wait for a prompt marker older than the call start', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const one = await directTask(h, 'one');
+    const { state, pending } = awaitCall(h, 'toolu_old', [one]);
+    userTyped(h, 'toolu_old', { at: Date.now() - 10_000 });
+    await sleep(500);
+    expect(state.returned).toBe(false);
+    expect(started(h, one)).toBe(false);
+    h.started[0]!.settle({ lastAssistantText: 'late result' });
+    expect(h.textOf(await pending)).toContain('late result');
+  });
+
+  it('covers R14: an await ended early over a settled and a running task returns the settled result whole, then the status line', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const finished = await directTask(h, 'finished');
+    const running = await directTask(h, 'running');
+    h.started[0]!.settle({ lastAssistantText: 'the finished answer' });
+    await until(() => h.service.runningTurn(finished) === undefined);
+    const { pending } = awaitCall(h, 'toolu_mixed', [finished, running]);
+    await sleep(60);
+    userTyped(h, 'toolu_mixed');
+    const text = h.textOf(await pending);
+    const resultAt = text.indexOf(`task: ${finished}`);
+    const statusAt = text.indexOf(`task: ${running} · running, started`);
+    expect(resultAt).toBeGreaterThanOrEqual(0);
+    expect(text).toMatch(new RegExp(`task: ${finished} .*status: completed`));
+    expect(text).toContain('the finished answer');
+    expect(statusAt).toBeGreaterThan(resultAt);
+    expect(started(h, running)).toBe(true);
+    expect(started(h, finished)).toBe(false);
+    h.started[1]!.settle();
+  });
+
+  it('collecting turn 1 clears turn 1\'s wake marker and leaves the marker of turn 2', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
+    await settled(h, 0, id);
+    await until(() => done(h, id) !== undefined);
+    await h.call('continue', { task: id, message: 'go on', wait: false });
+    expect(started(h, `${id}#2`)).toBe(true);
+    const text = h.textOf(await h.call('tasks', { task: id }));
+    expect(text).toMatch(new RegExp(`^task: ${id} · free · status: completed`));
+    expect(text).toMatch(new RegExp(`task: ${id} · free · running, started`));
+    expect(started(h, id)).toBe(false);
+    expect(started(h, `${id}#2`)).toBe(true);
+    h.started[1]!.settle({ lastAssistantText: 'second answer' });
+    await until(() => done(h, `${id}#2`) !== undefined);
+    expect(done(h, `${id}#2`)!.notice).toMatch(/turn 2/);
+  });
+
+  it('does not return again a turn whose result the wake hook already delivered', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    const id = await directTask(h);
+    await settled(h, 0, id);
+    // What the wake hook does when it claims the turn's result.
+    writeFileSync(h.service.collectedMarkerPath(id, 1)!, '');
+    const text = h.textOf(await h.call('await', { tasks: [id], timeout_s: 1 }));
+    expect(text).toMatch(new RegExp(`^task: ${id} · turn 1 already reached you`));
+    expect(text).not.toMatch(/status: completed\nsummary/);
+  });
+
+  it('covers R14: a waited delegate ended early returns the task id with its status line and the typed note, and the wake marker of turn 1 wakes with the result', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
+    let returned = false;
+    const pending = h.callWithId('toolu_delegate', 'delegate', { agent: 'free', brief: 'long job' }).then((r) => { returned = true; return r; });
+    await until(() => h.started.length === 1);
+    await sleep(60);
+    expect(returned).toBe(false);
+    userTyped(h, 'toolu_delegate');
+    const text = h.textOf(await pending);
+    const id = h.idIn(text);
+    expect(text).toMatch(new RegExp(`^task: ${id} · running, started`));
+    expect(text).toMatch(/the user sent a message/);
+    expect(text).toMatch(/the child keeps running/);
+    expect(h.service.runningTurn(id)).toBe(1);
+    expect(h.started[0]!.cancelled).toBe(false);
+    expect(started(h, id)).toBe(true);
+    expect(done(h, id)).toBeUndefined();
+    h.started[0]!.settle({ lastAssistantText: 'long job done' });
+    await until(() => done(h, id) !== undefined);
+    expect(done(h, id)!.notice).toContain('long job done');
+    expect(done(h, id)!.collectedMarker).toMatch(/turns[\\/]1\.collected$/);
+  });
+
+  it('covers R14: a waited continue that opens a new turn is ended early the same way and arms the wake marker for that turn', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
+    await settled(h, 0, id);
+    let returned = false;
+    const pending = h.callWithId('toolu_continue', 'continue', { task: id, message: 'go on' }).then((r) => { returned = true; return r; });
+    await until(() => h.started.length === 2);
+    await sleep(60);
+    expect(returned).toBe(false);
+    userTyped(h, 'toolu_continue');
+    const text = h.textOf(await pending);
+    expect(text).toMatch(new RegExp(`^task: ${id} · new turn: turn 2 started`));
+    expect(text).toMatch(/running, started/);
+    expect(text).toMatch(/the user sent a message/);
+    expect(h.service.runningTurn(id)).toBe(2);
+    expect(started(h, `${id}#2`)).toBe(true);
+    h.started[1]!.settle({ lastAssistantText: 'second answer' });
+    await until(() => done(h, `${id}#2`) !== undefined);
+    expect(done(h, `${id}#2`)!.notice).toMatch(/turn 2/);
+    expect(done(h, `${id}#2`)!.notice).toContain('second answer');
   });
 });

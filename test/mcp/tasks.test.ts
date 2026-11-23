@@ -10,9 +10,9 @@ import { DelegationService } from '../../src/service/delegation-service.js';
 import { WakeMarkers } from '../../src/mcp/wake-markers.js';
 import { kernelWithPort, makeProject, manualPort, TIERED_YAML, until } from '../helpers.js';
 
-async function setup(taskMode = true, nonInteractive = false, session: () => string | undefined = () => 'session-a', onTaskMode?: (enabled: boolean) => void) {
+async function setup(taskMode = true, nonInteractive = false, session: () => string | undefined = () => 'session-a', onTaskMode?: (enabled: boolean) => void, portOptions: { steers?: boolean; resume?: boolean } = {}) {
   const root = makeProject(TIERED_YAML);
-  const { port, started } = manualPort();
+  const { port, started } = manualPort(portOptions);
   const service = new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} });
   const wakeDataDir = mkdtempSync(path.join(tmpdir(), 'subzero-wake-test-'));
   const server = createSubzeroServer({ service, parentSessionId: session, taskMode, wakeDataDir, nonInteractive, onTaskMode, progress: { heartbeatMs: 20 } });
@@ -23,6 +23,18 @@ async function setup(taskMode = true, nonInteractive = false, session: () => str
 }
 
 describe('Claude MCP tasks', () => {
+  it('covers R16: continue on a running task replies steered at once in task mode, with the task id first and no MCP task', async () => {
+    const { client, started } = await setup(true, false, () => 'session-a', undefined, { steers: true });
+    const first = await client.callTool({ name: 'delegate', arguments: { agent: 'free', brief: 'one', wait: false } }, CallToolResultSchema);
+    const taskId = /sz-[a-z2-7]{6}/.exec(JSON.stringify(first))![0];
+    started[0]!.emit({ kind: 'prompt_sent' });
+    const reply: any = await client.callTool({ name: 'continue', arguments: { task: taskId, message: 'also check the tests' } }, CallToolResultSchema);
+    expect(reply.task).toBeUndefined();
+    expect(reply.content[0].text).toMatch(new RegExp(`^task: ${taskId} · steered: your message joined turn 1`));
+    expect(started[0]!.steers).toEqual(['also check the tests']);
+    started[0]!.settle();
+    await client.close();
+  });
   it('marks task mode only after an augmented request demonstrates support', async () => {
     const observed: boolean[] = [];
     const { client, started } = await setup(true, false, () => 'session-a', (enabled) => { observed.push(enabled); });
