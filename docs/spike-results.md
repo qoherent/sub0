@@ -155,6 +155,15 @@ started another turn without a user prompt, and the second Stop hook ran. This
 confirms the hook wake mechanism for the fallback. The probe used only temporary
 files and did not install a hook in the project.
 
+On 2026-11-23, an interactive Claude Code 2.1.322 session in a scratch folder
+called a temporary local MCP tool that blocked for 60 seconds, and a person typed
+a message 10 seconds into the call without pressing Escape. A `UserPromptSubmit`
+hook fired at that moment (13:56:14 UTC), between the tool's start (13:56:04) and
+its end (13:57:04), and before `PostToolUse`. Its input carries the session id.
+So a hook does see a message typed during a blocking MCP call, at submit time.
+The probe did not check whether the hook can change what Claude sees mid-call; the
+message itself reached Claude after the tool returned.
+
 The two-parent acceptance run in the pi parent plan is still pending. A person
 must check a real compound-engineering review and local child on pi, including
 notices, Escape, `/subzero cancel`, `/new`, and the shell task listing. On Claude

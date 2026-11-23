@@ -77,9 +77,18 @@ component ClaudeRoutingHooks {
     parent session id, or for one turn of such a task that opened without a
     call to wait for it. The *wake hook* is an asyncRewake Stop hook that watches
     only those entries, never the store folder.
+
+    The *prompt hook* is a UserPromptSubmit hook, which Claude Code runs when
+    the user submits a message, also while a tool call blocks. A
+    *prompt marker* is a plugin data folder entry for one parent session id
+    that holds the time the user last submitted a message there.
   }
 
   logic {
+    When the user submits a message, the prompt hook writes the prompt marker
+    of its parent session id with the time of that submit and lets the message
+    through unchanged, which ends the flow.
+
     When a Stop event starts the wake hook, it waits while a wake marker of
     that parent session id is pending. When a marker records a result text and
     completion notice, the hook atomically claims it and exits with both, waking
@@ -127,6 +136,11 @@ component ClaudeRoutingHooks {
   }
 
   constraints {
+    The prompt hook must never block, delay or change a message, must write no
+    text of the message into the prompt marker, and must exit 0 with no output
+    on any error, so that a broken prompt hook only loses the early end of a
+    wait.
+
     The routing text must name each routable tier that a tier word maps to
     against
     its tier word, say
@@ -286,6 +300,10 @@ component ClaudeRoutingHooks {
   }
 
   cases {
+    A message that the user types 10 seconds into a blocking MCP tool call runs
+    the prompt hook during the call, and the prompt marker of its parent
+    session id holds that time before the call returns.
+
     In every case here the merged configuration also holds the medium tier,
     and a case that names the model tiers configured names only
     the
@@ -365,6 +383,10 @@ component ClaudeRoutingHooks {
   interface {
     The wake hook reads each wake marker of the current parent session id and
     delivers its result text and completion notice when it is complete.
+
+    Run the prompt hook for each message the user submits and record its
+    prompt marker, so that the MCP server can end a waited call early when the
+    user types.
 
     Add the routing text to Claude's context at each session start, resume,
     /clear and compaction, built from the merged configuration under the

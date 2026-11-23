@@ -141,7 +141,7 @@ make each choice explicitly.
    marketplace. Built; see [status.md](status.md). Built since, ahead of the old phasing: the pi parent
    extension (planned for v0.3), guided `init` in both parents, and the global config file
    `~/.agents/subzero.yaml` with `enabled: false` (part of the old v0.2 config layering).
-3. **v0.2 (narrowed 2026-11-23, decisions 35–56):** `continue` with steering on both parents (Claude
+3. **v0.2 (narrowed 2026-11-23, decisions 35–57):** `continue` with steering on both parents (Claude
    Code and pi), and parallel limits per model (`models.parallel`) in place of limits per endpoint.
    Nothing else.
 4. **v0.3:** the rest of the former v0.2: YAML schema + `validate`/`lock`, the rest of the task model
@@ -407,6 +407,18 @@ refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil c
     pre-filled from the old value and removing `endpoints:`, and then goes on with the chosen scope. Why: otherwise
     the load error stays in every project, and each write still has exactly one preview and one confirm.
 
-To check on pi 1.5.2 before building: relaunching with `--session-id <task id>` and the same `--session-dir`
-reopens the existing session (`--session` must not be added with `--session-id`); a `steer` accepted during the
-child's last model call is read before `agent_settled`; `/reload` keeps the pi session id.
+57. **Waits end early on Claude Code too.** This replaces the Claude Code half of 38. A UserPromptSubmit hook (the
+    prompt hook) writes a prompt marker for its parent session id each time the user submits a message. While a
+    waited `delegate`, `continue` or `await` call blocks, the MCP server watches that marker, and when the user
+    has typed since the call started it ends the wait without cancelling anything: `delegate` and `continue`
+    return the task id with its status line and say the user sent a message, `await` returns the status lines of
+    the tasks still running, and each task left running reports back by wake marker. Why: Claude Code calls wait
+    by default, so without this a message reaches the parent only after the child settles. A probe on Claude Code
+    2.1.322 (spike-results.md) showed the hook fires at submit time during a blocking MCP call.
+
+Checked on pi 1.5.2 on 2026-11-23, with subzero's child flags and a real model: relaunching with
+`--session-id <task id>` and the same `--session-dir`, without `--session`, reopens the existing session (the child
+recalled a word from turn 1); a `steer` sent during the turn's last model call, with no tools, is answered
+`disposition: "queued"` and read before `agent_settled`, in the same turn; `/reload` (through `ctx.reload()`, the
+same flow) keeps the pi session id. pi's `steer` reply does not promise the message stays queued (`clear_queue`
+drops it), so "delivered" means accepted before `agent_settled`, as PiDriver says.
