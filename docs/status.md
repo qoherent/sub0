@@ -20,7 +20,7 @@ routing and the plugin distribution, which is what this repository builds
 today. Some later work is built already: the pi parent (planned for v0.3), and
 guided init and the global config file (part of the old v0.2). v0.2 was narrowed
 on 2026-11-23 to `continue` with steering on both parents and parallel limits
-per model (decisions 35–48 in decisions.md); the later milestones follow the
+per model (decisions 35–56 in decisions.md); the later milestones follow the
 phasing there.
 
 The plans in [plans/](plans/) record what each piece of work set out to
@@ -37,7 +37,7 @@ do, what it deferred, and how it was checked.
 | Tiered subagent routing for compound-engineering | Built and accepted in the R17 live run and its probes. |
 | Plugin distribution (`subzero@qoherent`) | Built and tested locally. A previous `plugin` branch is published; these changes and the pi package branch have not been published. The release workflow, first tag and model-backed walkthroughs are still to do. |
 | Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing and no go/no-go decision has been written. |
-| v0.2 (`continue` with steering, parallel limits per model) | Decided (decisions 35–48); Sigil contracts and plan not written yet. |
+| v0.2 (`continue` with steering, parallel limits per model) | Decided (decisions 35–56); Sigil contracts and plan not written yet. |
 | v0.3 and later (the rest of the task model, other hosts) | Not started. |
 
 The test suite, typecheck and release build are run locally for this branch.
@@ -216,9 +216,9 @@ narrowed on 2026-11-23.
   Code, `subzero_continue` on pi) that holds a message for a task that has not
   started, steers a running task and starts a new turn on a settled one, for
   the tasks of the current parent session. One result per turn. On pi, a message
-  the user types during a subzero wait ends the wait early. Decisions 35–47.
+  the user types during a subzero wait ends the wait early. Decisions 35–47, 49–51, 54 and 55.
 - Parallel limits per model: `models.parallel` keyed by model id replaces
-  `endpoints:`, which becomes a load error that guided init repairs. Decision 48.
+  `endpoints:`, which becomes a load error that guided init repairs. Decisions 48, 52, 53 and 56.
 - Before building: check the session relaunch, late `steer` delivery and
   `/reload` session ids on pi 1.5.2, and probe whether a Claude Code hook sees a
   message typed during a blocking MCP call.

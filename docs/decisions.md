@@ -141,7 +141,7 @@ make each choice explicitly.
    marketplace. Built; see [status.md](status.md). Built since, ahead of the old phasing: the pi parent
    extension (planned for v0.3), guided `init` in both parents, and the global config file
    `~/.agents/subzero.yaml` with `enabled: false` (part of the old v0.2 config layering).
-3. **v0.2 (narrowed 2026-11-23, decisions 35–48):** `continue` with steering on both parents (Claude
+3. **v0.2 (narrowed 2026-11-23, decisions 35–56):** `continue` with steering on both parents (Claude
    Code and pi), and parallel limits per model (`models.parallel`) in place of limits per endpoint.
    Nothing else.
 4. **v0.3:** the rest of the former v0.2: YAML schema + `validate`/`lock`, the rest of the task model
@@ -360,14 +360,52 @@ refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil c
 48. **Parallel limits per model.** `models.parallel` maps a full model id (`local/qwen3-coder-30b`) to its limit, a
     positive whole number; tiers that name the same model share one counter, and a model with no entry has no
     limit. The count stays per parent session, first come first served. It merges by model id like the old
-    endpoint entries: the agent file's entry wins, and an entry no tier uses is ignored. `endpoints:` is removed
+    endpoint entries: the agent file's entry wins; a global entry that no tier of the project uses is ignored,
+    and an agent-file entry that no tier uses is a load error (52). `endpoints:` is removed
     and is now a load error that names the file, says `endpoints` was replaced by `models.parallel` and lists the
-    models of that endpoint the file's tiers use. Guided init repairs such a file: it pre-fills each model's
+    models of that endpoint its old limit covered (53). Guided init repairs such a file: it pre-fills each model's
     limit with the old endpoint value, shows the change in its diff and writes only after the user confirms, in
     the file of the scope chosen. `init <model>` does not repair. Why per model: it fits cloud providers with
     limits per model and servers that run each model in its own process. What is lost: one limit shared by
     several models on one server (the one-GPU case) can no longer be written; such a setup gives each model
     its own limit, which the diff makes visible.
+
+49. **Held messages whose turn ends first.** A follow-up message held for a child run that sent its prompt and then
+    settled, or that pi refused because the run had settled, opens a new turn as for a settled task. Held
+    messages of a child run that failed or was cancelled before its prompt are not delivered, and that turn's
+    result says so in one line. Why: a message the caller was told is queued must not vanish, and a task that
+    fails at every start (skill_mismatch) must not loop.
+50. **Abandoned tasks.** A task of the current parent session whose owner died mid-turn is continued like a settled
+    one: a new turn on its child session, or a release with its brief when it never sent its prompt. Why: the
+    partial work is kept, and every task that is not running can be continued.
+51. **Taking a task over.** A process that continues a task of the same parent session takes ownership of it. Only a
+    turn that is running in a live owner blocks this, because only that owner holds the child's stdin; a settled
+    or abandoned task can be taken over even while its owner lives. The rule is in DelegationService and holds on
+    both parents, because no core service names a parent host. This refines 41, which deferred only continuing
+    tasks of other parent sessions.
+52. **An unused limit in the agent file is a load error.** A `models.parallel` entry in the agent file that no tier or
+    tier override uses fails the load; in the global file it is ignored. Why: a model id is easy to mistype, and a
+    silently ignored limit would flood a one-GPU server. This corrects the wording of 48.
+53. **What the `endpoints:` error lists.** For each endpoint it lists the models its old limit covered: for the agent
+    file, the models of this project's merged configuration; for the global file, the models of its own tiers.
+    Guided setup pre-fills from the same list.
+
+54. **A turn that opens on its own reaches Claude Code by a wake marker.** When held messages open a turn with no
+    call waiting for it, the MCP server records a wake marker for that turn whatever the task mode, and the wake
+    hook wakes Claude with its result. A wake marker therefore names a turn, not only a task. Why: no MCP task
+    exists for such a turn, and a parent told only "queued" would otherwise never be prompted to collect it.
+
+55. **The Claude Code `continue` tool never answers with an MCP task.** It always replies at once with the delivery
+    outcome, whatever the task mode; its `wait` defaults to true, as `delegate`'s does while task mode is off, and a
+    new turn it does not wait for reports back through a wake marker for that turn. Why: "steered" needs no
+    follow-up and the parent should know it at once, and `continue` then behaves the same whether task mode is on
+    or off.
+
+56. **Guided init repairs `endpoints:` in the other file first.** When `endpoints:` is in the file the chosen scope does
+    not write (the global file for "only this project", or the agent file for "every project"), guided init first
+    offers to repair that file in its own step, with its own preview and confirmation, writing per-model limits
+    pre-filled from the old value and removing `endpoints:`, and then goes on with the chosen scope. Why: otherwise
+    the load error stays in every project, and each write still has exactly one preview and one confirm.
 
 To check on pi 1.5.2 before building: relaunching with `--session-id <task id>` and the same `--session-dir`
 reopens the existing session (`--session` must not be added with `--session-id`); a `steer` accepted during the

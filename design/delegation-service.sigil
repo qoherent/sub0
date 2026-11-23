@@ -2,19 +2,22 @@
   task, task id, brief, child run, result, domain event, child port,
   child run state, enqueue time, start time, child driver, transcript, attach command,
   launch spec, model listing, model check, prerequisites check, starter tools,
+  follow-up message, delivery outcome, turn, turn number,
 }
 @design/cli.sigil from Cli import { subzero init }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, project root, load error, tool list,
-  unresolved root error, model endpoint, parallel limit, general agent,
+  unresolved root error, model, parallel limit, general agent,
   model tier, tier error, agent file, timeout, fallback agent,
   working directory, medium tier, setup state, change set, setup preview,
   preview fingerprint, change set error, stale preview error, write error,
   refused change, setup scope, merged configuration, off error, global file,
-  enabled switch, built-in agent, child host options,
+  enabled switch, built-in agent, child host options, endpoints entry,
+  agent entry,
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
+  owner process,
 }
 @design/kernel.sigil from Kernel import {
   driver registry, parent adapter, supported child host, child host, parent host,
@@ -26,7 +29,8 @@ component DelegationService {
     Give every *front end* one entry that is ready to delegate: it turns a
     named
     agent, a model tier or neither, and a brief into a task, finds a live task
-    by its task id later, and starts clean after an earlier process has died.
+    by its task id later, sends a task of the same parent session a
+    follow-up message, and starts clean after an earlier process has died.
   }
 
   state {
@@ -39,8 +43,13 @@ component DelegationService {
     a
     result gives one, and DelegationService holds no size of its own.
 
-    The *live task registry* holds the tasks that this process has started, by
-    their task id and by the parent session id of their delegation.
+    The *live task registry* holds the tasks that this process has started or
+    continued, by their task id and by the parent session id of their
+    delegation.
+
+    A *continuation* is the request of a front end to send a follow-up message
+    to a task. It holds a task id, the follow-up message, an optional wait and
+    the parent session id of its caller.
 
     A *session cancel* cancels every Pending and live task of one
     parent session id in the live task registry, and reports their task ids and
@@ -49,10 +58,12 @@ component DelegationService {
     A *collect tool* is the tool of a front end that returns the result of a
     task that its caller did not wait for.
 
-    A *completion notice* tells a parent model that one of its tasks settled:
+    A *completion notice* tells a parent model that a turn of one of its tasks
+    settled:
     it
     names
-    the task by its task id with its status, tells the parent model to collect
+    the task by its task id with its status and, from turn 2 on, its
+    turn number, tells the parent model to collect
     the
     result through the collect tool that the front end names, lists the tasks
     of
@@ -76,14 +87,15 @@ component DelegationService {
 
     The *queue place* of a child run whose child run state is Pending is its
     position, counted from 1, among the Pending child runs of its
-    model endpoint in this process, in the order they arrived.
+    model in this process, in the order they arrived.
 
-    A *status line* reports a task that has no result yet. For a queued task of
-    this process it gives the model endpoint, the queue place and the time
+    A *status line* reports a task whose latest turn has no result yet. For a
+    queued task of
+    this process it gives the model, the queue place and the time
     waited since the enqueue time, and for a queued task of another process it
-    gives the model endpoint and the time waited with no queue place:
+    gives the model and the time waited with no queue place:
     ```text
-    queued, not launched yet: no child is running; it starts when endpoint <e>
+    queued, not launched yet: no child is running; it starts when model <m>
     has room (place <n> in this session's queue, waiting <elapsed>)
     ```
     For a task whose child run has a start time the status line gives that
@@ -92,10 +104,11 @@ component DelegationService {
     running, started <iso> (<elapsed> ago)
     ```
 
-    The *result text* of a settled task starts with a line that holds the
+    The *result text* of a settled turn starts with a line that holds the
     task id
-    first, then the agent, the task status and the failure kind when there is
-    one. Lines follow for the message when there is one, the summary, with
+    first, then the agent, the turn number from turn 2 on, the task status and
+    the failure kind when there is one. Lines follow for the message when there is
+    one, the summary, with
     (empty) for an empty summary, and the usage with the duration when
     the result holds usage. A notice goes on the line after the first one, so
     the task id still comes first.
@@ -112,14 +125,26 @@ component DelegationService {
 
     The *guide text* is the one conversation, its steps, questions,
     suggestions and warnings, that every parent adapter follows over the
-    setup operations during an init that a person starts. After it shows the
+    setup operations during an init that a person starts. It never
+    writes a parallel limit for a model of an endpoints entry that the person
+    did not confirm. After it shows the
     setup state it asks whether the chosen models are for every project or
-    only this one, which gives the setup scope of its preview and apply, and
+    only this one, which gives the setup scope of its preview and apply. It
+    asks the parallel limit of each chosen model and, when the setup state
+    holds an endpoints entry, of every model in its list, chosen or not,
+    offering the parallel limit of that entry for each, before the write that
+    removes the endpoints map, and
     before the confirmation it says which model tier or limit of the change
     set this project overrides when the setup scope is the global file. After the
     stale preview error of an apply it previews the change set again, and
     after any other setup refusal of an apply it ends the init, writing
-    nothing.
+    nothing. When an endpoints entry of the setup state is in the file that
+    the chosen setup scope does not write, the guide text first repairs that
+    file: it previews a change set for the setup scope of that file, which
+    sets the parallel limit of each model in the list of its endpoints entry,
+    offering the parallel limit of that entry, and removes its endpoints map,
+    and applies it only after its own confirmation. Then it goes on with the
+    chosen setup scope.
   }
 
   logic {
@@ -184,32 +209,71 @@ component DelegationService {
     agent definition, that brief, that child port, those child host options
     and the parent session id,
     and add the task to the live task registry, which a later collect or
-    cancel reads. When the child runs of its model endpoint in this process
+    cancel reads. When the child runs of its model in this process
     that are Starting or Live have reached its parallel limit, keep the
     child run Pending at the next queue place and release it, first come first
     served, when one of them ends, and otherwise release it at once. When the
     caller waits, offer each domain event to the caller and return the result
     when the child run settles, which ends the flow. When the caller does not
     wait, return the task id at once with the start time of a released
-    child run, or with the model endpoint, the queue place and the
+    child run, or with the model, the queue place and the
     enqueue time of a Pending one, which ends the flow.
+
+    On a continuation, run the start-up sweep again, then look for its task in
+    the live task registry and then in the task record, and read its
+    owner process and its latest turn from the task record in both cases. A
+    task in the live task registry whose owner process is now another process
+    is dropped from the live task registry and handled as a task that is not
+    there, so that its turns are read again from the task record. A task id
+    that no
+    task record holds gets an error that names it, which ends the flow. A task
+    whose parent session id is not the parent session id of the continuation,
+    a continuation with no parent session id, and a task whose latest turn is
+    running in an owner process other than this one that is still alive get
+    the delivery outcome
+    not delivered with the status line of the task, or the first line of its
+    result text when its latest turn has settled, and no result, which ends
+    the flow. A task whose task status is abandoned is continued as a settled
+    one. For a task of the same parent session id that is not in the
+    live task registry, load the merged configuration as for a delegation,
+    take the child port of the child host of its frozen agent definition from
+    the driver registry and the child host options for that child host from
+    the same load, return a load error, the off error or an error of the
+    driver registry as a delegation does, with nothing sent, and otherwise add
+    the task to the live task registry. Then hand the follow-up message to
+    TaskCore. With the delivery outcome queued or steered, return it with the
+    status line of the task, which ends the flow. With the delivery outcome
+    new turn, keep the child run of the new turn Pending and release it under
+    the parallel limit of its model as for a delegation, and when the caller
+    waits, offer each domain event and return the result of that turn when it
+    settles, and otherwise return the delivery outcome new turn with the
+    status line at once, which ends the flow. With the delivery outcome
+    not delivered from TaskCore, return it with a message that the child host
+    of the task cannot take a follow-up message, which ends the flow. A new turn
+    that TaskCore opens for held follow-up messages is released under the
+    parallel limit of its model in the same way, and its result reaches the
+    front end through the completion notice, which ends that flow.
 
     Before a collect, a cancel or a listing, run the start-up sweep again, so
     that a task whose owner process died after start-up is not shown as
-    running. On a collect or a cancel by task id, look in the
+    running, and drop from the live task registry each task whose
+    owner process is now another process, so that it is read from the
+    task record with its latest turn. On a collect or a cancel by task id, look in
+    the
     live task registry and then in the task record, which gives the stored
     result of a settled task or the task status of an abandoned one. A task
-    with a stored result gives that result, and a task whose task status is
-    abandoned gives no result and says that it is abandoned, which ends the
-    flow. A collect of a task in the live task registry that has not settled
-    gives no result and returns its start time, or its model endpoint,
+    with a stored result for its latest turn gives that result, and a task
+    whose task status is abandoned gives no result and says that it is
+    abandoned, which ends the flow. A collect of a task in the live task registry
+    that has not settled
+    gives no result and returns its start time, or its model,
     queue place and enqueue time while it is Pending, which ends the flow. A
     cancel of a task that has already settled returns its stored result
     unchanged, which ends the flow. A cancel of a Pending child run removes it
-    from the queue of its model endpoint, and each later Pending child run
+    from the queue of its model, and each later Pending child run
     moves up one queue place, which ends the flow. A collect of a task whose
     task status is running and that is not in the live task registry gives no
-    result, returns its model endpoint, its enqueue time and its start time
+    result, returns its model, its enqueue time and its start time
     when one is recorded, read from the task record, and says that the task
     belongs to another process, which ends the flow. A cancel of such a task
     reports that it belongs to another process and cannot be cancelled here,
@@ -221,12 +285,15 @@ component DelegationService {
     session cancel with no parent session id cancels nothing and returns that
     the session is unknown, which ends the flow.
 
-    When a task that its caller did not wait for settles, build its
-    completion notice from the task id and status of the task, the name of the
+    When a turn that its caller did not wait for settles, build its
+    completion notice from the task id, the status and the turn number of the
+    turn, the name of the
     collect tool of the front end, and the status line of each task of
     the same parent session id that is still Pending or live, and offer it to
-    the
-    front end that made the delegation, which ends that flow. A task that a
+    the front end that opened that turn, which is the front end of the
+    delegation for turn 1, of the continuation for a later turn, and of this
+    process for a turn opened for held follow-up messages, which ends that
+    flow. A task that a
     session cancel or a cancel ended gets the stop notice instead.
 
     On a listing of the models in the guided setup, run the
@@ -324,8 +391,9 @@ component DelegationService {
     A completion notice and a stop notice must never carry the transcript of a
     child run, and the stop notice must never ask the parent model to act.
 
-    A parallel limit must be counted from each child run of this process that
-    is Starting or Live, and a child run that is Pending must not be counted.
+    A parallel limit must be counted for each model from each child run of
+    this process on that model that is Starting or Live, whatever its
+    model tier, and a child run that is Pending must not be counted.
     A child run that ends in any way, whether Settled, Failed or Cancelled,
     must stop being counted at once and release the next Pending child run. A
     delegation from a command line process or from another session is not
@@ -336,13 +404,19 @@ component DelegationService {
     must add no agent entry, and must use
     the project root that a DelegationService resolved and never the
     working directory of its process. It must run one model check at a time,
-    so that a single model endpoint is not overloaded, and it must make no
+    so that a single model server is not overloaded, and it must make no
     delegation, task or task record, because the models it checks are not in
     the agent file yet.
 
     A child run that is Pending must be returned with its queue place and its
     enqueue time and never with a start time, and the time it waits must not
     count toward its timeout.
+
+    A continuation must reach only a task of its own parent session id and
+    must never change the frozen agent definition of that task, and
+    DelegationService must pass its follow-up message to TaskCore unchanged.
+    A reply about a task that a continuation did not reach must never repeat
+    its result.
 
     DelegationService depends on TaskCore for the task, on the driver registry
     of
@@ -385,12 +459,13 @@ component DelegationService {
     A delegation while the agent file is malformed returns the load error and
     writes no task record.
 
-    Two delegations to agents on one model endpoint whose parallel limit is 1
-    start two child runs. The second stays Pending until the first ends,
+    Two delegations to agents on one model whose parallel limit is 1, through
+    two model tiers that both name it, start two child runs. The second stays
+    Pending until the first ends,
     whether it settles, fails by timeout or is cancelled, and is then released,
     and a cancel of the second while it is Pending starts no child.
 
-    Three delegations that do not wait, on a model endpoint whose
+    Three delegations that do not wait, on a model whose
     parallel limit is 1, return the first with its start time and the second
     and third Pending at queue place 1 and 2. Cancelling the second moves the
     third to queue place 1.
@@ -461,6 +536,26 @@ component DelegationService {
 
     A shutdown while a child run ignores its cancel past the deadline records
     that task as cancelled, and its task record does not stay running.
+
+    A continuation for a live task of the same parent session id returns
+    steered with its status line, and the task later settles with one result.
+    A continuation for a task of that parent session id that settled returns
+    new turn and, when the caller does not wait, its status line; when that
+    turn settles, its completion notice names turn 2.
+
+    A continuation for a task of another parent session id returns
+    not delivered with the first line of its result text, and sends nothing to
+    the child.
+
+    A continuation for a settled task of the same parent session id whose
+    owner process has exited, after a pi resume in a new pi process, adds the
+    task to the
+    live task registry, opens a new turn, and the task record names this
+    process as its owner process.
+
+    With one live child run on a model whose parallel limit is 1, a
+    continuation that opens a new turn on another task of that model keeps
+    the new child run Pending at queue place 1 until the first one ends.
   }
 
   interface {
@@ -469,12 +564,18 @@ component DelegationService {
     its brief text is empty, and return the result with the task id first once
     the child run settles, or return the task id at once when the caller does
     not wait, with the start time of a released child run,
-    or the model endpoint, the queue place and the enqueue time of a Pending
+    or the model, the queue place and the enqueue time of a Pending
     one. When the named agent is not configured and the fallback agent runs
     instead, return the report that the named agent is not configured with
     the task id, whether or not the caller waits.
 
-    Report each queued task by its model endpoint, by its queue place when it
+    Accept a continuation and return the delivery outcome of its
+    follow-up message, with the status line of the task for queued, steered
+    and new turn when the caller does not wait, the result of the new turn
+    when the caller waits for it, and for not delivered the status line or the
+    first line of the result text and no result.
+
+    Report each queued task by its model, by its queue place when it
     is a
     task of this process, and by the time it has waited, and never as started.
     Give every front end the same wording for it, the status line of a task
@@ -489,9 +590,10 @@ component DelegationService {
     Hand the project root, once resolved, to the front end that started the
     service, for that front end's own use, and never resolve a different one.
 
-    Let a caller collect the result of a task by task id, returning no result
+    Let a caller collect the result of the latest turn of a task by task id,
+    returning no result
     while its task status is running, but its start time, or its
-    model endpoint,
+    model,
     queue place and enqueue time while it is Pending, and let a caller cancel a
     task by task id.
 
@@ -508,8 +610,9 @@ component DelegationService {
     and the child driver registered for its child host. Refuse the attach
     command while the task is running or when its task record has no launch spec.
 
-    Keep a delegation Pending while its model endpoint has reached its
-    parallel limit, and release it first come first served.
+    Keep a delegation, or a new turn of a continuation, Pending while its
+    model has reached its parallel limit, and release it first come first
+    served.
 
     List the tasks of one parent session id, or of every parent session id,
     each with its task id, its agent, its task status, the time it was
@@ -575,6 +678,16 @@ component DelegationService {
     because the parallel limit is, so it names the place in this session's
     queue
     only.
+
+    A continuation reaches only the tasks of its own parent session id, so
+    that a parent model never sends a message into the work of another
+    conversation, and a process that continues a task of that parent session
+    after its first owner process exited, as a pi resume in a new pi process
+    can, takes it over. Only a turn that is running needs its live owner,
+    which alone holds the stdin of its child, so a settled or abandoned task
+    can be taken over even while its owner lives. The rule holds on every
+    parent host, because no core service names one. Continuing any task of
+    the project is left for later.
 
     The status line and the result text live here, and not in a front end,
     because

@@ -1,11 +1,12 @@
 @design/kernel.sigil from Kernel import { parent model }
 @design/task-core.sigil from TaskCore import {
   task, task id, child run, child run state, domain event, result, launch spec,
-    enqueue time, start time, child session, child driver,
+    enqueue time, start time, child session, child driver, turn, turn number,
+    follow-up message,
 }
 @design/delegation-service.sigil from DelegationService import { queued task }
 @design/agent-config.sigil from AgentConfig import {
-  agent definition, project root, model endpoint,
+  agent definition, project root, model,
 }
 
 component TaskStore {
@@ -19,29 +20,29 @@ component TaskStore {
     is
     the set of files that TaskStore keeps in the directory tasks/<task id>/ of
     the
-    store folder. It holds task.json with the frozen agent definition and, once
-    the
-    child run has started, the launch spec, the *event log* events.jsonl, and
-    turns/1.json with the exact result the parent model received. A task whose
-    child run
-    failed before it started has no launch spec. The same directory also holds
-    the
-    *driver files* of the task, which are what its child driver keeps there
-    beside
-    the task record and which TaskStore neither writes nor removes.
+    store folder. It holds task.json with the frozen agent definition and the
+    brief, so that a later process can release the task with it, and, once
+    a child run has started, the launch spec of the latest child run, the
+    *event log* events.jsonl, and one file turns/<turn number>.json for each
+    turn, which holds, from turn 2 on, the follow-up message that opened that
+    turn, and the exact result the parent model received for it. A task whose
+    child run failed before it started has no launch spec. The same directory
+    also holds the *driver files* of the task beside the task record. Only its
+    child driver writes or removes a driver file, and TaskStore provides the
+    folder that holds them.
 
-    A task record also keeps the model endpoint and the enqueue time of its
-    task
-    from its first write, and the start time once its child run is released.
+    A task record also keeps the model of its task and the time the task was
+    created, which is the enqueue time of turn 1, from its first write, and
+    the enqueue time of its latest turn, and the start time once the child run
+    of that turn is released.
 
-    The *task status* of a task is running while its child run state is
-    Pending,
-    Starting or Live. It then becomes the status of its result, which is
-    completed,
-    truncated, failed or cancelled, or it becomes abandoned when the
-    *start-up sweep* marks it. A task whose task record holds a result has the
-    task status of that result, whatever the latest line of the task index
-    says.
+    The *task status* of a task is running while the child run state of its
+    latest turn is Pending, Starting or Live. It then becomes the status of the
+    result of that turn, which is completed, truncated, failed or cancelled, or
+    it becomes abandoned when the *start-up sweep* marks it. A new turn makes
+    the task status running again. A task whose task record holds a result for
+    its latest turn has the task status of that result, whatever the latest
+    line of the task index says.
 
     The *task index* is index.jsonl in the store folder. It is append-only and
     has
@@ -51,9 +52,10 @@ component TaskStore {
     *parent session id*
     when there is one, the child session, the file that holds it and the
     timestamps. It also records the *owner process*, which is the process that
-    created the task and runs its child run, by its process id and its
-    start time,
-    on the first line written for the task. A parent session id is the id of
+    runs the child runs of the task, by its process id and its start time, on
+    the first line written for the task, and again on the first line of a turn
+    that another process starts, which makes that process the owner process
+    from then on. A parent session id is the id of
     the
     conversation that made the delegation, and a delegation from the command
     line
@@ -69,13 +71,17 @@ component TaskStore {
     owner process is no longer alive, or is alive with a different start time.
     Mark that task abandoned by appending the change to the task index. The
     sweep signals no process, and it ends when every such task is marked. An
-    abandoned task has no result and can still be listed and attached. Read the
-    latest line of a task again just before appending, and append nothing for a
-    task whose task record holds a result.
+    abandoned task has no result for its latest turn and can still be listed
+    and attached. Read the latest line of a task again just before appending,
+    and append nothing for a task whose task record holds a result for its
+    latest turn.
 
-    When a task record is written with a new task status, write the result into
-    the task record first, in one step, and only then append a line for it to
-    the task index, which ends the write.
+    When a task record is written with a new task status, write the result of
+    its turn into the task record first, in one step, and only then append a
+    line for it to the task index, which ends the write. When a turn opens on a
+    settled task, write its turn file with its follow-up message and then
+    append a running line, with the owner process when it changes, which ends
+    the write.
   }
 
   constraints {
@@ -91,7 +97,9 @@ component TaskStore {
     The result in a task record must be written in one step, so that a reader
     never sees part of it, and before the line of the task index that gives its
     task status. A later abandoned line for a task whose task record holds a
-    result must be ignored by every reader and never rewritten.
+    result for its latest turn must be ignored by every reader and never
+    rewritten. A result of an earlier turn must never be rewritten by a later
+    turn.
 
     TaskStore must never store a queued task as a task status of its own. A
     task whose task record has
@@ -107,9 +115,9 @@ component TaskStore {
     one of its own, so that the store folder is the one the start-up sweep
     read.
 
-    The event log must hold each domain event of the task across its child run,
-    and
-    it must never be sent to the parent model.
+    The event log must hold each domain event of the task across every
+    child run of every turn, each follow-up message whole included, and it
+    must never be sent to the parent model.
 
     The store folder must be created readable by its owner only, with a
     .gitignore
@@ -146,18 +154,29 @@ component TaskStore {
     .gitignore, and in a git repository nothing in it shows in git status while
     the
     user's own .gitignore is unchanged.
+
+    A task that settled at turn 1 and takes a follow-up message keeps
+    turns/1.json unchanged, has the task status running while turn 2 runs, and
+    then has the task status of the result in turns/2.json.
+
+    A task whose owner process died after it settled, continued from a later
+    process of the same parent session id, gets a running line that records
+    the new owner process, so that the start-up sweep of that later process
+    does not mark it abandoned while its turn runs.
   }
 
   interface {
     Provide the task record of a task id for writing and reading, including its
-    launch spec and its result. Create the store folder, readable by its owner
+    launch spec, each turn and the result of each turn. Create the store folder,
+    readable by its owner
     only
     and ignoring itself, on the first write of a task record.
 
     Append each domain event to the event log of its task.
 
-    Provide the model endpoint, the enqueue time and the start time of each
-    task record to a reader in any process.
+    Provide the model, the enqueue time and the start time of each
+    task record to a reader in any process, and the owner process of each
+    task.
 
     List each task record of one parent session id, or of every
     parent session id,

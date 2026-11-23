@@ -74,7 +74,8 @@ component ClaudeRoutingHooks {
     Agent spawn.
 
     A *wake marker* is a plugin data folder entry for one background task of a
-    parent session id. The *wake hook* is an asyncRewake Stop hook that watches
+    parent session id, or for one turn of such a task that opened without a
+    call to wait for it. The *wake hook* is an asyncRewake Stop hook that watches
     only those entries, never the store folder.
   }
 
