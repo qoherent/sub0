@@ -241,6 +241,12 @@ component AgentConfig {
     uses after the change, keep one that only a tier override uses, remove the
     endpoints map from the file of the setup scope, and load the result as the
     merged configuration, keeping its load error when it would not load. A
+    setup preview of a repair step, the change set that guided setup makes for the
+    file that the chosen setup scope does not write, may keep as what the next step
+    repairs a load error that comes only from an endpoints map of the file of the
+    chosen setup scope, a missing medium tier or a parallel limit that no
+    model tier uses, and any other load error of that setup preview refuses the
+    change set. A
     change set adds no starter entry. Return the setup preview and
     write nothing, which ends the flow.
 
@@ -249,7 +255,8 @@ component AgentConfig {
     with a
     *stale preview error* when the preview fingerprint differs, and refuse
     when the setup preview holds a refused change or would not load, writing
-    nothing. Write nothing when nothing changes, and otherwise write the result
+    nothing. A load error that a repair step keeps does not count as would not load
+    there. Write nothing when nothing changes, and otherwise write the result
     and return the setup preview with whether it wrote, which ends the flow.
     When the file system refuses that write, leave that file as it was
     and refuse with a *write error* that names the file and the cause the
@@ -327,7 +334,10 @@ component AgentConfig {
     old limit covered, which for the agent file are those of the model tiers
     and tier overrides of the merged configuration and for the global file
     are those of its own model tiers, and says that
-    guided setup repairs the file. An endpoints entry is never turned into a
+    guided setup repairs the file. AgentConfig raises this error after it has
+    merged the two layers, and not while it reads one layer, so that the models it
+    lists are those of the merged model tiers and tier overrides. An
+    endpoints entry is never turned into a
     parallel limit without a write that the person confirms.
 
     An agent entry must be rejected, naming it, when it has no timeout or its
@@ -520,6 +530,12 @@ component AgentConfig {
     repairs. A change set for that agent file that sets the parallel limit of
     r9700/Qwen3.8 to 1 writes it, removes the endpoints map in the same write,
     and the agent file loads, with no parallel limit for r9700/Qwen3-4B.
+
+    A change set that repairs the global file by setting the parallel limit
+    of its models and removing its endpoints map, in a project whose agent
+    file still holds an endpoints map, gives a setup preview that keeps the
+    load error of the agent file, and its apply writes the global file, so
+    that the next step can repair the agent file.
 
     An agent file with one invalid agent entry gives a load error that names it
     and returns no agent definition, not even a valid one.

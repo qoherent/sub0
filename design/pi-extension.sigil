@@ -1,7 +1,7 @@
 @design/delegation-service.sigil from DelegationService import {
   delegation, brief text, session cancel, completion notice, stop notice,
   status line, result text, queued task, collect tool, guided setup,
-  setup operations, guide text, setup refusal, continuation,
+  setup operations, guide text, setup refusal, continuation, notice sink,
 }
 @design/agent-config.sigil from AgentConfig import {
   tier word, tier text, unmatched tier text, agent alias, agent file,
@@ -67,6 +67,13 @@ component PiExtension {
     A *mid-turn user message* is a message that the user sends while a turn of
     the pi session runs, which pi hands to the extension as input with the
     streaming behavior steer.
+
+    A *reload report* is the one notice that PiExtension sends into a pi
+    session that follows a reload or a resume. It lists each turn that a
+    session end stopped, or that the death of its owner process left
+    abandoned, and that no earlier notice reported, with the follow-up
+    messages that did not reach it. It is neither a completion notice nor a
+    stop notice.
 
     A *session core* is the DelegationService that the entry point of the
     extension
@@ -186,7 +193,10 @@ component PiExtension {
     starts
     a turn when pi is idle and joins the turn that is running otherwise, which
     ends
-    that flow. A task that ended by a session cancel after an abort, or by a
+    that flow. At the start of a pi session PiExtension registers its notice sink
+    with the session core, and sends the completion notice that the notice sink
+    receives for a turn that no call opened in the same way, which ends that flow.
+    A task that ended by a session cancel after an abort, or by a
     cancel
     through the subzero tools or the /subzero command, sends no turn trigger:
     its
@@ -197,6 +207,15 @@ component PiExtension {
     the pi session sends no stop notice to the parent model, and the user sees
     only
     the count of cancelled tasks.
+
+    At the start of a pi session that follows a reload or a resume, read the
+    task records of the parent session id of the session core and send one
+    reload report into the pi session as a steering message with no turn
+    trigger, so that the next turn of the parent model carries it. Then ask
+    TaskCore to record each listed turn as reported, so that a later reload
+    lists none of them again. A turn that the user or the subzero tools
+    cancelled is never listed, and nothing is sent when no turn is listed,
+    which ends the flow.
 
     On the /subzero command with init and a model, with the optional named
     options thinking and timeout, ask Kernel for the prerequisites check and
@@ -318,6 +337,12 @@ component PiExtension {
     session.
     Neither may carry the transcript of a child run.
 
+    The reload report must list a turn at most once and only a turn that a
+    session end stopped or that the death of its owner process left
+    abandoned. It is the one notice that reaches the next session of the
+    same parent session id, and it must never be sent to a session of
+    another parent session id.
+
     The session widget must be shown only when the pi parent host has a user
     interface. The clash warning must always be shown: as a notification when
     the pi
@@ -373,6 +398,11 @@ component PiExtension {
     turn trigger, and
     the parent model gets three stop notices on its next turn, one for each
     task.
+
+    After a reload that cancelled a task with a held follow-up message, the
+    next pi session sends one reload report that names the task and the
+    message, a second reload sends none for it, and a task that the user
+    cancelled earlier is never listed.
 
     With pi idle and two background tasks running, the /subzero command with
     cancel
@@ -434,7 +464,9 @@ component PiExtension {
 
     Deliver the completion notice of each background task into the pi session,
     and the
-    stop notice of each task that was stopped, under the rules of the logic.
+    stop notice of each task that was stopped, under the rules of the logic. Send
+    the reload report of a reload or a resume once, and register the notice sink of
+    the session core.
 
     Run a session cancel when the user aborts a turn, when the /subzero command
     asks

@@ -20,16 +20,25 @@ component TaskStore {
     is
     the set of files that TaskStore keeps in the directory tasks/<task id>/ of
     the
-    store folder. It holds task.json with the frozen agent definition and the
-    brief, so that a later process can release the task with it, and, once
+    store folder. It holds task.json with the frozen agent definition, its tier and
+    the brief, so that a later process can release the task with it, and, once
     a child run has started, the launch spec of the latest child run, the
-    *event log* events.jsonl, and one file turns/<turn number>.json for each
+    *event log* events.jsonl, and one *turn file* turns/<turn number>.json for each
     turn, which holds, from turn 2 on, the follow-up message that opened that
     turn, and the exact result the parent model received for it. A task whose
     child run failed before it started has no launch spec. The same directory
     also holds the *driver files* of the task beside the task record. Only its
     child driver writes or removes a driver file, and TaskStore provides the
     folder that holds them.
+
+    A new turn opens by an exclusive create of its turn file, which holds
+    the owner process of the process that claims it. The latest turn is the
+    turn file with the highest turn number, a turn file with no result is a
+    running turn, and the owner process of that turn is the one in its turn
+    file. A turn file that holds a bare result, as a task record of an
+    earlier version wrote it, is read as the turn file of turn 1. A turn
+    whose result has reached the parent model has a *collected marker*, the
+    empty file turns/<turn number>.collected beside its turn file.
 
     A task record also keeps the model of its task and the time the task was
     created, which is the enqueue time of turn 1, from its first write, and
@@ -55,7 +64,9 @@ component TaskStore {
     runs the child runs of the task, by its process id and its start time, on
     the first line written for the task, and again on the first line of a turn
     that another process starts, which makes that process the owner process
-    from then on. A parent session id is the id of
+    from then on. A reader takes the owner process of the latest line that records
+    one, and the time of the first line of the task as its creation time, so that a
+    takeover shows in the task index. A parent session id is the id of
     the
     conversation that made the delegation, and a delegation from the command
     line
@@ -70,7 +81,9 @@ component TaskStore {
     scan the task index for a task whose latest line says running and whose
     owner process is no longer alive, or is alive with a different start time.
     Mark that task abandoned by appending the change to the task index. The
-    sweep signals no process, and it ends when every such task is marked. An
+    sweep signals no process, and it ends when every such task is marked. The sweep
+    and the takeover check read the owner process of a running turn from its
+    turn file. An
     abandoned task has no result for its latest turn and can still be listed
     and attached. Read the latest line of a task again just before appending,
     and append nothing for a task whose task record holds a result for its
@@ -81,7 +94,9 @@ component TaskStore {
     line for it to the task index, which ends the write. When a turn opens on a
     settled task, write its turn file with its follow-up message and then
     append a running line, with the owner process when it changes, which ends
-    the write.
+    the write. The claim is the exclusive create of the turn file, the running line
+    follows only a claim that succeeded, and a process that loses the claim appends
+    no line and reads the task record again, which ends the write.
   }
 
   constraints {
@@ -100,6 +115,16 @@ component TaskStore {
     result for its latest turn must be ignored by every reader and never
     rewritten. A result of an earlier turn must never be rewritten by a later
     turn.
+
+    A turn must be claimed only by the exclusive create of its turn file,
+    never by a lock or a signal across processes, and a process that loses
+    the claim must append no line to the task index, so that the owner
+    process of a running turn is never replaced by a process that lost. A
+    collected marker must never be removed or rewritten, and a reader must
+    count a turn as collected only from its collected marker, so that a
+    restarted or taking-over process neither repeats nor skips a turn. A
+    task record whose turn file of turn 1 holds a bare result must stay
+    readable.
 
     TaskStore must never store a queued task as a task status of its own. A
     task whose task record has
@@ -163,6 +188,13 @@ component TaskStore {
     process of the same parent session id, gets a running line that records
     the new owner process, so that the start-up sweep of that later process
     does not mark it abandoned while its turn runs.
+
+    Two processes that open turn 2 of one task at once make one exclusive
+    create succeed, the loser appends no line to the task index and the task
+    keeps the owner process of the winner. A task record whose turn file of
+    turn 1 holds a bare result lists as completed at turn 1, and a turn with
+    a collected marker is not read as uncollected by a process that starts
+    later.
   }
 
   interface {
@@ -171,6 +203,10 @@ component TaskStore {
     readable by its owner
     only
     and ignoring itself, on the first write of a task record.
+
+    Let a caller claim a turn by the exclusive create of its turn file with
+    its owner process, and write and read the collected marker of each turn,
+    so that every process reads which turns reached the parent model.
 
     Append each domain event to the event log of its task.
 

@@ -416,9 +416,34 @@ refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil c
     by default, so without this a message reaches the parent only after the child settles. A probe on Claude Code
     2.1.322 (spike-results.md) showed the hook fires at submit time during a blocking MCP call.
 
+58. **Every uncollected turn reaches the parent.** When a later turn opens before an earlier turn's result was
+    collected, collecting the task (a collect, an `await`, or the notice's collect hint) returns every uncollected
+    turn's result, oldest first, then the latest turn's status line. A result whose held messages opened a new turn
+    says so in one line, and a notice never lists its own task as running. A turn counts as collected once any path
+    has delivered its result to the parent, and that mark is durable, so a restarted or taking-over process
+    neither repeats nor skips a turn. Why: a message held for a task that settles first opens a turn of its own,
+    and returning only the latest turn would hide the answer to the brief behind it.
+59. **On Claude Code, only the main conversation's waits end early.** The prompt marker of 57 is per parent session,
+    and a subagent shares its parent's session id yet cannot see the user's message, so ending its wait would only
+    break its work. The PreToolUse hook therefore also matches subzero's tools and records each call's agent id,
+    keyed by the tool-use id that Claude Code gives both the hook and the MCP request (probe below). The server
+    ends a wait early only for a call whose marker is found and records no agent id; a call with an agent id, or
+    with no marker found, keeps waiting. Why: this decides between breaking subagents and not ending waits at all,
+    and the probe shows the safe trigger exists.
+60. **Messages that did not reach a child are replayed, and a reload reports what stopped.** When a turn is abandoned
+    before its child sent its prompt, its messages are replayed in order before the next turn's own message, and the
+    reply says so. After a pi reload or resume, the parent's next turn carries one notice that lists the tasks a
+    session end stopped and the messages that did not reach them, once. Why: a message the parent wrote must not
+    vanish silently with a stopped child, and a parent that is not told cannot repeat it.
+
 Checked on pi 1.5.2 on 2026-11-23, with subzero's child flags and a real model: relaunching with
 `--session-id <task id>` and the same `--session-dir`, without `--session`, reopens the existing session (the child
 recalled a word from turn 1); a `steer` sent during the turn's last model call, with no tools, is answered
 `disposition: "queued"` and read before `agent_settled`, in the same turn; `/reload` (through `ctx.reload()`, the
 same flow) keeps the pi session id. pi's `steer` reply does not promise the message stays queued (`clear_queue`
 drops it), so "delivered" means accepted before `agent_settled`, as PiDriver says.
+
+Checked on Claude Code 2.1.330 on 2026-11-23 (spike-results.md): a PreToolUse hook for an MCP tool call carries
+`tool_use_id`, and `agent_id` and `agent_type` only when a subagent made the call; the MCP server receives the same id
+as `params._meta["claudecode/toolUseId"]`. So the call marker of 59 is keyed by the tool-use id alone, and no
+input-hash fallback is needed.

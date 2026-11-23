@@ -9,6 +9,7 @@
 }
 @design/task-store.sigil from TaskStore import {
   task record, event log, parent session id, sessions folder, driver files,
+  turn file,
 }
 
 component TaskCore {
@@ -41,6 +42,10 @@ component TaskCore {
     its caller has released its child run, its *start time*, the time of that
     release. The enqueue time of turn 1 is the time the task was created.
 
+    The turn that releases a task whose child runs never sent their prompt
+    takes the brief as its prompt, its turn file marks the brief as that
+    prompt, and the follow-up message stays beside it as held.
+
     A child run has a *child run state*. It is Pending until its caller
     releases it, then moves through Starting and Live to Settled, and it can
     also end Failed or Cancelled. A child run is Live from the moment its
@@ -59,7 +64,10 @@ component TaskCore {
     follow-up messages were not delivered. The status truncated means only that the
     child
     stopped at its own length limit. The summary is the whole last assistant
-    message of the child run.
+    message of the child run. A turn that a session cancel or the shutdown of its
+    process stopped records the *stop reason* session end, and a front end may ask
+    TaskCore to record that the stop of a turn was reported to the parent model, so
+    that no front end reports it twice.
 
     A session usage is the token count, the cost and the context use at settle
     of a
@@ -80,8 +88,9 @@ component TaskCore {
     A *domain event* is one step of a child run, such as run started, skills
     verified, prompt sent, tool activity, agent message, follow-up message,
     turn settled and run exited. The brief event carries the whole brief, and
-    the follow-up message event carries the whole text of the follow-up
-    message it records. Tool
+    the follow-up message event carries the whole text of the follow-up message it
+    records and the delivery outcome that message got, so that the event log never
+    shows an undelivered message as received. Tool
     activity carries the tool name and its target path, and the run started
     event
     carries the launch spec of the child run. Each domain event is written to
@@ -90,12 +99,18 @@ component TaskCore {
 
     A *child session* is the record of the child's own conversation that its
     child driver keeps for a task, in the sessions folder that TaskStore
-    provides. Every turn of a task adds to the same child session.
+    provides. Every turn of a task adds to the same child session. A task has a
+    child session once the prompt sent event of one of its child runs is in its
+    event log. A task record with no prompt sent event at all, as an earlier
+    version wrote it, has one when its child session exists, which its child driver
+    checks before a session resume.
 
     A child driver may offer *turn steering*, which delivers a
     steering message into its live child run, and *session resume*, which
     starts a child run on the existing child session of a task with a
-    follow-up message as its prompt. Both are optional.
+    follow-up message as its prompt. Both are optional. A steering message that a
+    child run settled without reading is an *unread steering message*, which
+    turn steering reports at the settle of that child run.
   }
 
   logic {
@@ -134,7 +149,11 @@ component TaskCore {
     held for it, or turn steering reports for a held follow-up message that
     the child run had already settled, open a new turn for those messages as
     for a settled turn, with the first as its prompt and the rest held for
-    it, which ends that branch. When a child run fails or is cancelled before
+    it, which ends that branch. Open a new turn in the same way for the unread
+    steering messages that turn steering reports at the settle of a child run, in
+    the order delivered, with the first as its prompt and the rest held for it, and
+    its result reaches the caller as that of a turn opened for held follow-up
+    messages, which ends that branch. When a child run fails or is cancelled before
     it sent its prompt, its held follow-up messages are not delivered and its
     result says so, so that a task that fails at each start never loops. When
     the child run settles, build the result with the
@@ -160,9 +179,16 @@ component TaskCore {
     which restarts the timeout of that child run in the child driver, return
     the delivery outcome steered, which ends the flow. When it reports that the
     child run had
-    already settled, go on as for a settled turn. A latest turn that ended
+    already settled, go on as for a settled turn. When it reports that the
+    child run is stopping, return the delivery outcome not delivered and open no
+    turn, which ends the flow. A latest turn that ended
     with no result, because the process that ran it died, counts as settled
-    here. When the latest turn has
+    here. When that turn never sent its prompt, its follow-up messages and its held
+    ones go to the new turn, in the order received, before the new
+    follow-up message, and the reply says that they were replayed. When
+    session resume reports that the child session no longer exists, release the new
+    turn with the brief as for a task with no child session, and hold the
+    follow-up message for it. When the latest turn has
     settled and the task has a child session, open a new turn with the next
     turn number and a new enqueue time, whose child run starts Pending and is
     released by the caller
@@ -192,6 +218,10 @@ component TaskCore {
     delivered into it, and each new turn gets the whole timeout of the
     agent definition. Nothing bounds the total time of a task across its
     steering messages and turns.
+
+    The listeners of a turn must fire only for that turn and never for a
+    later turn of the task, because each turn owns its child run, its result
+    and its listeners, so that no completion of an earlier turn is repeated.
 
     A new turn that opens because a child run had already settled, for held
     follow-up messages or for a follow-up message, must open only after the
@@ -290,6 +320,12 @@ component TaskCore {
     of that turn says so, and no new turn opens. A follow-up message held for a
     child run that settles before its child driver delivers it opens a new turn
     with it as the prompt.
+
+    Steering messages that turn steering reports as unread at the settle of
+    a child run open a new turn with the first as its prompt. A turn
+    abandoned before its prompt with two follow-up messages is replayed when
+    the next follow-up message opens turn 3: the child run gets the two
+    messages first, in order, then the third.
   }
 
   interface {
@@ -345,7 +381,9 @@ component TaskCore {
     or that the child run had already settled, and session resume, which starts
     a child run on the existing child session of a task with a follow-up message
     as its prompt and is otherwise started, run, cancelled and reported like
-    any child run. A child driver may also offer an *attach command* that
+    any child run. Turn steering also reports that the child run is stopping, which
+    TaskCore answers as not delivered, and each unread steering message at the
+    settle of the child run. A child driver may also offer an *attach command* that
     reopens the
     child session of a task in the terminal interface of its child program,
     built

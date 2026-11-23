@@ -4,6 +4,7 @@
     child working directory,
     starter tools, prerequisites check, model listing, model check,
     follow-up message, steering message, turn steering, session resume, turn,
+    unread steering message,
 }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, skill folder, project root, timeout, thinking level,
@@ -93,14 +94,24 @@ component PiDriver {
     sessions folder, which reopens the child session of the task because its
     id is the task id, perform skill verification as for any child run, and
     send the follow-up message as the prompt, after which the child run goes on
-    as above, which ends that flow.
+    as above, which ends that flow. Before it starts pi, check that the session
+    file of the child session exists, and when it does not, start no pi and report
+    that the child session is gone, which ends that flow. Before it sends the
+    prompt, read get_session_stats and keep it as the usage baseline, and at settle
+    report the session usage as the difference from that baseline, because pi
+    reports tokens and cost across the whole session, and the context use at settle
+    as pi reports it.
 
     On turn steering, send the steering message to pi with the steer command
     while the child run is live. When pi accepts it before agent_settled,
     restart the timeout of the child run and report that it was delivered,
     which ends that flow. When the child run has already reached
     agent_settled, send nothing and report that it had already settled, which
-    ends that flow.
+    ends that flow. When a stop is pending, send nothing and report that the
+    child run is stopping, which ends that flow. Read the queue_update events of pi
+    while the child run is live, and at agent_settled report each steering message
+    that pi still holds as queued as an unread steering message, because pi makes
+    its last queue check before it emits agent_settled, which ends that flow.
   }
 
   constraints {
@@ -199,6 +210,19 @@ component PiDriver {
     it must not count the time that the child run waited Pending for its
     caller.
 
+    A steering message counts as delivered when pi accepts the steer command
+    before agent_settled with no stop pending, whether pi answers queued or
+    handled, because the responses and the events of pi arrive in order on
+    one stdout. pi does not promise that an accepted message stays queued,
+    so the driver must report as unread each steering message that is still
+    queued at agent_settled, and must answer a steering message that arrives
+    while a stop is pending as stopping and send nothing. The prompt sent
+    domain event must be reported only once pi has accepted the prompt
+    command, and never for a child run that failed skill verification,
+    because TaskCore takes from it that the task has a child session. The
+    session file, whose path the driver sets before it sends the prompt,
+    proves no child session by itself.
+
     A steering message must be sent with the steer command of pi and never
     with follow_up, so that it joins the running turn and that turn still
     settles once, at agent_settled. The driver must verify on pi 1.5.2, as for
@@ -264,6 +288,13 @@ component PiDriver {
     after agent_settled is not sent, and the driver reports that the child run
     had already settled.
 
+    A steering message that pi accepts after its last queue check, so that
+    the child run settles without reading it, is reported as unread, and one
+    that arrives while a stop is pending is answered stopping. A session
+    resume whose session file is gone starts no pi and reports that the
+    child session is gone, and the session usage of a resumed turn is the
+    session stats at settle less those read before its prompt.
+
     A session resume of a task whose first child run settled starts pi with
     the same flag set, and the child reads the follow-up message as the next
     message of the same child session.
@@ -288,7 +319,9 @@ component PiDriver {
     Offer turn steering, which delivers a steering message into a live
     child run or reports that it had already settled, and session resume, which
     starts a child run on the child session of a task with a follow-up message
-    as its prompt.
+    as its prompt. Offer both as optional offerings, and make whether it steers
+    known before any child run exists, so that a caller can answer queued or not
+    delivered with no child run.
     Keep the skill overlay of each task for as long as its task record exists.
 
     Hand each domain event of a live child run to the caller as it happens,

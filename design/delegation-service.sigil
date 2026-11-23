@@ -17,7 +17,7 @@
 }
 @design/task-store.sigil from TaskStore import {
   task record, task status, parent session id, start-up sweep, task index,
-  owner process,
+  owner process, collected marker,
 }
 @design/kernel.sigil from Kernel import {
   driver registry, parent adapter, supported child host, child host, parent host,
@@ -51,6 +51,28 @@ component DelegationService {
     to a task. It holds a task id, the follow-up message, an optional wait and
     the parent session id of its caller.
 
+    A *continuation queue* holds the continuations of one task in this
+    process, in the order received.
+
+    A *notice sink* is the one entry that each front end registers with
+    DelegationService, to which DelegationService offers the completion
+    notice of a turn that no call of that front end opened: a turn opened
+    for held follow-up messages, for unread steering messages or for a
+    replay.
+
+    A *wait handle* is what a front end holds while a delegation, a
+    continuation or a wait up to a bound is waited for. It takes an *until signal*,
+    which ends the wait and returns the current state of the task,
+    and an abort, which cancels, and the two are separate. A *forced wait*
+    is a wait that a front end asks for because nothing would collect a
+    result after its process exits, as in a print mode or a non-interactive
+    session.
+
+    A turn is collected once any path has delivered its result to the parent
+    model, whether a collect, a waited reply or a delivery that a front end
+    makes by its own means, and every such path writes the collected marker
+    of that turn.
+
     A *session cancel* cancels every Pending and live task of one
     parent session id in the live task registry, and reports their task ids and
     how many there were.
@@ -65,10 +87,10 @@ component DelegationService {
     the task by its task id with its status and, from turn 2 on, its
     turn number, tells the parent model to collect
     the
-    result through the collect tool that the front end names, lists the tasks
-    of
-    the same parent session id that are still Pending or live with their
-    status line, and tells the parent model to wait for them before it uses the
+    result through the collect tool that the front end names, lists the tasks of
+    the same parent session id other than its own task that are still Pending or
+    live with their status line, and tells the parent model to wait for them before
+    it uses the
     results
     together. It carries no result text, and it names no running tasks and
     gives
@@ -111,7 +133,8 @@ component DelegationService {
     one, the summary, with
     (empty) for an empty summary, and the usage with the duration when
     the result holds usage. A notice goes on the line after the first one, so
-    the task id still comes first.
+    the task id still comes first. A result whose held follow-up messages opened a
+    new turn ends with one line that says so.
 
     The *guided setup* is the part of DelegationService that a front end
     reaches during an init that a person starts. It is made with Kernel, the
@@ -219,7 +242,13 @@ component DelegationService {
     child run, or with the model, the queue place and the
     enqueue time of a Pending one, which ends the flow.
 
-    On a continuation, run the start-up sweep again, then look for its task in
+    On a continuation, first register its task id in the live task registry as
+    opening, before its first wait, so that a session cancel that arrives during
+    the sweep or the load of the merged configuration stops the turn before it
+    starts, and the continuation then ends with the delivery outcome not delivered
+    and the reason cancelled. Hand the continuation to the continuation queue of
+    its task, which runs the continuations of one task one at a time. Then run the
+    start-up sweep again, then look for its task in
     the live task registry and then in the task record, and read its
     owner process and its latest turn from the task record in both cases. A
     task in the live task registry whose owner process is now another process
@@ -227,13 +256,17 @@ component DelegationService {
     there, so that its turns are read again from the task record. A task id
     that no
     task record holds gets an error that names it, which ends the flow. A task
-    whose parent session id is not the parent session id of the continuation,
-    a continuation with no parent session id, and a task whose latest turn is
+    whose parent session id is not the parent session id of the continuation, and a
+    task whose latest turn is
     running in an owner process other than this one that is still alive get
     the delivery outcome
     not delivered with the status line of the task, or the first line of its
     result text when its latest turn has settled, and no result, which ends
-    the flow. A task whose task status is abandoned is continued as a settled
+    the flow. A continuation with no parent session id, and a continuation for a
+    task that has none, get the delivery outcome not delivered with the message
+    that this conversation could not be identified, never the status line or the
+    result of the task, which ends the flow. A task whose task status is abandoned
+    is continued as a settled
     one. For a task of the same parent session id that is not in the
     live task registry, load the merged configuration as for a delegation,
     take the child port of the child host of its frozen agent definition from
@@ -252,7 +285,29 @@ component DelegationService {
     of the task cannot take a follow-up message, which ends the flow. A new turn
     that TaskCore opens for held follow-up messages is released under the
     parallel limit of its model in the same way, and its result reaches the
-    front end through the completion notice, which ends that flow.
+    front end through the completion notice, which ends that flow. Only a
+    continuation that opens a new turn, whether as a new turn or as a release,
+    loads the merged configuration, before it claims the turn and just before its
+    child run enters the queue of its model, and takes the parallel limit of that
+    model from it, whether its task came from the live task registry or from its
+    task record. A continuation that steers or holds loads none and uses the frozen
+    task record, so that a broken agent file never blocks steering a running child.
+    When that load fails, the continuation ends with the delivery outcome not
+    delivered and the load error or the off error, and no turn is claimed. A
+    process that loses the claim of a new turn to another process reads the
+    task record again, and then holds, steers or answers not delivered as the
+    latest turn there says.
+
+    A delegation with no parent session id adds one line to its reply that
+    says the task cannot be continued, because no conversation could name
+    it.
+
+    A waited delegation, a waited continuation and a wait up to a bound each
+    end when their turn settles, when their bound passes or when their until
+    signal fires, which returns the current state of the task and cancels
+    nothing, and only the abort of the wait handle cancels. A forced wait
+    also waits for each turn that the held follow-up messages of the awaited
+    turn open, and returns each result in order, which ends that flow.
 
     Before a collect, a cancel or a listing, run the start-up sweep again, so
     that a task whose owner process died after start-up is not shown as
@@ -279,6 +334,13 @@ component DelegationService {
     reports that it belongs to another process and cannot be cancelled here,
     and changes nothing, which ends the flow.
 
+    On a collect, an await or the collect hint of a completion notice for a
+    task, give the result of each turn that has a result and no collected
+    marker, oldest first, then the status line of the latest turn when it
+    has no result yet, and mark each turn given as collected, so that a
+    restarted or taking-over process neither repeats nor skips a turn, which
+    ends the flow.
+
     On a session cancel for a parent session id, cancel each Pending and live
     task of that parent session id in the live task registry the way a cancel
     does, and return their task ids and count, which ends the flow. A
@@ -292,7 +354,8 @@ component DelegationService {
     the same parent session id that is still Pending or live, and offer it to
     the front end that opened that turn, which is the front end of the
     delegation for turn 1, of the continuation for a later turn, and of this
-    process for a turn opened for held follow-up messages, which ends that
+    process for a turn opened for held follow-up messages, for unread steering
+    messages or for a replay, through its notice sink, which ends that
     flow. A task that a
     session cancel or a cancel ended gets the stop notice instead.
 
@@ -411,6 +474,14 @@ component DelegationService {
     A child run that is Pending must be returned with its queue place and its
     enqueue time and never with a start time, and the time it waits must not
     count toward its timeout.
+
+    Continuations of one task must run one at a time through its
+    continuation queue, so that two continuations of a settled task open
+    exactly one turn and the second steers or holds into it. An until signal
+    must end a wait without cancelling any task or turn. Every path that
+    delivers the result of a turn to the parent model must mark that turn
+    collected through its collected marker, and a collect must never give a
+    collected turn again nor skip an uncollected one.
 
     A continuation must reach only a task of its own parent session id and
     must never change the frozen agent definition of that task, and
@@ -556,6 +627,19 @@ component DelegationService {
     With one live child run on a model whose parallel limit is 1, a
     continuation that opens a new turn on another task of that model keeps
     the new child run Pending at queue place 1 until the first one ends.
+
+    Turn 1 settles with a held follow-up message that opens turn 2 before
+    turn 1 was collected: a collect returns the result of turn 1, the line
+    that its held message opened turn 2 and the status line of turn 2, and a
+    second collect after turn 2 settles returns only turn 2, also from a
+    process that starts later. A continuation for a running task whose agent
+    file now fails to load still steers it, and a continuation that would
+    open a new turn then answers not delivered with the load error and
+    claims no turn. A session cancel that arrives while a continuation loads
+    the merged configuration stops its turn before it starts. A continuation
+    with no parent session id answers that this conversation could not be
+    identified, and a delegation with none says in its reply that the task
+    cannot be continued.
   }
 
   interface {
@@ -574,6 +658,13 @@ component DelegationService {
     and new turn when the caller does not wait, the result of the new turn
     when the caller waits for it, and for not delivered the status line or the
     first line of the result text and no result.
+
+    Let each front end register one notice sink for the completion notice of
+    a turn that no call of it opened, and give each waited delegation,
+    continuation and wait up to a bound a wait handle whose until signal
+    ends the wait without cancelling. Let a collect of a task by task id
+    give each uncollected turn, oldest first, before the status line of its
+    latest turn.
 
     Report each queued task by its model, by its queue place when it
     is a

@@ -191,6 +191,14 @@ So a hook does see a message typed during a blocking MCP call, at submit time.
 The probe did not check whether the hook can change what Claude sees mid-call; the
 message itself reached Claude after the tool returned.
 
+On 2026-11-23, a headless Claude Code 2.1.330 session in a scratch folder (a stub MCP server with one `ping` tool and
+a PreToolUse hook that logged its whole input) called the tool once from the main conversation and once from a
+subagent started with the Agent tool. The hook input of both calls carried `tool_use_id`, `session_id`, the tool name
+and its input; only the subagent call also carried `agent_id` and `agent_type` (`general-purpose`). The server
+received the same id in `params._meta["claudecode/toolUseId"]` of each `tools/call`, next to a `progressToken`. So a
+call marker can be keyed by the tool-use id, and the marker says whether the call came from a subagent. The check
+used temporary files only.
+
 The two-parent acceptance run in the pi parent plan is still pending. A person
 must check a real compound-engineering review and local child on pi, including
 notices, Escape, `/subzero cancel`, `/new`, and the shell task listing. On Claude
