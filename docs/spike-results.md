@@ -236,7 +236,9 @@ Observations from the run:
 - A Claude Code session opened inside this repository also loads the plugin's
   root `.mcp.json` as a project server named `subzero`, which fails because
   `${CLAUDE_PLUGIN_ROOT}` is unset there. A subagent misreported that startup
-  failure as the plugin server dropping.
+  failure as the plugin server dropping. Fixed afterwards: the server is now
+  declared inline in `.claude-plugin/plugin.json`, and the root `.mcp.json` is
+  gone.
 - On pi, a completion notice still arrived for a turn that a later
   `subzero_await` had already returned (`sz-l5m3xg`, `sz-2nvkku`). The parent's
   next `subzero_await` answered "already reached you", so nothing was lost, but

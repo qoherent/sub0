@@ -39,6 +39,9 @@
 - Behavior change: the Claude Code MCP server no longer offers MCP tasks.
   Claude Code never selected them, so the branch was never used. A background
   result always arrives through the wake hook.
+- The Claude Code MCP server is declared in `.claude-plugin/plugin.json`
+  instead of a root `.mcp.json`, so a session opened inside this repository no
+  longer loads a broken project server named `subzero`.
 - Behavior change: on Claude Code, `delegate` and `continue` run in the
   background unless the call sets `wait: true`, as `subagent` and
   `subzero_continue` already do on pi. A non-interactive or unidentified

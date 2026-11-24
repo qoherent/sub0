@@ -70,10 +70,11 @@ flowchart LR
 
 ```
 subzero/                                  # Claude Code plugin
-  .claude-plugin/plugin.json              # name: "subzero", userConfig, hooks, mcpServers
-  .mcp.json                               # { "subzero": { "command": "node",
-                                          #   "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.js"],
-                                          #   "env": { "SUBZERO_DATA": "${CLAUDE_PLUGIN_DATA}" } } }
+  .claude-plugin/plugin.json              # name: "subzero", hooks, and mcpServers inline:
+                                          #   { "subzero": { "command": "sh",
+                                          #   "args": ["${CLAUDE_PLUGIN_ROOT}/bin/subzero", "--bundle", "server"],
+                                          #   "env": { "SUBZERO_DATA": "${CLAUDE_PLUGIN_DATA}", ... } } }
+                                          # (no root .mcp.json: a session opened in this repo would load it)
   dist/server.js                          # one bundled file, no runtime deps, no npx
   hooks/hooks.json                        # SessionStart (sync proxies, reloadSkills, record session id)
                                           # SessionEnd (flush run store)

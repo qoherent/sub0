@@ -18,7 +18,6 @@ const BUNDLES = ['agent-hook', 'cli', 'hook', 'prompt-hook', 'server', 'wake-hoo
 // Named paths only: a new file never ships by accident.
 const ALLOWLIST = [
   '.claude-plugin/plugin.json',
-  '.mcp.json',
   'hooks/hooks.json',
   'skills/init',
   'skills/cancel',
@@ -105,7 +104,7 @@ writeFileSync(
   `${JSON.stringify({ ...manifest, repository, homepage: repository }, null, 2)}\n`,
 );
 
-// The plugin at the zip root; `.` so dotfiles (.claude-plugin, .mcp.json) are included, -X to drop extra file attributes.
+// The plugin at the zip root; `.` so dotfiles (.claude-plugin) are included, -X to drop extra file attributes.
 const zipped = spawnSync('zip', ['-q', '-r', '-X', zip, '.'], { cwd: stage, encoding: 'utf8' });
 if (zipped.status !== 0) fail(`zip failed: ${zipped.stderr || zipped.stdout}`);
 

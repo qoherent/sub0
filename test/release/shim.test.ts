@@ -196,8 +196,9 @@ describe('plugin launch configuration', () => {
   const json = (file: string) => JSON.parse(readFileSync(path.join(REPO, file), 'utf8')) as any;
   const SHIM = 'sh "${CLAUDE_PLUGIN_ROOT}/bin/subzero"';
 
-  it('launches the MCP server through the shim with the same environment variables', () => {
-    const server = json('.mcp.json').mcpServers.subzero;
+  it('declares the MCP server in the plugin manifest, not a root .mcp.json that a session in this repository would load', () => {
+    expect(existsSync(path.join(REPO, '.mcp.json'))).toBe(false);
+    const server = json('.claude-plugin/plugin.json').mcpServers.subzero;
     expect(server.command).toBe('sh');
     expect(server.args).toEqual(['${CLAUDE_PLUGIN_ROOT}/bin/subzero', '--bundle', 'server']);
     expect(server.env).toEqual({ SUBZERO_PROJECT_DIR: '${CLAUDE_PROJECT_DIR}', SUBZERO_DATA: '${CLAUDE_PLUGIN_DATA}' });

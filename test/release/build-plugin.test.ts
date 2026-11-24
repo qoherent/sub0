@@ -13,7 +13,6 @@ const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).stat
 /** Exactly what a release ships (KTD4): any other file in the staged plugin is a leak. */
 const ALLOWLIST = [
   '.claude-plugin/plugin.json',
-  '.mcp.json',
   'LICENSE',
   'bin/subzero',
   ...BUNDLES.map((name) => `dist/${name}.js`),
@@ -51,7 +50,7 @@ beforeAll(() => {
  */
 function sourceTree(dist: 'real' | 'stub' | 'none' = 'stub'): string {
   const root = tempDir('subzero-src-');
-  for (const file of ['.claude-plugin/plugin.json', '.mcp.json', 'LICENSE', 'bin/subzero', 'hooks/hooks.json', 'package.json']) {
+  for (const file of ['.claude-plugin/plugin.json', 'LICENSE', 'bin/subzero', 'hooks/hooks.json', 'package.json']) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     cpSync(path.join(REPO, file), path.join(root, file));
   }
