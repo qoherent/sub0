@@ -144,7 +144,11 @@ component TaskCore {
     which
     ends that branch. When the prompt sent event arrives, the child run is
     Live, and hand each held follow-up message, in the order received, to the
-    turn steering of the child driver, which ends that branch. When a
+    turn steering of the child driver, and record in the event log each one
+    that turn steering answered delivered at once, and each one it answered
+    settled once the new turn holds it, so that a held message with no answer
+    on record is not delivered when its owner process dies or pi reloads, which
+    ends that branch. When a
     child run that sent its prompt settles while follow-up messages are still
     held for it, or turn steering reports for a held follow-up message that
     the child run had already settled, open a new turn for those messages as

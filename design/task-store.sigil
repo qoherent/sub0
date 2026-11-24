@@ -150,7 +150,11 @@ component TaskStore {
 
     The event log must hold each domain event of the task across every
     child run of every turn, each follow-up message whole included, and it
-    must never be sent to the parent model.
+    must never be sent to the parent model. It must also hold, for each held
+    follow-up message of a turn whose steering answered, a record of that
+    answer, so that the messages of a turn that sent its prompt which no answer
+    reached are known as not delivered after its owner process died or a pi
+    session reloaded.
 
     The store folder must be created readable by its owner only, with a
     .gitignore

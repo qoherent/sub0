@@ -211,6 +211,36 @@ describe('TaskCore follow-up messages', () => {
     expect(runs[0]!.steers).toEqual(['one', 'two', 'three']);
   });
 
+  it('records that a held message was delivered only when its steer answers, so a message still pending when the process dies is undelivered', async () => {
+    const { task, runs, store } = prompted();
+    await task.followUp('held one');
+    task.release();
+    let answer: ((value: 'delivered') => void) | undefined;
+    runs[0]!.steerAnswer = () => new Promise((resolve) => (answer = resolve));
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    const record = () => store.undeliveredMessages(store.readTurn(task.taskId, 1)!, store.readEvents(task.taskId));
+    await until(() => answer !== undefined);
+    // The prompt went out and the steer is on its way: the process could die here.
+    expect(record()).toEqual(['held one']);
+    answer!('delivered');
+    await until(() => record().length === 0);
+    expect(store.readEvents(task.taskId).filter((e) => e.kind === 'held_message_handled')).toMatchObject([{ text: 'held one', answer: 'delivered', turn: 1 }]);
+  });
+
+  it('records a held message answered settled as handled only once the next turn holds it', async () => {
+    const { task, runs, store } = prompted();
+    await task.followUp('late message');
+    task.release();
+    runs[0]!.steerAnswer = 'settled';
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await task.turns[0]!.result;
+    await until(() => runs.length === 2);
+    expect(store.readTurn(task.taskId, 2)).toMatchObject({ viaHeld: true, message: 'late message' });
+    expect(store.undeliveredMessages(store.readTurn(task.taskId, 1)!, store.readEvents(task.taskId))).toEqual([]);
+    expect(store.readEvents(task.taskId).filter((e) => e.kind === 'held_message_handled')).toMatchObject([{ text: 'late message', answer: 'settled', turn: 1 }]);
+  });
+
   it('covers R9: a held message whose run settles after prompt_sent but before delivery opens turn 2 with it as the prompt', async () => {
     const { task, runs } = prompted();
     await task.followUp('late message');

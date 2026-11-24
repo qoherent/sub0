@@ -341,9 +341,11 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           else extra.signal.addEventListener('abort', onAbort, { once: true });
           const typing = watchTyping(currentSession, startedAt, toolUseId);
           let replies;
-          try { replies = await Promise.all(ids.map((id) => service.waitFor(id, seconds * 1000, typing.signal ? { until: typing.signal } : {}))); }
+          // The reply decides which results fit, so the turns are marked collected only once it has.
+          try { replies = await Promise.all(ids.map((id) => service.waitFor(id, seconds * 1000, { mark: false, ...(typing.signal ? { until: typing.signal } : {}) }))); }
           finally { extra.signal.removeEventListener('abort', onAbort); typing.stop(); }
           const formatted = formatAwaitWithShown(replies);
+          for (const { taskId, turn } of formatted.shown) service.markDelivered(taskId, turn);
           const markers = wakeMarkers();
           if (formatted.shown.length && markers !== undefined) {
             const owners = await service.list().catch(() => []);

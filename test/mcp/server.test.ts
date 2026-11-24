@@ -587,6 +587,21 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     expect(joined.endsWith(`\n\ntask: ${b} · free · completed · result not shown here (reply size); read it whole with tasks(${b})`)).toBe(true);
   });
 
+  it('leaves a result that an await deferred uncollected, so a later await returns it whole instead of saying it already reached the parent', async () => {
+    const long = 'FINDING-'.repeat(7000);
+    const { call, textOf, service } = await connect({ lastText: long }, null, undefined, TIERED_YAML);
+    const a = taskIdOf(textOf(await call('delegate', { agent: 'free', brief: 'a', wait: false })));
+    const b = taskIdOf(textOf(await call('delegate', { agent: 'free', brief: 'b', wait: false })));
+    const first = textOf(await call('await', { tasks: [a, b], timeout_s: 20 }));
+    expect(first.endsWith(`result not shown here (reply size); read it whole with tasks(${b})`)).toBe(true);
+    expect(service.store.isCollected(a, 1)).toBe(true);
+    expect(service.store.isCollected(b, 1)).toBe(false);
+    const again = textOf(await call('await', { tasks: [b], timeout_s: 20 }));
+    expect(again).toContain(`summary:\n${long}\nusage:`);
+    expect(again).not.toMatch(/already reached you/);
+    expect(service.store.isCollected(b, 1)).toBe(true);
+  });
+
   it("tells the child the reply budget in the brief of the server's delegations", async () => {
     const { call, textOf, service } = await connect({}, null, undefined, TIERED_YAML);
     const id = taskIdOf(textOf(await call('delegate', { agent: 'free', brief: 'go', expected_output: 'A list.', wait: true })));
@@ -682,6 +697,29 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
     const pending = h.callWithId(toolUseId, 'await', { tasks, timeout_s: 30 }).then((r) => { state.returned = true; return r; });
     return { state, pending };
   };
+
+  it('defers the several turn results of one task when they do not fit after earlier sections, and leaves them uncollected for the next await', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const a = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'a' })));
+    const b = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'b' })));
+    h.started[0]!.settle({ lastAssistantText: 'A'.repeat(45_000) });
+    h.started[1]!.settle({ lastAssistantText: 'first turn of b '.repeat(300) });
+    await until(() => h.service.runningTurn(a) === undefined && h.service.runningTurn(b) === undefined);
+    expect(h.textOf(await h.call('continue', { task: b, message: 'and more' }))).toMatch(/new turn: turn 2/);
+    await until(() => h.started.length === 3);
+    h.started[2]!.settle({ lastAssistantText: 'second turn of b '.repeat(300) });
+    await until(() => h.service.runningTurn(b) === undefined);
+    const first = h.textOf(await h.call('await', { tasks: [a, b], timeout_s: 5 }));
+    expect(first.startsWith(`task: ${a}`)).toBe(true);
+    expect(first).toContain(`task: ${b} · free · 2 turn results not shown here (reply size); read them whole with tasks(${b})`);
+    expect(first).not.toContain('second turn of b');
+    expect(h.service.store.isCollected(b, 1)).toBe(false);
+    expect(h.service.store.isCollected(b, 2)).toBe(false);
+    const again = h.textOf(await h.call('await', { tasks: [b], timeout_s: 5 }));
+    expect(again).toContain('first turn of b');
+    expect(again).toContain('second turn of b');
+    expect(h.service.store.isCollected(b, 1) && h.service.store.isCollected(b, 2)).toBe(true);
+  });
 
   it('covers R16: the server instructions tell the parent when to use continue', async () => {
     const { client } = await connect();

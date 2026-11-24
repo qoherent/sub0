@@ -158,7 +158,7 @@ agents:
 
   it('warns when the required tier is missing and still records the session id', () => {
     const project = tempDir();
-    const { stdout, data } = runHook(project, 'endpoints: {}\n');
+    const { stdout, data } = runHook(project, 'skills: {}\n');
     expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toMatch(/medium.*required/);
     expect(readParentSessionId(data, project, process.pid)).toBe('s-1');
   });

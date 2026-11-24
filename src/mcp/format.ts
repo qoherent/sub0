@@ -27,8 +27,12 @@ export function describeReply(reply: DelegateReply | CollectReply, view?: { agen
   return withNotice(describeTaskReply(reply, view, MCP_TOOL_NAMES, now), 'notice' in reply ? reply.notice : undefined);
 }
 
-/** The one line of an await reply that stands for a result left out for the reply's size. */
-function deferredLine(reply: Extract<CollectReply, { kind: 'result' }>): string {
+/** The one line of an await reply that stands for the result, or the several turn results, left out for the reply's size. */
+function deferredLine(reply: Extract<CollectReply, { kind: 'result' | 'results' }>): string {
+  if (reply.kind === 'results') {
+    const { agent } = reply.results[0]!.result;
+    return `task: ${reply.taskId} · ${agent} · ${reply.results.length} turn results not shown here (reply size); read them whole with tasks(${reply.taskId})`;
+  }
   const { taskId, agent, status } = reply.result;
   return `task: ${taskId} · ${agent} · ${status} · result not shown here (reply size); read it whole with tasks(${taskId})`;
 }
@@ -38,8 +42,8 @@ function deferredLine(reply: Extract<CollectReply, { kind: 'result' }>): string 
  * Each result section is given whole while the joined reply stays within the limit,
  * and the first is always given whole, even alone over the limit, since Claude Code
  * then saves the reply to a file and loses nothing. A later result that does not
- * fit is deferred to one line that points to tasks(<id>). A task with no result
- * keeps its status line.
+ * fit is deferred to one line that points to tasks(<id>), whether it is one result or
+ * the several turn results of a task. A task with no result keeps its status line.
  */
 export function formatAwait(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): string {
   return formatAwaitWithShown(replies, limit, now).body;
@@ -60,7 +64,7 @@ export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESUL
   for (const reply of replies) {
     const whole = describeReply(reply, undefined, now);
     const joined = length + (sections.length > 0 ? 2 : 0) + whole.length;
-    const section = reply.kind === 'result' && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
+    const section = (reply.kind === 'result' || reply.kind === 'results') && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
     if (section === whole) shown.push(...deliveredTurns(reply));
     length += (sections.length > 0 ? 2 : 0) + section.length;
     sections.push(section);

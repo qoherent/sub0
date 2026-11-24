@@ -338,7 +338,10 @@ component AgentConfig {
     merged the two layers, and not while it reads one layer, so that the models it
     lists are those of the merged model tiers and tier overrides. An
     endpoints entry is never turned into a
-    parallel limit without a write that the person confirms.
+    parallel limit without a write that the person confirms. A file whose
+    endpoints map holds no entry is rejected in the same way, with the error
+    saying that the map is empty and that the key goes, and guided setup removes
+    the key.
 
     An agent entry must be rejected, naming it, when it has no timeout or its
     timeout is not a positive number of seconds.

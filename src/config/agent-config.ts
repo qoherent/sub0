@@ -64,6 +64,8 @@ export interface LegacyEndpointLimit {
   parallel: number | null;
   /** The models of the configuration that the old limit covered, in tier order. */
   models: string[];
+  /** The file holds the key with no entry in it (`endpoints: {}` or a bare `endpoints:`): nothing to convert, but the key still goes. */
+  empty?: true;
 }
 
 /** One agent entry resolved at one model tier. */
@@ -391,6 +393,8 @@ interface Layer {
   limits: Map<string, number | null>;
   /** The old `endpoints:` map: endpoint to its limit, null when it is not a number. */
   legacyEndpoints: Map<string, number | null>;
+  /** The file holds the `endpoints:` key with no entry in it. */
+  emptyEndpoints: boolean;
   routing: Partial<RoutingSettings>;
   skillFolders: Map<string, string>;
   agents: Record<string, unknown>;
@@ -497,11 +501,13 @@ function legacyLimits(
     // The global file covers its own tiers' models only: another project's tiers are not its business.
     const own = [...global.tiers.values()].filter((t): t is ModelTier => t !== null).map((t) => t.model);
     for (const [endpoint, parallel] of global.legacyEndpoints) out.push({ file: globalPath, endpoint, parallel, models: coveredBy(endpoint, own) });
+    if (global.emptyEndpoints) out.push({ file: globalPath, endpoint: '', parallel: null, models: [], empty: true });
   }
   if (project !== null) {
     const merged = new Set<string>([...tiers.values()].map((t) => t.model));
     for (const entry of entries.values()) for (const override of entry.overrides.values()) if (override.model !== undefined) merged.add(override.model);
     for (const [endpoint, parallel] of project.legacyEndpoints) out.push({ file: agentFile, endpoint, parallel, models: coveredBy(endpoint, [...merged]) });
+    if (project.emptyEndpoints) out.push({ file: agentFile, endpoint: '', parallel: null, models: [], empty: true });
   }
   return out;
 }
@@ -516,6 +522,7 @@ function legacyEndpointsError(limits: LegacyEndpointLimit[], globalPath: string)
   const kind = file === globalPath ? 'global file' : 'agent file';
   const own = limits.filter((l) => l.file === file);
   const lines = own.map((l) => {
+    if (l.empty === true) return '  the map is empty, so there is no limit to keep: remove the key';
     const was = l.parallel === null ? 'no limit' : `limit ${l.parallel}`;
     return l.models.length === 0
       ? `  endpoint ${l.endpoint} (${was}): no model of this configuration uses it, so drop it`
@@ -608,6 +615,8 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     const parallel = isRecord(entry) ? entry.parallel : undefined;
     legacyEndpoints.set(endpoint, typeof parallel === 'number' ? parallel : null);
   }
+  // The key is what the contract rejects, so an empty one counts too.
+  const emptyEndpoints = 'endpoints' in doc && legacyEndpoints.size === 0;
 
   const tiers = new Map<string, ModelTier | null>();
   for (const [name, raw] of Object.entries((modelsMap.tiers ?? {}) as Record<string, unknown>)) {
@@ -624,6 +633,7 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     tiers,
     limits,
     legacyEndpoints,
+    emptyEndpoints,
     routing: validateRouting(doc.routing),
     skillFolders,
     agents: agentsMap,

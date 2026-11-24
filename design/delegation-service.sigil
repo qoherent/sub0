@@ -292,6 +292,8 @@ component DelegationService {
     model from it, whether its task came from the live task registry or from its
     task record. A continuation that steers or holds loads none and uses the frozen
     task record, so that a broken agent file never blocks steering a running child.
+    A continuation whose steering finds the child run already settled opens a new
+    turn, so it loads the merged configuration just before it claims that turn.
     When that load fails, the continuation ends with the delivery outcome not
     delivered and the load error or the off error, and no turn is claimed. A
     process that loses the claim of a new turn to another process reads the
@@ -339,7 +341,10 @@ component DelegationService {
     marker, oldest first, then the status line of the latest turn when it
     has no result yet, and mark each turn given as collected, so that a
     restarted or taking-over process neither repeats nor skips a turn, which
-    ends the flow.
+    ends the flow. A front end that decides afterwards which of the results it
+    shows, as an await reply with a size limit does, asks for the collect
+    without the marking and marks the turns it showed, so that a result it left
+    out is still uncollected.
 
     On a session cancel for a parent session id, cancel each Pending and live
     task of that parent session id in the live task registry the way a cancel

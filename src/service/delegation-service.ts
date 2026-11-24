@@ -470,8 +470,12 @@ export class DelegationService {
     };
   }
 
-  /** Every path that delivers a result to the parent marks its turn collected. */
-  private markDelivered(taskId: string, turn: number): void {
+  /**
+   * Every path that delivers a result to the parent marks its turn collected. A front end that
+   * decides afterwards which results it shows, such as an await reply with a size limit, collects
+   * with `mark: false` and marks the turns it showed here.
+   */
+  markDelivered(taskId: string, turn: number): void {
     try {
       this.connected?.store.markCollected(taskId, turn);
     } catch (err) {
@@ -611,19 +615,21 @@ export class DelegationService {
       if (task === undefined) return refuse('its task record could not be loaded');
     }
 
-    // Steering and holding use the frozen record; only a turn that opens needs the configuration.
+    // Steering and holding use the frozen record; only a turn that opens needs the configuration, and the
+    // task asks for it each time it is about to claim one, also when a steer finds the run already settled.
     let catalog: AgentCatalog | undefined;
-    if (ENDED_STATES.has(task.state)) {
+    const beforeNewTurn = (): string | undefined => {
       try {
         catalog = this.loadCatalog(this.connected!.projectRoot);
-        task.setChildHostOptions(catalog.childHostOptions[task.agent.host] ?? {});
+        task!.setChildHostOptions(catalog.childHostOptions[task!.agent.host] ?? {});
+        return undefined;
       } catch (err) {
-        return refuse(`the configuration does not load, so no new turn was opened: ${(err as Error).message}`);
+        return `the configuration does not load, so no new turn was opened: ${(err as Error).message}`;
       }
-    }
+    };
     if (opening.cancelled) return refuse('the conversation was cancelled while the message was being delivered');
 
-    const reply = await task.followUp(request.message);
+    const reply = await task.followUp(request.message, beforeNewTurn);
     // A session cancel that landed while the turn was being claimed stops it before it is attached.
     if (opening.cancelled && reply.outcome === 'new_turn') {
       await reply.turn!.cancel();
@@ -636,6 +642,7 @@ export class DelegationService {
     }
     switch (reply.outcome) {
       case 'not_delivered':
+        if (reply.refused !== undefined) return refuse(reply.refused);
         return refuse(reply.taken === true ? 'another process opened the next turn first' : this.undeliveredReason(task));
       case 'steered':
       case 'queued':
@@ -685,7 +692,7 @@ export class DelegationService {
    * status of the latest turn when it has not settled. `onlyNew` answers "delivered" for a
    * settled task whose result already reached the parent.
    */
-  async collect(taskId: string, options: { onlyNew?: boolean } = {}): Promise<CollectReply> {
+  async collect(taskId: string, options: { onlyNew?: boolean; mark?: boolean } = {}): Promise<CollectReply> {
     const { store } = await this.connect();
     store.sweep();
     this.dropTakenOver(store);
@@ -697,7 +704,7 @@ export class DelegationService {
     const fresh = record.turns.filter((t) => t.result !== undefined && !store.isCollected(taskId, t.turn));
     if (fresh.length > 0) {
       const results = fresh.map((turn) => this.turnResult(record.turns, turn));
-      for (const { result } of results) this.markDelivered(taskId, result.turn ?? 1);
+      if (options.mark !== false) for (const { result } of results) this.markDelivered(taskId, result.turn ?? 1);
       if (results.length === 1 && waiting === null && results[0]!.openedTurn === undefined) return { kind: 'result', result: results[0]!.result };
       return { kind: 'results', taskId, results, ...(waiting !== null ? { then: waiting } : {}) };
     }
@@ -731,8 +738,9 @@ export class DelegationService {
   }
 
   /** Wait up to timeoutMs for a live task; otherwise answer as collect does. */
-  async waitFor(taskId: string, timeoutMs: number, options: { until?: AbortSignal } = {}): Promise<CollectReply> {
-    const first = await this.collect(taskId, { onlyNew: true });
+  async waitFor(taskId: string, timeoutMs: number, options: { until?: AbortSignal; mark?: boolean } = {}): Promise<CollectReply> {
+    const collecting = { onlyNew: true, ...(options.mark !== undefined ? { mark: options.mark } : {}) };
+    const first = await this.collect(taskId, collecting);
     const live = this.registry.get(taskId);
     if ((first.kind !== 'running' && first.kind !== 'queued') || live === undefined) return first;
     let timer: NodeJS.Timeout | undefined;
@@ -743,7 +751,7 @@ export class DelegationService {
     ]);
     clearTimeout(timer);
     // Read the task again: it may have been released while this call waited.
-    return this.collect(taskId, { onlyNew: true });
+    return this.collect(taskId, collecting);
   }
 
   async cancel(taskId: string): Promise<CollectReply> {

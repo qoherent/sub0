@@ -133,7 +133,7 @@ describe('routingContext', () => {
   });
 
   it('warns when the medium tier is missing from a file that exists', () => {
-    expect(routingContext(project('endpoints: {}\n'))).toMatch(/routing is off/);
+    expect(routingContext(project('skills: {}\n'))).toMatch(/routing is off/);
     expect(routingContext(project(config()))).toMatch(/medium/);
     expect(routingContext(project(`models:\n  tiers:\n${tier('default', 'local/d')}`))).toMatch(/medium/);
   });

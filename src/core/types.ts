@@ -73,6 +73,12 @@ export type DomainEvent =
   | { kind: 'prompt_sent' }
   /** A follow-up message of the caller, whole, with its delivery outcome and the turn it joined or opened. */
   | { kind: 'follow_up_message'; text: string; outcome: DeliveryOutcome; turn?: number }
+  /**
+   * A held message of a turn whose steering answered: delivered into the run, or settled, which means it
+   * reached the next turn. Without this record a held message of a turn that sent its prompt counts as
+   * not delivered, because its answer would live only in memory.
+   */
+  | { kind: 'held_message_handled'; text: string; answer: 'delivered' | 'settled'; turn?: number }
   | { kind: 'tool_activity'; phase: 'start' | 'end'; tool: string; path?: string; isError?: boolean }
   | { kind: 'agent_message'; text: string }
   | { kind: 'turn_settled' }

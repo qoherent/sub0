@@ -499,9 +499,22 @@ export class TaskStore implements TaskRecordWriter {
    * prompt; `events` is the log of the task.
    */
   undeliveredMessages(turn: TurnFile, events: LoggedEvent[]): string[] {
-    if (events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn)) return [];
     const queued = events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []));
-    return [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...queued];
+    if (!events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn)) {
+      return [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...queued];
+    }
+    // The prompt carried the turn's first message. Every other one went to steering afterwards, one at a
+    // time, and counts as delivered only once its answer was recorded; a repeated text is matched one for one.
+    const handled = new Map<string, number>();
+    for (const e of events) {
+      if (e.kind === 'held_message_handled' && e.turn === turn.turn) handled.set(e.text, (handled.get(e.text) ?? 0) + 1);
+    }
+    return [...heldAfterPrompt(turn), ...queued].filter((text) => {
+      const answered = handled.get(text) ?? 0;
+      if (answered === 0) return true;
+      handled.set(text, answered - 1);
+      return false;
+    });
   }
 
   /** Write the result in one step, and only then the index line that gives its status. */
@@ -756,6 +769,16 @@ export class TaskStore implements TaskRecordWriter {
     });
     return true;
   }
+}
+
+/** The messages a turn handed to steering after its prompt, from its turn file. */
+function heldAfterPrompt(turn: TurnFile): string[] {
+  const held = turn.heldMessages ?? [];
+  // A turn opened for held messages prompts with its first and holds the rest, which its file lists.
+  if (turn.viaHeld === true) return held;
+  const all = [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : [])];
+  // A turn that starts again with its brief holds every message; one that resumes a session prompts with the first.
+  return [...(turn.briefPrompt === true ? all : all.slice(1)), ...held];
 }
 
 function sessionField(sessionFile: string | undefined): { sessionFile?: string } {

@@ -238,7 +238,9 @@ agent file the models are those of the merged configuration (its tiers and tier
 overrides, with the global file's tiers); for the global file they are the
 models of the global file's own tiers, because another project's tiers are not
 its business. An old limit that covered several models is offered as the default
-for each of them, and you can give each model its own value.
+for each of them, and you can give each model its own value. The key counts even
+when it holds nothing (`endpoints: {}` or a bare `endpoints:`): the error then says
+the map is empty and the key goes, and init removes it.
 
 Guided init repairs the file. It pre-fills each listed model's limit with the
 old value, shows the diff, and writes only after you confirm. When the file that

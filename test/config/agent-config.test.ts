@@ -222,6 +222,15 @@ describe('AgentConfig load', () => {
     expect(err.message).toContain('run /subzero:init in Claude Code or /subzero init in pi');
   });
 
+  it.each([['endpoints: {}\n'], ['endpoints:\n']])('fails an agent file whose endpoints key holds no entry (%j), because the key itself is what was removed', (text) => {
+    const root = project(VALID, text);
+    const file = path.join(root, '.agents', 'subzero.yaml');
+    expect(() => loadAgentFile(root)).toThrow(LoadError);
+    expect(() => loadAgentFile(root)).toThrow(new RegExp(`"endpoints:", which "models.parallel" replaced, in ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    expect(() => loadAgentFile(root)).toThrow(/the map is empty, so there is no limit to keep: remove the key/);
+    expect(loadAgentFile(root, { allowLegacyEndpoints: true }).legacyEndpoints).toEqual([{ file, endpoint: '', parallel: null, models: [], empty: true }]);
+  });
+
   it('reports an endpoints limit that no model uses as one to drop', () => {
     const root = project(VALID, 'endpoints:\n  gone:\n    parallel: 2\n');
     expect(() => loadAgentFile(root)).toThrow(/endpoint gone \(limit 2\): no model of this configuration uses it, so drop it/);

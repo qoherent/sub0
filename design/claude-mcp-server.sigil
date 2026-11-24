@@ -99,9 +99,11 @@ component ClaudeMcpServer {
     notice and the usage line of a result text, 48,000 characters.
 
     A *deferred line* stands in an await reply for the result of a settled
-    task that did not fit: one line with the task id, the agent and the
-    task status, saying that the result is not shown here for the reply's size
-    and that the tasks tool with that task id reads it whole.
+    task that did not fit, or for the several turn results of one task that
+    did not fit together: one line with the task id, the agent and the
+    task status or the number of turn results, saying that they are not shown
+    here for the reply's size and that the tasks tool with that task id reads
+    them whole.
 
     The *plugin data folder* is the folder that Claude Code gives the plugin
     for
@@ -267,7 +269,11 @@ component ClaudeMcpServer {
     An await reply must give each result whole or as a deferred line, and
     never a part of one. Its first section is always whole, even when alone it
     is over the tool result limit, and every later result text is whole only
-    while the joined reply stays within the tool result limit.
+    while the joined reply stays within the tool result limit. The turn results
+    of one task count as one section for this rule. The server marks a turn
+    collected only after the reply has shown its result, so that a result the
+    reply deferred is still uncollected and a later await or the tasks tool
+    gives it whole, also after the task was continued.
 
     No reply of the delegate tool, the tasks tool or the await tool may call a
     queued task started or
@@ -433,7 +439,10 @@ component ClaudeMcpServer {
     characters each returns the first five whole and a deferred line for the
     sixth, with no cut anywhere, within the tool result limit. An await whose
     first result alone is over the tool result limit returns it whole and gives
-    a deferred line for the next settled task.
+    a deferred line for the next settled task, and a later await over that
+    task returns its result whole. An await whose first result fills the reply
+    and whose next task has two uncollected turns gives one deferred line for
+    that task, leaves both turns uncollected, and a later await gives both.
 
     The brief of a delegation from the server ends with its reply budget.
 

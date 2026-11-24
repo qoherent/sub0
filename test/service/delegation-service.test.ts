@@ -826,6 +826,22 @@ describe('DelegationService continue', () => {
     expect(svc.store.readTurns(taskId)).toHaveLength(2);
   });
 
+  it('refuses a new turn, and starts no child, when the configuration broke while a steer found the run already settled', async () => {
+    const { root, svc, started, taskId } = await settledTask();
+    expect(await svc.continue({ taskId, message: 'turn two', parentSessionId: 'A' }, { wait: false })).toMatchObject({ kind: 'new_turn' });
+    started[1]!.emit({ kind: 'prompt_sent' });
+    // The run is Live when the message arrives; by the time its steer answers, the run has ended and the file is broken.
+    started[1]!.steerAnswer = () => {
+      writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'agents: [broken');
+      queueMicrotask(() => started[1]!.settle({ lastAssistantText: 'two' }));
+      return 'settled' as const;
+    };
+    const reply = await svc.continue({ taskId, message: 'late message', parentSessionId: 'A' }, { wait: false });
+    expect(reply).toMatchObject({ kind: 'not_delivered', reason: expect.stringMatching(/configuration does not load/) });
+    expect(started).toHaveLength(2);
+    expect(svc.store.readTurns(taskId)).toHaveLength(2);
+  });
+
   it('leaves no state listener on any of 20 settled turns of one task', async () => {
     const { svc, started, taskId } = await settledTask();
     for (let n = 2; n <= 20; n++) {

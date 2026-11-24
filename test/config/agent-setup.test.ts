@@ -1335,6 +1335,25 @@ models:
     expect(read(root)).not.toContain('endpoints');
   });
 
+  it.each([['endpoints: {}\n'], ['# kept comment\nendpoints:\n']])('marks a file whose endpoints key is empty (%j) repairable, previews the removal of the key and writes a file that loads', (head) => {
+    const text = `${head}models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const state = readSetupState(root, { host: 'pi' });
+    expect(state.status).toBe('repairable');
+    if (state.status !== 'repairable') throw new Error('unexpected');
+    expect(state.endpoints).toEqual([{ endpoint: '', parallel: null, file: fileOf(root), scope: 'project', models: [], empty: true }]);
+    expect(state.problem).toMatch(/holds "endpoints:".*an empty map/);
+    const preview = previewChanges(root, [], STARTER);
+    expect(preview.refusals).toEqual([]);
+    expect(preview.summary).toEqual(['remove the empty endpoints map, which models.parallel replaced']);
+    expect(preview.prefilled).toEqual([]);
+    expect(applyChanges(root, [], preview.fingerprint, STARTER).written).toBe(true);
+    expect(read(root)).not.toContain('endpoints');
+    expect(read(root)).toContain('models:\n  tiers:');
+    expect(() => loadAgentFile(root)).not.toThrow();
+    expect(readSetupState(root, { host: 'pi' }).status).toBe('ok');
+  });
+
   it('drops an endpoints entry that covers no model, and one with no limit', () => {
     const text = `endpoints:\n  gone:\n    parallel: 2\n  none:\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`;
     const root = makeProject(text);

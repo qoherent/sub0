@@ -57,6 +57,8 @@ export interface FollowUpReply {
   replayed?: number;
   /** Another process claimed the turn first, so nothing was written and the caller may read the record again. */
   taken?: true;
+  /** The caller refused to open a turn, with its reason, so nothing was written. */
+  refused?: string;
 }
 
 type Listener<T> = (value: T) => void;
@@ -288,7 +290,18 @@ export class Turn {
         if (!this.unanswered.delete(entry)) return;
         if (answer === 'settled') this.leftover.push(message);
         else if (answer !== 'delivered') this.undelivered.push(message);
+        // A delivered message is on record at once; a settled one is, once the next turn holds it.
+        else this.recordHandled(message, 'delivered');
       });
+    }
+  }
+
+  /** Record in the event log that a held message of this turn reached a child or the next turn. */
+  private recordHandled(text: string, answer: 'delivered' | 'settled'): void {
+    try {
+      this.task.core.store.appendEvent(this.task.taskId, { kind: 'held_message_handled', text, answer }, this.number);
+    } catch (err) {
+      this.task.core.warn(`could not record that a message reached ${this.task.taskId}: ${(err as Error).message}`);
     }
   }
 
@@ -354,7 +367,9 @@ export class Turn {
     } catch (err) {
       this.task.core.warn(`could not write the result of ${this.task.taskId}: ${(err as Error).message}`);
     }
-    if (opens && waiting.length > 0) this.task.openFollowOn(waiting);
+    if (opens && waiting.length > 0 && this.task.openFollowOn(waiting)) {
+      for (const message of this.leftover) this.recordHandled(message, 'settled');
+    }
     this.setState(stateOfResult(final));
     // The state is terminal: handleEvent returns once the result is set, so no listener hears more.
     this.eventListeners.clear();
@@ -456,9 +471,11 @@ export class Task {
 
   /**
    * Route a follow-up message by the state of the latest turn: hold it for a run that has not sent
-   * its prompt, steer it into a live run, or open a new turn for a turn that ended.
+   * its prompt, steer it into a live run, or open a new turn for a turn that ended. `beforeNewTurn`
+   * runs each time a new turn is about to be claimed, also for a run that settled while the message
+   * was being steered; a reason it returns refuses the turn.
    */
-  async followUp(message: string): Promise<FollowUpReply> {
+  async followUp(message: string, beforeNewTurn?: () => string | undefined): Promise<FollowUpReply> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const turn = this.latest;
       switch (turn.state) {
@@ -475,8 +492,11 @@ export class Task {
           await turn.result;
           continue;
         }
-        default:
+        default: {
+          const refused = beforeNewTurn?.();
+          if (refused !== undefined) return { ...this.answer(message, 'not_delivered', turn.number), refused };
           return this.openAfter(turn, message);
+        }
       }
     }
     return this.answer(message, 'not_delivered', this.latest.number);
@@ -526,11 +546,11 @@ export class Task {
     return this.answer(message, 'new_turn', number, { turn, ...(replayed.length > 0 ? { replayed: replayed.length } : {}) });
   }
 
-  /** Open the turn for messages a settled run left unread or held; its first message is its prompt. */
-  openFollowOn(messages: string[]): void {
+  /** Open the turn for messages a settled run left unread or held; its first message is its prompt. False when no turn opened. */
+  openFollowOn(messages: string[]): boolean {
     if (!this.promptEver || this.port.resume === undefined) {
       this.core.warn(`${messages.length} message(s) for ${this.taskId} did not reach the child and cannot be resumed`);
-      return;
+      return false;
     }
     const number = this.latest.number + 1;
     const enqueuedAt = new Date().toISOString();
@@ -542,12 +562,13 @@ export class Task {
     }
     if (!claimed) {
       this.core.warn(`another process opened turn ${number} of ${this.taskId} first, so ${messages.length} message(s) were not delivered`);
-      return;
+      return false;
     }
     const turn = new Turn(this, number, enqueuedAt, { kind: 'resume', message: messages[0]! }, messages.slice(1), undefined, true);
     this.turns.push(turn);
     if (this.core.onTurnOpened !== undefined) this.core.onTurnOpened(this, turn);
     else turn.release();
+    return true;
   }
 }
 

@@ -420,11 +420,30 @@ describe('TaskStore', () => {
       store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'other turn', outcome: 'queued' }, 1);
       const turn = store.readTurn('sz-undeli', 2)!;
       expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['old one', 'now', 'held one', 'queued two']);
-      // A prompt sent by another turn does not count; one sent by this turn leaves nothing undelivered.
+      // A prompt sent by another turn does not count. One sent by this turn carried the first message;
+      // the others went to steering afterwards and count as delivered only once their answer is on record.
       store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 1);
       expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toHaveLength(4);
       store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 2);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['now', 'held one', 'queued two']);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'now', answer: 'delivered' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'queued two', answer: 'settled' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'held one', answer: 'delivered' }, 1);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['held one']);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'held one', answer: 'delivered' }, 2);
       expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual([]);
+    });
+
+    it('matches repeated held texts one answer for one message, and counts the heldMessages of a turn opened for held messages', () => {
+      const { store, create } = setup();
+      create('sz-rep');
+      store.writeResult('sz-rep', result('sz-rep'));
+      store.claimTurn('sz-rep', 2, { viaHeld: true, message: 'first', heldMessages: ['again', 'again'], enqueuedAt: 't' });
+      store.appendEvent('sz-rep', { kind: 'prompt_sent' }, 2);
+      const turn = store.readTurn('sz-rep', 2)!;
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-rep'))).toEqual(['again', 'again']);
+      store.appendEvent('sz-rep', { kind: 'held_message_handled', text: 'again', answer: 'delivered' }, 2);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-rep'))).toEqual(['again']);
     });
 
     it('parses only the log lines of the kinds asked for', () => {

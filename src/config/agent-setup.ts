@@ -411,11 +411,12 @@ function legacyOf(l: Layers): EndpointState[] {
     file: e.file,
     scope: e.file === l.globalPath ? 'global' : 'project',
     models: e.models,
+    ...(e.empty === true ? { empty: true as const } : {}),
   }));
 }
 
 const otherScope = (scope: SetupScope): SetupScope => (scope === 'global' ? 'project' : 'global');
-const endpointsKeyText = (e: EndpointState) => `${e.endpoint} (${e.parallel === null ? 'no limit' : `limit ${e.parallel}`}) covers ${e.models.length === 0 ? 'no model' : e.models.join(', ')}`;
+const endpointsKeyText = (e: EndpointState) => e.empty === true ? 'an empty map' : `${e.endpoint} (${e.parallel === null ? 'no limit' : `limit ${e.parallel}`}) covers ${e.models.length === 0 ? 'no model' : e.models.join(', ')}`;
 
 /**
  * The tiers, limits and tier dependents at a scope, or "no file". A file that fails to
@@ -763,7 +764,9 @@ function plan(l: Layers, scope: SetupScope, changes: Change[], starter: SetupSta
     summary.push(`model ${model}: remove the parallel limit, no tier or override uses it any more`);
     droppedLimits.push(model);
   }
-  for (const entry of repairs) summary.push(`remove endpoints.${entry.endpoint}${entry.parallel === null ? '' : ` (limit ${entry.parallel})`}, which models.parallel replaced`);
+  for (const entry of repairs) {
+    summary.push(entry.empty === true ? 'remove the empty endpoints map, which models.parallel replaced' : `remove endpoints.${entry.endpoint}${entry.parallel === null ? '' : ` (limit ${entry.parallel})`}, which models.parallel replaced`);
+  }
 
   // Pass 1 edits the original in place: replace tier fields and limits, remove entries.
   const hasTier = (name: string) => own.tiers.get(name) === true;
