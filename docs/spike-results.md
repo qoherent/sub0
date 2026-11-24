@@ -206,3 +206,38 @@ Code, the remaining checks cover background delivery, Escape during `await`,
 stopping one task, the 120-second boundary, `/subzero:cancel`, and `/clear`.
 The 2.1.322 probe above did not select MCP tasks, so it does not establish that
 delegations appear as MCP tasks in Claude's `/tasks` view.
+
+## v0.2 live acceptance (2026-11-24)
+
+A person ran the four live checks of the v0.2 plan on both parents: Claude Code
+2.1.331 with this branch loaded through `--plugin-dir`, and pi with the staged
+extension. The child model was `qoherent/qwen-flash-iq4` on the `small` and
+`medium` tiers, with `models.parallel: { qoherent/qwen-flash-iq4: 1 }` in the
+global file. Each check was confirmed against the task store and the plugin
+data folder, not only the parent's text.
+
+| Check | pi | Claude Code |
+|---|---|---|
+| Steer a running task | Pass: `sz-l5m3xg`, `follow_up_message … steered` after `prompt_sent`; the one result covered only the narrowed scope | Pass: `sz-prpifr`, two messages steered into turn 1; its result covered both |
+| Continue a finished task | Pass: `sz-2nvkku` turn 2, `new_turn`, same pi session file, no re-read of the file turn 1 read | Pass: `sz-prpifr` turn 2, `new_turn`, same session file; the answer cited turn 1's findings |
+| Typing ends a waited call | Pass: `subzero_await` returned the "you sent a message" note; the child kept running | Pass from the main conversation (`await` ended, wake marker armed, later cleared). Pass from a subagent: its call marker held an agent id and its `await` ran the full 300 s through a typed message |
+| One child at a time under `parallel: 1` | Pass: `sz-2nvkku` (medium) queued at 11:37:39 and started at 11:37:47, when `sz-m772qb` (small) finished | Pass: `sz-hhqu7v` queued at 11:33:13 and started at 11:33:25, when `sz-s54sr6` finished |
+
+Observations from the run:
+- Claude Code 2.1.331 steers its own background subagents with SendMessage, and
+  it moves a running tool call into the background when the user types. It then
+  reports that call as "MCP task … completed"; this is its own label, not
+  subzero's MCP tasks, which the server no longer offers (decision 61).
+- A slash command such as `/subzero:tasks` goes through the prompt hook, so it
+  ends a waited main-conversation call like a typed message does.
+- `/clear` stopped the previous conversation's running task, as designed.
+- A plain "run a subagent" spawn has no model, maps to the `large` tier and
+  stays on Claude when `large` is not configured.
+- A Claude Code session opened inside this repository also loads the plugin's
+  root `.mcp.json` as a project server named `subzero`, which fails because
+  `${CLAUDE_PLUGIN_ROOT}` is unset there. A subagent misreported that startup
+  failure as the plugin server dropping.
+- On pi, a completion notice still arrived for a turn that a later
+  `subzero_await` had already returned (`sz-l5m3xg`, `sz-2nvkku`). The parent's
+  next `subzero_await` answered "already reached you", so nothing was lost, but
+  the notice cost a parent turn.
