@@ -347,6 +347,33 @@ describe('pi subzero_continue and early end of a wait', () => {
     await fake.emit('session_shutdown', { reason: 'quit' });
   });
 
+  it('sends no completion notice for a turn that a later subzero_await returned, after an earlier await ended early', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    const first = run('subzero_await', { tasks: [id], timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await fake.emit('input', STEER);
+    expect(textOf(await first)).toMatch(/running/);
+    const second = run('subzero_await', { tasks: [id], timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    runs[0]!.settle({ lastAssistantText: 'the answer' });
+    expect(textOf(await second)).toContain('the answer');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(completions(fake)).toEqual([]);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('still sends the completion notice when a subzero_await timed out before the turn settled', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    expect(textOf(await run('subzero_await', { tasks: [id], timeout_s: 0 }))).toMatch(/running/);
+    runs[0]!.settle();
+    await until(() => completions(fake).length === 1);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
   it('covers R1: subzero_continue on a running background task replies steered with the task id', async () => {
     const { runs, fake, run } = await session();
     const id = idOf(textOf(await run('subagent', { task: 'long job' })));

@@ -54,7 +54,14 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     waits.add(controller);
     return { until: controller.signal, done: () => waits.delete(controller), ended: () => controller.signal.aborted };
   };
-  /** Send the completion notice of one turn once it settles, unless it was cancelled or the session closed. */
+  /** The subzero_await calls running now, by task id: a turn one of them returns needs no notice. */
+  const awaiting = new Map<string, Set<Promise<void>>>();
+  /** Once every subzero_await of the task has returned, true when one of them delivered the turn. */
+  const deliveredByAwait = async (svc: DelegationService, taskId: string, turn: number): Promise<boolean> => {
+    await Promise.all([...(awaiting.get(taskId) ?? [])]);
+    return svc.store.isCollected(taskId, turn);
+  };
+  /** Send the completion notice of one turn once it settles, unless it was cancelled, collected, or the session closed. */
   const notified = new Set<string>();
   const notifyWhenSettled = (svc: DelegationService, taskId: string, turn: number, parentSessionId: string): void => {
     // A turn reports once, whichever call ended its wait or started it in the background.
@@ -65,6 +72,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     if (done === undefined) return;
     void done.then(async (settled) => {
       if (settled.status === 'cancelled' || activeSession.closed) return;
+      if (await deliveredByAwait(svc, taskId, turn)) return;
       const notice = await svc.notice(taskId, settled.status, parentSessionId, names.collect, turn);
       if (!activeSession.closed) sendCompletion(pi, notice);
     }).catch(() => {});
@@ -104,9 +112,11 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     const svc = service;
     stopNotices = svc.onNotice((notice) => {
       if (notice.phase !== 'settled' || notice.parentSessionId !== sessionId || notice.result.status === 'cancelled' || activeSession.closed) return;
-      void svc.notice(notice.taskId, notice.result.status, sessionId, names.collect, notice.turn).then((text) => {
+      void (async () => {
+        if (await deliveredByAwait(svc, notice.taskId, notice.turn)) return;
+        const text = await svc.notice(notice.taskId, notice.result.status, sessionId, names.collect, notice.turn);
         if (!activeSession.closed) sendCompletion(pi, text);
-      });
+      })().catch(() => {});
     });
     if (event?.reason === 'reload' || event?.reason === 'resume') {
       try {
@@ -212,6 +222,9 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         if (signal?.aborted) abort();
         else signal?.addEventListener('abort', abort, { once: true });
         const typing = startWait();
+        let returned!: () => void;
+        const call = new Promise<void>((resolve) => (returned = resolve));
+        for (const id of args.tasks) awaiting.set(id, (awaiting.get(id) ?? new Set()).add(call));
         try {
           const replies = await Promise.all(args.tasks.map((id) => svc.waitFor(id, seconds * 1000, { until: typing.until })));
           let text = replies.map(describe).join('\n\n');
@@ -229,6 +242,12 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         } finally {
           signal?.removeEventListener('abort', abort);
           typing.done();
+          for (const id of args.tasks) {
+            const calls = awaiting.get(id);
+            calls?.delete(call);
+            if (calls?.size === 0) awaiting.delete(id);
+          }
+          returned();
         }
       });
     },

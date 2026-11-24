@@ -193,7 +193,10 @@ component PiExtension {
     starts
     a turn when pi is idle and joins the turn that is running otherwise, which
     ends
-    that flow. At the start of a pi session PiExtension registers its notice sink
+    that flow. Send no completion notice for a turn that a subzero_await call
+    returned, waiting for every subzero_await call of that task to return
+    first, so that a turn the parent model already read never starts another
+    turn. At the start of a pi session PiExtension registers its notice sink
     with the session core, and sends the completion notice that the notice sink
     receives for a turn that no call opened in the same way, which ends that flow.
     A task that ended by a session cancel after an abort, or by a
