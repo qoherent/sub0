@@ -15,7 +15,8 @@ import { lockAvailable, lockProgram, withDenyLock } from './deny-lock.js';
 
 /** The delegate tool as Claude Code names it for the plugin. */
 export const DELEGATE_TOOL = 'mcp__plugin_subzero_subzero__delegate';
-const AWAIT_TOOL = 'mcp__plugin_subzero_subzero__await';
+export const AWAIT_TOOL = 'mcp__plugin_subzero_subzero__await';
+export const CONTINUE_TOOL = 'mcp__plugin_subzero_subzero__continue';
 const TASKS_TOOL = 'mcp__plugin_subzero_subzero__tasks';
 /** The longest wait the await tool honours. */
 const AWAIT_SECONDS = 600;

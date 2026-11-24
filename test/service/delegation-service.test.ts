@@ -35,6 +35,14 @@ describe('DelegationService', () => {
     expect(svc.store.readTask(reply.taskId)?.status).toBe('cancelled');
     expect(await svc.collect(reply.taskId)).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
   });
+  it('marks the result of a cancelled live task collected, so a later collect does not deliver it again', async () => {
+    const { port } = manualPort();
+    const svc = service(makeProject(), port);
+    const reply = await svc.delegate({ agent: 'helper', briefText: 'x', parentSessionId: 'A' }, { wait: false });
+    if (reply.kind === 'result') throw new Error('expected live task');
+    expect(await svc.cancel(reply.taskId)).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
+    expect(await svc.collect(reply.taskId, { onlyNew: true })).toMatchObject({ kind: 'delivered', status: 'cancelled' });
+  });
   it('cancels only live and queued tasks of the selected session', async () => {
     const { port, started } = manualPort();
     const svc = service(makeProject(), port);
@@ -748,6 +756,25 @@ describe('DelegationService continue', () => {
     expect(svc.store.readTurns('sz-runnng')).toHaveLength(1);
   });
 
+  it('refuses a running turn of another process when the probe cannot tell whether that process is alive', async () => {
+    const root = makeProject();
+    const other = new TaskStore(root, { warn: () => {}, owner: { pid: 4242, startTime: 'other' } });
+    const agent = (await import('../../src/config/agent-config.js')).getAgent(root, 'helper');
+    other.createTaskRecord({ taskId: 'sz-unsure', agent, brief: 'b', model: agent.model, parentSessionId: 'A', createdAt: new Date().toISOString() });
+    other.appendEvent('sz-unsure', { kind: 'prompt_sent' }, 1);
+    const { port, started } = live();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: kernelWithPort(port),
+      store: { probe: { startTime: (pid) => (pid === process.pid ? 'now' : undefined) }, owner: { pid: process.pid, startTime: 'now' } },
+    });
+    const refused = await svc.continue({ taskId: 'sz-unsure', message: 'no', parentSessionId: 'A' }, { wait: false });
+    expect(refused).toMatchObject({ kind: 'not_delivered', reason: expect.stringMatching(/running in another process/) });
+    expect(svc.store.readTurns('sz-unsure')).toHaveLength(1);
+    expect(started).toHaveLength(0);
+  });
+
   it('covers R8: a held message that opens turn 2 reaches the parent as turn 1\'s result, the opened-turn line and turn 2\'s status', async () => {
     const root = makeProject();
     const { port, started } = live();
@@ -828,6 +855,24 @@ describe('DelegationService continue', () => {
     expect(started[1]!.steers).toEqual(['two']);
   });
 
+  it('does not hold the task\'s chain while a waited continue waits for its turn, so a second continue joins that turn', async () => {
+    const { svc, started, taskId } = await settledTask();
+    let firstDone = false;
+    const first = svc.continue({ taskId, message: 'one', parentSessionId: 'A' }, { wait: true }).then((reply) => {
+      firstDone = true;
+      return reply;
+    });
+    await until(() => started.length === 2);
+    const second = await svc.continue({ taskId, message: 'two', parentSessionId: 'A' }, { wait: false });
+    expect(['queued', 'steered']).toContain(second.kind);
+    expect(firstDone).toBe(false);
+    started[1]!.emit({ kind: 'prompt_sent' });
+    await until(() => started[1]!.steers.length === 1);
+    expect(started[1]!.steers).toEqual(['two']);
+    started[1]!.settle({ lastAssistantText: 'turn two answer' });
+    expect(await first).toMatchObject({ kind: 'new_turn', turn: 2, status: { kind: 'result', result: { turn: 2, summary: 'turn two answer' } } });
+  });
+
   it('prevents the turn from starting when a session cancel arrives while the continuation is being delivered', async () => {
     const { svc, started, taskId } = await settledTask();
     const pending = svc.continue({ taskId, message: 'too late', parentSessionId: 'A' }, { wait: false });
@@ -835,6 +880,27 @@ describe('DelegationService continue', () => {
     expect(await pending).toMatchObject({ kind: 'not_delivered', reason: expect.stringMatching(/cancelled/) });
     expect(started).toHaveLength(1);
     expect(svc.store.readTurns(taskId)).toHaveLength(1);
+  });
+
+  it('cancels the turn it just claimed when a session cancel lands while the message is steered into a run that then ends', async () => {
+    const { port, started } = live();
+    const svc = service(makeProject(), port);
+    const first = await svc.delegate({ agent: 'helper', briefText: 'first', parentSessionId: 'A' }, { wait: false });
+    const taskId = ids(first);
+    started[0]!.emit({ kind: 'prompt_sent' });
+    // The run answers "settled" only after the conversation was cancelled, so the message goes on to claim a new turn.
+    started[0]!.steerAnswer = async (): Promise<'settled'> => {
+      await svc.cancelSession('A');
+      return 'settled';
+    };
+    const reply = await svc.continue({ taskId, message: 'racing', parentSessionId: 'A' }, { wait: false });
+    expect(reply).toMatchObject({ kind: 'not_delivered', reason: expect.stringMatching(/cancelled/) });
+    // No run starts for the turn the claim opened, and that turn does not stay running.
+    expect(started).toHaveLength(1);
+    const turns = svc.store.readTurns(taskId);
+    expect(turns).toHaveLength(2);
+    expect(turns[1]!.result).toMatchObject({ status: 'cancelled' });
+    expect(await svc.collect(taskId, { onlyNew: true })).not.toMatchObject({ kind: 'running' });
   });
 
   it('ends a waited delegate with the until signal, returns its status line, and the child keeps running', async () => {
@@ -850,6 +916,47 @@ describe('DelegationService continue', () => {
     started[0]!.emit({ kind: 'prompt_sent' });
     started[0]!.settle({ lastAssistantText: 'finished later' });
     expect(await svc.waitForCompletion(ids(reply))).toMatchObject({ kind: 'result', result: { summary: 'finished later' } });
+  });
+
+  it('waits through a held-message turn with followOn: both results, turn 2 last, both turns collected', async () => {
+    const { port, started } = live();
+    const svc = service(makeProject(), port);
+    const waiting = svc.delegate({ agent: 'helper', briefText: 'first', parentSessionId: 'A' }, { wait: true, followOn: true });
+    await until(() => started.length === 1);
+    const taskId = (await svc.list('A'))[0]!.taskId;
+    expect(await svc.continue({ taskId, message: 'held', parentSessionId: 'A' }, { wait: false })).toMatchObject({ kind: 'queued' });
+    started[0]!.steerAnswer = 'settled';
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await until(() => started.length === 2);
+    started[1]!.emit({ kind: 'prompt_sent' });
+    started[1]!.settle({ lastAssistantText: 'turn two answer' });
+    const reply = await waiting;
+    expect(reply).toMatchObject({ kind: 'result', result: { turn: 2, summary: 'turn two answer' }, results: [{ summary: 'turn one answer' }, { turn: 2 }] });
+    expect(svc.store.isCollected(taskId, 1)).toBe(true);
+    expect(svc.store.isCollected(taskId, 2)).toBe(true);
+    expect(await svc.collect(taskId, { onlyNew: true })).toMatchObject({ kind: 'delivered', turn: 2 });
+  });
+
+  it('keeps turn 1\'s result when the until signal ends a followOn wait while turn 2 still runs', async () => {
+    const { port, started } = live();
+    const svc = service(makeProject(), port);
+    const typing = new AbortController();
+    const waiting = svc.delegate({ agent: 'helper', briefText: 'first', parentSessionId: 'A' }, { wait: true, followOn: true, until: typing.signal });
+    await until(() => started.length === 1);
+    const taskId = (await svc.list('A'))[0]!.taskId;
+    expect(await svc.continue({ taskId, message: 'held', parentSessionId: 'A' }, { wait: false })).toMatchObject({ kind: 'queued' });
+    started[0]!.steerAnswer = 'settled';
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await until(() => started.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    typing.abort();
+    const reply = await waiting;
+    expect(reply).toMatchObject({ kind: 'result', result: { summary: 'turn one answer' } });
+    expect(svc.store.isCollected(taskId, 1)).toBe(true);
+    expect(started[1]!.cancelled).toBe(false);
+    started[1]!.settle();
   });
 
   it('reports a turn that held messages opened through the notice sink, when it opens and once when it settles', async () => {

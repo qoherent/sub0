@@ -12,7 +12,7 @@ import { mapPiRequest } from './request.js';
 import { sendCompletion, sendReloadReport, sendStopped } from './notices.js';
 import { clashWarning, SessionWidget } from './ui.js';
 
-const names = { collect: 'subzero_await', cancel: 'subzero_cancel' };
+const names = { collect: 'subzero_await', cancel: 'subzero_cancel', read: 'subzero_tasks' };
 const TYPED_NOTE = 'note: you sent a message, so this call stopped waiting; the child keeps running and its result arrives as a completion notice';
 const result = (text: string, isError = false) => ({ content: [{ type: 'text' as const, text }], details: {}, ...(isError ? { isError: true } : {}) });
 const describe = (reply: Parameters<typeof describeTaskReply>[0]) =>

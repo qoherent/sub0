@@ -209,7 +209,7 @@ export interface TaskRecordWriter {
    */
   readEvents(taskId: string, kinds?: LoggedEvent['kind'][]): LoggedEvent[];
   /** The messages of a turn that no child run received, in order; none when its prompt was sent. */
-  undeliveredMessages(taskId: string, turn: TurnFile, events: LoggedEvent[]): string[];
+  undeliveredMessages(turn: TurnFile, events: LoggedEvent[]): string[];
   /** True when a child of the task was ever sent a prompt, so the task has a child session. */
   promptWasSent(taskId: string): boolean;
   /** Write the result of a turn (`extra.turn`, else the result's turn, else 1), then its index line. */
@@ -483,7 +483,7 @@ export class TaskStore implements TaskRecordWriter {
    * file records, then the follow-ups the log shows queued for it. None once the turn sent its
    * prompt; `events` is the log of the task.
    */
-  undeliveredMessages(taskId: string, turn: TurnFile, events: LoggedEvent[]): string[] {
+  undeliveredMessages(turn: TurnFile, events: LoggedEvent[]): string[] {
     if (events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn)) return [];
     const queued = events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []));
     return [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...queued];

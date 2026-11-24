@@ -522,8 +522,9 @@ function legacyEndpointsError(limits: LegacyEndpointLimit[], globalPath: string)
       : `  endpoint ${l.endpoint} (${was}) covered ${l.models.join(', ')}: give each model its own limit under models.parallel`;
   });
   return new LoadError(
-    `the ${kind} holds "endpoints:", which "models.parallel" replaced, in ${file}. A limit now belongs to one whole model, shared by every tier that names it:\n${lines.join('\n')}\n` +
-      `Guided init repairs this and pre-fills the old values${RUN_INIT}`,
+    // The first sentence carries the file, the replacement and the repair command: a warning that cuts the message short still names the fix.
+    `the ${kind} holds "endpoints:", which "models.parallel" replaced, in ${file}${RUN_INIT}, which repairs it and pre-fills the old values. ` +
+      `A limit now belongs to one whole model, shared by every tier that names it:\n${lines.join('\n')}`,
   );
 }
 

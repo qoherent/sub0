@@ -9,7 +9,7 @@
 // call, if any) and always allows the call.
 import { realpathSync } from 'node:fs';
 import { dataDir, setting, writeCallMarker } from '../mcp/parent-session.js';
-import { decideAgentSpawn, type SpawnInput } from './routing.js';
+import { AWAIT_TOOL, CONTINUE_TOOL, DELEGATE_TOOL, decideAgentSpawn, type SpawnInput } from './routing.js';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -17,7 +17,7 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-const SUBZERO_TOOLS = new Set(['mcp__plugin_subzero_subzero__delegate', 'mcp__plugin_subzero_subzero__continue', 'mcp__plugin_subzero_subzero__await']);
+const SUBZERO_TOOLS = new Set([DELEGATE_TOOL, CONTINUE_TOOL, AWAIT_TOOL]);
 
 let output = '';
 try {

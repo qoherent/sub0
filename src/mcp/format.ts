@@ -19,9 +19,12 @@ export const REPLY_RESERVE = 2_000;
 export const REPLY_BUDGET_CHARS = TOOL_RESULT_LIMIT - REPLY_RESERVE;
 export const LISTING_CAP = 50;
 
+/** The tool names a reply of the Claude Code server points the parent at. */
+export const MCP_TOOL_NAMES = { collect: 'await', cancel: 'cancel', read: 'tasks' };
+
 /** One reply of delegate, tasks, await or cancel about one task, with the task id first. */
 export function describeReply(reply: DelegateReply | CollectReply, view?: { agent: string; createdAt: string }, now = Date.now()): string {
-  return withNotice(describeTaskReply(reply, view, { collect: 'await', cancel: 'cancel' }, now), 'notice' in reply ? reply.notice : undefined);
+  return withNotice(describeTaskReply(reply, view, MCP_TOOL_NAMES, now), 'notice' in reply ? reply.notice : undefined);
 }
 
 /** The one line of an await reply that stands for a result left out for the reply's size. */

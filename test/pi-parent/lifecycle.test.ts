@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { TaskCore } from '../../src/core/task-core.js';
 import { registerPiExtension } from '../../src/pi-parent/extension.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
+import { TaskStore } from '../../src/store/task-store.js';
 import { fakePi } from './fake-pi-api.js';
 import { kernelWithPort, makeProject, manualPort, TIERED_YAML, until } from '../helpers.js';
 
@@ -235,6 +237,32 @@ describe('pi reload report of stopped turns', () => {
     expect(stopped(second.fake)[0]).toContain(id);
     expect(stopped(second.fake)[0]).toContain('never delivered words');
     await second.fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R10: a reload reports an abandoned turn 2 as "<id> (turn 2)" with its message once, and a second reload reports nothing', async () => {
+    const root = makeProject(TIERED_YAML);
+    const first = await process_(root);
+    const id = idOf(textOf(await first.run('subagent', { task: 'one' })));
+    await until(() => first.runs.length === 1);
+    first.runs[0]!.emit({ kind: 'prompt_sent' });
+    first.runs[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await until(() => first.service.store.readTask(id)?.status === 'completed');
+    await first.fake.emit('session_shutdown', { reason: 'quit' });
+    // Turn 2 opens in a process that dies before its prompt reaches the child.
+    const dead = new TaskStore(root, { warn: () => {}, owner: { pid: 999_999, startTime: 'then' } });
+    const deadCore = new TaskCore({ projectRoot: root, store: dead, warn: () => {} });
+    const { port } = manualPort({ steers: true, resume: true });
+    expect(await deadCore.load(id, port)!.followUp('the abandoned message')).toMatchObject({ outcome: 'new_turn' });
+
+    const second = await process_(root, 'reload');
+    expect(stopped(second.fake)).toHaveLength(1);
+    const report = stopped(second.fake)[0]!;
+    expect(report).toContain(`${id} (turn 2)`);
+    expect(report.split('the abandoned message')).toHaveLength(2);
+    await second.fake.emit('session_shutdown', { reason: 'quit' });
+    const third = await process_(root, 'reload');
+    expect(stopped(third.fake)).toEqual([]);
+    await third.fake.emit('session_shutdown', { reason: 'quit' });
   });
 
   it('covers R10: a task the user cancelled with subzero_cancel is never listed by a later reload', async () => {

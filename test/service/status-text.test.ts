@@ -31,6 +31,16 @@ describe('status text', () => {
     expect(formatResult({ ...base, status: 'failed', heldNotDelivered: 2 })).toMatch(/note: 2 follow-up messages held for this turn did not reach the child/);
   });
 
+  it('words a result reply that carries several results: each result in order, the opened-turn line after the last', () => {
+    const base = { taskId: 'sz-aaaaaa', agent: 'helper', status: 'completed' as const };
+    const one = { ...base, summary: 'turn one answer' };
+    const two = { ...base, turn: 2, summary: 'turn two answer' };
+    const text = describeTaskReply({ kind: 'result', result: two, results: [one, two], openedTurn: 3 }, undefined, { collect: 'await', cancel: 'cancel' });
+    expect(text.indexOf('turn one answer')).toBeLessThan(text.indexOf('turn two answer'));
+    expect(text.indexOf('turn two answer')).toBeLessThan(text.indexOf('opened turn 3'));
+    expect(text.match(/opened turn/g)).toHaveLength(1);
+  });
+
   it('words each delivery outcome with the task id first', () => {
     const tools = { collect: 'await', cancel: 'cancel' };
     expect(describeContinueReply({ kind: 'steered', taskId: 'sz-aaaaaa', turn: 1 }, tools)).toMatch(/^task: sz-aaaaaa · steered: .*turn 1.*single result/);

@@ -238,6 +238,30 @@ describe('TaskCore follow-up messages', () => {
     expect(task.latest.number).toBe(1);
   });
 
+  it('counts a held message the steer answered stopping as not delivered when the run still completes, and opens no turn 2', async () => {
+    const { task, runs } = prompted();
+    expect(await task.followUp('held one')).toMatchObject({ outcome: 'queued' });
+    task.release();
+    runs[0]!.steerAnswer = 'stopping';
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle({ lastAssistantText: 'done' });
+    expect(await task.result).toMatchObject({ status: 'completed', heldNotDelivered: 1 });
+    expect(runs).toHaveLength(1);
+    expect(task.latest.number).toBe(1);
+  });
+
+  it('counts a held message answered settled as not delivered when the run was cancelled, and starts no new run', async () => {
+    const { task, runs } = prompted();
+    expect(await task.followUp('held one')).toMatchObject({ outcome: 'queued' });
+    task.release();
+    runs[0]!.steerAnswer = 'settled';
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle({ status: 'cancelled' });
+    expect(await task.result).toMatchObject({ status: 'cancelled', heldNotDelivered: 1 });
+    expect(runs).toHaveLength(1);
+    expect(task.latest.number).toBe(1);
+  });
+
   it('covers R2: a message to a task cancelled while Pending releases it with the brief, then steers the message', async () => {
     const { task, runs } = prompted();
     await task.cancel();

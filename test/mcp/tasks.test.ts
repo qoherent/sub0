@@ -82,6 +82,27 @@ describe('Claude MCP tasks', () => {
     await client.close();
   });
 
+  it('forces a continue with wait:false on a settled task to wait in non-interactive mode, and returns the new turn\'s result', async () => {
+    const { client, service, started } = await setup(false, true, () => 'session-a', undefined, { steers: true, resume: true });
+    const first = client.callTool({ name: 'delegate', arguments: { agent: 'free', brief: 'one', wait: false } }, CallToolResultSchema);
+    await until(() => started.length === 1);
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await first;
+    const taskId = (await service.list('session-a'))[0]!.taskId;
+    let returned = false;
+    const pending = client.callTool({ name: 'continue', arguments: { task: taskId, message: 'go on', wait: false } }, CallToolResultSchema).then((result) => { returned = true; return result; });
+    await until(() => started.length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(returned).toBe(false);
+    started[1]!.emit({ kind: 'prompt_sent' });
+    started[1]!.settle({ lastAssistantText: 'turn two answer' });
+    const reply: any = await pending;
+    expect(reply.content[0].text).toMatch(new RegExp(`^task: ${taskId} · new turn: turn 2`));
+    expect(JSON.stringify(reply)).toContain('turn two answer');
+    await client.close();
+  });
+
   it('does not advertise task mode in non-interactive mode', async () => {
     const { client } = await setup(true, true);
     expect(client.getServerCapabilities()?.tasks).toBeUndefined();
@@ -225,6 +246,23 @@ describe('Claude MCP tasks', () => {
     await service.cancelSession('session-a');
     const collected = await client.request({ method: 'tasks/result', params: { taskId: result.task.taskId } }, CallToolResultSchema);
     expect(collected.content.map((part) => part.type === 'text' ? part.text : '').join('\n')).toMatch(/stopped.*no action is needed/i);
+    await client.close();
+  });
+  it('marks every turn a task-mode result delivers as collected, including one whose held message opened turn 2', async () => {
+    const { client, service, started } = await setup(true, false, () => 'session-a', undefined, { steers: true, resume: true });
+    const created = await client.request({ method: 'tools/call', params: { name: 'delegate', arguments: { agent: 'free', brief: 'one' }, task: {} } }, CreateTaskResultSchema);
+    await until(() => started.length === 1);
+    const taskId = (await service.list('session-a'))[0]!.taskId;
+    const held: any = await client.callTool({ name: 'continue', arguments: { task: taskId, message: 'held' } }, CallToolResultSchema);
+    expect(held.content[0].text).toMatch(/queued/);
+    started[0]!.steerAnswer = 'settled';
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'turn one answer' });
+    const collected = await client.request({ method: 'tasks/result', params: { taskId: created.task.taskId } }, CallToolResultSchema);
+    expect(JSON.stringify(collected)).toContain('turn one answer');
+    await until(() => service.store.isCollected(taskId, 1));
+    expect(await service.collect(taskId, { onlyNew: true })).toMatchObject({ kind: 'running' });
+    started[1]!.settle();
     await client.close();
   });
 });

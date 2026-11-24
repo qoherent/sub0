@@ -220,6 +220,23 @@ describe('pi extension requests', () => {
   });
 });
 
+describe('pi await of a collected turn', () => {
+  it('names subzero_tasks, not subzero_await, as the tool that reads a turn that already reached the parent', async () => {
+    const root = makeProject(TIERED_YAML);
+    const { port, started } = manualPort();
+    const fake = fakePi(root);
+    registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
+    await fake.emit('session_start');
+    const reply = await fake.tools.get('subagent')!.execute('call', { task: 'one' }, undefined, undefined, fake.context as any);
+    const taskId = /sz-[a-z2-7]{6}/.exec(JSON.stringify(reply))![0];
+    started[0]!.settle({ lastAssistantText: 'first result' });
+    const first = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
+    expect(first.content[0]).toMatchObject({ text: expect.stringContaining('first result') });
+    const again = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
+    expect(again.content[0]).toMatchObject({ text: expect.stringMatching(/already reached you.*read it again with subzero_tasks/) });
+  });
+});
+
 describe('pi subzero_continue and early end of a wait', () => {
   const STEER = { type: 'input', text: 'x', source: 'interactive', streamingBehavior: 'steer' };
   const textOf = (reply: { content: { type: string; text?: string }[] }) => {

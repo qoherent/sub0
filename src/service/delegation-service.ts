@@ -242,6 +242,12 @@ export interface ContinueOptions {
   onState?: (state: ChildRunState) => void;
 }
 
+/** What the serialized step of a continuation decided: its reply, and the new turn to wait on once the chain is released. */
+interface ContinueStep {
+  reply: ContinueReply;
+  waitOn?: { task: Task; turn: Turn };
+}
+
 /** Marks an in-flight continuation so a session cancel can stop it before its turn starts. */
 interface Opening {
   cancelled: boolean;
@@ -443,7 +449,11 @@ export class DelegationService {
     let turn = first;
     for (;;) {
       const outcome = await Promise.race([turn.result, untilPromise(options.until)]);
-      if (outcome === UNTIL) return this.liveReply(task);
+      if (outcome === UNTIL) {
+        // Earlier turns' results are already marked collected, so they go out with this reply; the follow-on turn still running is reported through the front end's wake and notice machinery.
+        if (results.length === 0) return this.liveReply(task);
+        return { kind: 'result', result: results[results.length - 1]!, ...(results.length > 1 ? { results } : {}) };
+      }
       results.push(outcome);
       this.markDelivered(task.taskId, outcome.turn ?? 1);
       const next = task.latest !== turn && options.followOn === true ? task.latest : undefined;
@@ -544,7 +554,11 @@ export class DelegationService {
       set.add(opening);
     }
     try {
-      return await this.serial(request.taskId, () => this.continueNow(request, options, opening, false));
+      // The serialized step opens, steers or holds and releases the chain; a waited new turn is waited on after it, so a second continue for the task can steer into that turn.
+      const step = await this.serial(request.taskId, () => this.continueNow(request, options, opening, false));
+      if (step.waitOn === undefined || step.reply.kind !== 'new_turn') return step.reply;
+      const status = await this.waitTurn(step.waitOn.task, step.waitOn.turn, options);
+      return { ...step.reply, status };
     } finally {
       if (request.parentSessionId !== undefined) {
         const set = this.opening.get(request.parentSessionId);
@@ -566,9 +580,9 @@ export class DelegationService {
     return next;
   }
 
-  private async continueNow(request: Continuation, options: ContinueOptions, opening: Opening, retried: boolean): Promise<ContinueReply> {
+  private async continueNow(request: Continuation, options: ContinueOptions, opening: Opening, retried: boolean): Promise<ContinueStep> {
     const { taskId, parentSessionId } = request;
-    const refuse = (reason: string, status?: string): ContinueReply => ({ kind: 'not_delivered', taskId, reason, ...(status !== undefined ? { status } : {}) });
+    const refuse = (reason: string, status?: string): ContinueStep => ({ reply: { kind: 'not_delivered', taskId, reason, ...(status !== undefined ? { status } : {}) } });
     const { store, core } = await this.connect();
     if (opening.cancelled) return refuse('the conversation was cancelled while the message was being delivered');
     store.sweep();
@@ -582,8 +596,8 @@ export class DelegationService {
     let task = this.registry.get(taskId);
     if (task === undefined) {
       const latest = record.turns[record.turns.length - 1];
-      // Only the owner of a running turn holds its child, so a turn running in a live process is not ours to take.
-      if (latest !== undefined && latest.result === undefined && record.status === 'running' && latest.owner !== null && !store.isOwner(latest.owner) && store.ownerAlive(latest.owner) === true) {
+      // Only the owner of a running turn holds its child, so a turn running in a process that is not known to be dead is not ours to take (the sweep keeps such a turn too).
+      if (latest !== undefined && latest.result === undefined && record.status === 'running' && latest.owner !== null && !store.isOwner(latest.owner) && store.ownerAlive(latest.owner) !== false) {
         return refuse(`its latest turn is running in another process (pid ${latest.owner.pid}); wait for its result`, this.undeliveredStatus(record));
       }
       if (record.task === null) return refuse('its task record is missing');
@@ -610,6 +624,11 @@ export class DelegationService {
     if (opening.cancelled) return refuse('the conversation was cancelled while the message was being delivered');
 
     const reply = await task.followUp(request.message);
+    // A session cancel that landed while the turn was being claimed stops it before it is attached.
+    if (opening.cancelled && reply.outcome === 'new_turn') {
+      await reply.turn!.cancel();
+      return refuse('the conversation was cancelled while the message was being delivered');
+    }
     if (reply.taken === true && !retried) {
       // Another process claimed the turn first: read the record again and decide afresh.
       this.registry.delete(taskId);
@@ -620,12 +639,14 @@ export class DelegationService {
         return refuse(reply.taken === true ? 'another process opened the next turn first' : this.undeliveredReason(task));
       case 'steered':
       case 'queued':
-        return { kind: reply.outcome, taskId, turn: task.latest.number };
+        return { reply: { kind: reply.outcome, taskId, turn: task.latest.number } };
       case 'new_turn': {
         const turn = reply.turn!;
         this.attachTurn(task, turn, options, this.limitFor(task, catalog), parentSessionId);
-        const status: DelegateReply = options.wait ? await this.waitTurn(task, turn, options) : this.liveReply(task);
-        return { kind: 'new_turn', taskId, turn: turn.number, ...(reply.replayed !== undefined ? { replayed: reply.replayed } : {}), status };
+        return {
+          reply: { kind: 'new_turn', taskId, turn: turn.number, ...(reply.replayed !== undefined ? { replayed: reply.replayed } : {}), status: this.liveReply(task) },
+          ...(options.wait ? { waitOn: { task, turn } } : {}),
+        };
       }
     }
   }
@@ -738,7 +759,12 @@ export class DelegationService {
     store.sweep();
     this.dropTakenOver(store);
     const live = this.registry.get(taskId);
-    if (live !== undefined && live.settledResult === undefined) return { kind: 'result', result: await live.cancel() };
+    if (live !== undefined && live.settledResult === undefined) {
+      const result = await live.cancel();
+      // A cancelled result is not needed again.
+      this.markDelivered(taskId, result.turn ?? 1);
+      return { kind: 'result', result };
+    }
     // A settled task returns its stored result unchanged; nothing is signalled.
     return this.collect(taskId);
   }
@@ -776,7 +802,7 @@ export class DelegationService {
         if (turn.stopReason !== 'session_end' && !abandoned) continue;
         if (store.isReported(view.taskId, turn.turn)) continue;
         events ??= store.readEvents(view.taskId);
-        const lost = store.undeliveredMessages(view.taskId, turn, events);
+        const lost = store.undeliveredMessages(turn, events);
         const named = turn.turn >= 2 ? `${view.taskId} (turn ${turn.turn})` : view.taskId;
         lines.push(`- ${named} · ${view.agent} · stopped${lost.length > 0 ? `; it never received ${lost.map((m) => JSON.stringify(m)).join(', ')}` : ''}`);
         try {

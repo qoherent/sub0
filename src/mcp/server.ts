@@ -11,7 +11,7 @@ import type { ChildRunState } from '../core/types.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { EmptyBriefError, type DelegationService } from '../service/delegation-service.js';
 import { describeContinueReply, pendingOf } from '../service/status-text.js';
-import { deliveredTurns, describeReply, formatAwaitWithShown, formatListing, REPLY_BUDGET_CHARS } from './format.js';
+import { deliveredTurns, describeReply, formatAwaitWithShown, formatListing, MCP_TOOL_NAMES, REPLY_BUDGET_CHARS } from './format.js';
 import { readCallMarker, readPromptMarker } from './parent-session.js';
 import { ProgressReporter, type ProgressOptions } from './progress.js';
 import { SubzeroTaskStore } from './task-store.js';
@@ -318,7 +318,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
                   const withNotice = reply.notice === undefined ? result : { ...result, notice: reply.notice };
                   const body = `${describeReply(withNotice)}${notice ? `\n\n${notice}` : ''}`;
                   await store.storeTaskResult(task.taskId, result.kind === 'result' && result.result.status === 'failed' ? 'failed' : 'completed', text(body));
-                  if (result.kind === 'result') service.markDelivered(result.result.taskId, result.result.turn ?? 1);
+                  for (const t of deliveredTurns(result)) service.markDelivered(t.taskId, t.turn);
                 } finally { taskStore.release(task.taskId); }
               })();
               if (args.wait === true || options.nonInteractive === true) {
@@ -475,7 +475,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
               try { armWake(currentSession, task, reply.turn); } catch { /* A marker failure must not lose a continuation. */ }
             }
             const endedEarly = reply.kind === 'new_turn' && wait && typing.signal?.aborted === true && reply.status.kind !== 'result';
-            const body = describeContinueReply(reply, { collect: 'await', cancel: 'cancel' });
+            const body = describeContinueReply(reply, MCP_TOOL_NAMES);
             return text(endedEarly ? `${body}\n${typedNote}` : body);
           } finally {
             typing.stop();

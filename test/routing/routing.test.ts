@@ -132,6 +132,13 @@ describe('routingContext', () => {
     expect(routingContext(project())).toBeUndefined();
   });
 
+  it('keeps the repair command in the SessionStart warning for a file that still holds endpoints:', () => {
+    const warning = routingContext(project(`endpoints:\n  local:\n    parallel: 1\n${config('medium')}`));
+    expect(warning).toMatch(/routing is off/);
+    expect(warning).toContain('endpoints');
+    expect(warning).toContain('init');
+  });
+
   it('warns when the medium tier is missing from a file that exists', () => {
     expect(routingContext(project('endpoints: {}\n'))).toMatch(/routing is off/);
     expect(routingContext(project(config()))).toMatch(/medium/);

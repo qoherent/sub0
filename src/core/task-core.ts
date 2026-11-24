@@ -486,7 +486,7 @@ export class Task {
     const events = this.core.store.readEvents(this.taskId);
     // With no turn file, only the queued follow-ups of the log are left.
     const file = this.core.store.readTurn(this.taskId, ended.number) ?? { turn: ended.number, owner: null, enqueuedAt: ended.enqueuedAt };
-    return this.core.store.undeliveredMessages(this.taskId, file, events);
+    return this.core.store.undeliveredMessages(file, events);
   }
 
   /** Open the next turn for a message, after a turn that ended. */

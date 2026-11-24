@@ -185,6 +185,16 @@ These are listed on the install page and are not fixed:
   a Claude Code subagent never ends early.
 - A model with no `models.parallel` entry has no limit, including the model of
   a continued task.
+- A waited `delegate` in Claude Code MCP-task mode cannot end early when the
+  user types: a task-augmented call must answer with a task, and the contract
+  does not say what it returns instead. Other waited calls end early.
+- A process that dies between claiming a turn and writing its running index line
+  leaves the task listed with its earlier status until another process continues
+  it; `continue` still takes it over. A session cancel that lands just after a
+  turn settles cleanly with held messages does not stop the follow-on turn those
+  messages open.
+- A steer answer that arrives more than a second after its run ended is neither
+  replayed nor counted in the result.
 - If the MCP server fails to start, the session-start text still says routing is
   on, and every subagent runs on Claude.
 - The routing hook needs `lockf` (macOS) or `flock` (Linux) for its per-session

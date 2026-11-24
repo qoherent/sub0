@@ -17,14 +17,21 @@ export function formatProgress(agent: string, latest: string, elapsedMs: number)
   return `${agent} · ${latest} · ${formatElapsed(elapsedMs)}`;
 }
 
+/** The names of the tools a reply points the parent at; `read` is the tool that reads a task without waiting, which falls back to `collect`. */
+export interface ToolNames {
+  collect: string;
+  cancel: string;
+  read?: string;
+}
+
 const UNIDENTIFIED_LINE = 'note: this conversation could not be identified, so the task cannot be continued';
 
-export function describeTaskReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now = Date.now()): string {
+export function describeTaskReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: ToolNames, now = Date.now()): string {
   const text = describeReply(reply, view, tools, now);
   return 'continuable' in reply && reply.continuable === false ? `${text}\n${UNIDENTIFIED_LINE}` : text;
 }
 
-function describeReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now: number): string {
+function describeReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: ToolNames, now: number): string {
   if (reply.kind === 'result') {
     const results = 'results' in reply && reply.results !== undefined ? reply.results : [reply.result];
     const sections = results.map((r, i) => (i === results.length - 1 && reply.openedTurn !== undefined ? `${formatResult(r)}\n${openedLine(reply.openedTurn)}` : formatResult(r)));
@@ -35,7 +42,7 @@ function describeReply(reply: DelegateReply | CollectReply, view: { agent: strin
     if (reply.then !== undefined) sections.push(describeReply(reply.then, view, tools, now));
     return sections.join('\n\n');
   }
-  if (reply.kind === 'delivered') return `task: ${reply.taskId} · turn ${reply.turn} already reached you (${reply.status}); read it again with ${tools.collect === 'await' ? 'tasks' : tools.collect}`;
+  if (reply.kind === 'delivered') return `task: ${reply.taskId} · turn ${reply.turn} already reached you (${reply.status}); read it again with ${tools.read ?? tools.collect}`;
   const id = `task: ${reply.taskId}`;
   const lead = view !== undefined ? `${id} · ${view.agent}` : id;
   if (reply.kind === 'abandoned') return `${lead} · abandoned: its owner process died, so it has no result`;
@@ -58,7 +65,7 @@ function openedLine(turn: number): string {
 /** What `continue` answers: the delivery outcome first, with the task id leading the line. */
 export function describeContinueReply(
   reply: ContinueReply,
-  tools: { collect: string; cancel: string },
+  tools: ToolNames,
   view?: { agent: string; createdAt: string },
   now = Date.now(),
 ): string {

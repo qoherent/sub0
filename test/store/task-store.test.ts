@@ -333,12 +333,12 @@ describe('TaskStore', () => {
       store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'steered', outcome: 'steered' }, 2);
       store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'other turn', outcome: 'queued' }, 1);
       const turn = store.readTurn('sz-undeli', 2)!;
-      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toEqual(['old one', 'now', 'held one', 'queued two']);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['old one', 'now', 'held one', 'queued two']);
       // A prompt sent by another turn does not count; one sent by this turn leaves nothing undelivered.
       store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 1);
-      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toHaveLength(4);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toHaveLength(4);
       store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 2);
-      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toEqual([]);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual([]);
     });
 
     it('parses only the log lines of the kinds asked for', () => {
