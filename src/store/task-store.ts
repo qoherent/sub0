@@ -692,18 +692,21 @@ export class TaskStore implements TaskRecordWriter {
   }
 
   /**
-   * Mark abandoned each task whose latest line says running and whose owner process
-   * is gone or has another start time. Signals no process. Returns the marked ids.
+   * Mark abandoned each task whose latest line says running, or whose latest turn file is newer
+   * than its latest line, and whose owner process is gone or has another start time. Signals no
+   * process. Returns the marked ids.
    */
   sweep(): string[] {
     const marked: string[] = [];
     // A probe that cannot even read this process cannot tell anyone is gone.
     if (typeof this.probe.startTime(process.pid) !== 'string') return marked;
     for (const line of this.readLatest().values()) {
-      if (line.status !== 'running') continue;
       const latest = this.latestTurn(line.taskId);
       // A turn that settled is nobody's to abandon; the owner of a running turn is the one in its turn file.
       if (latest?.result !== undefined) continue;
+      // A process that died between claiming a turn and writing its running line left only the turn file.
+      const unindexed = (indexed: IndexLine) => latest !== null && latest.turn > (indexed.turn ?? 1);
+      if (line.status !== 'running' && !unindexed(line)) continue;
       const owner = latest?.owner ?? line.owner;
       if (owner === undefined) continue;
       // A probe that cannot tell (undefined) never marks a task, and a live owner keeps its task.
@@ -711,7 +714,7 @@ export class TaskStore implements TaskRecordWriter {
 
       // Read again just before appending: the owner may have settled meanwhile.
       const now = this.readLatest().get(line.taskId);
-      if (now === undefined || now.status !== 'running') continue;
+      if (now === undefined || (now.status !== 'running' && !unindexed(now))) continue;
       if (this.readResult(line.taskId) !== null) continue;
       this.appendIndex({
         taskId: line.taskId,
@@ -722,6 +725,8 @@ export class TaskStore implements TaskRecordWriter {
         ...sessionField(now.sessionFile ?? this.findSessionFile(line.taskId)),
         createdAt: now.createdAt,
         updatedAt: new Date().toISOString(),
+        // The turn it abandons, so that a turn file with no running line is marked once.
+        ...(latest !== null ? { turn: latest.turn } : {}),
       });
       marked.push(line.taskId);
     }

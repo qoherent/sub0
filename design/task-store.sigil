@@ -78,9 +78,11 @@ component TaskStore {
 
   logic {
     Run the start-up sweep at start-up and again whenever a caller asks for it:
-    scan the task index for a task whose latest line says running and whose
-    owner process is no longer alive, or is alive with a different start time.
-    Mark that task abandoned by appending the change to the task index. The
+    scan the task index for a task whose latest line says running, or whose
+    latest turn file is newer than the turn of its latest line and holds no
+    result, and whose owner process is no longer alive, or is alive with a
+    different start time. Mark that task abandoned at that turn by appending
+    the change to the task index. The
     sweep signals no process, and it ends when every such task is marked. The sweep
     and the takeover check read the owner process of a running turn from its
     turn file. An
@@ -188,6 +190,11 @@ component TaskStore {
     process of the same parent session id, gets a running line that records
     the new owner process, so that the start-up sweep of that later process
     does not mark it abandoned while its turn runs.
+
+    A process that claims turns/2.json of a settled task and dies before it
+    appends the running line leaves a task that the next start-up sweep marks
+    abandoned at turn 2, once, so that every listing and the task record agree
+    on its task status.
 
     Two processes that open turn 2 of one task at once make one exclusive
     create succeed, the loser appends no line to the task index and the task

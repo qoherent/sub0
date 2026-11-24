@@ -244,6 +244,29 @@ describe('TaskStore', () => {
       expect(later.readTask('sz-aaaaab')).toMatchObject({ status: 'abandoned', turn: 2 });
     });
 
+    it('marks abandoned, once, a turn 2 that a dead process claimed before writing its running line, so the listing and the task agree', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-uuuuuu', 'p1');
+      dead.store.writeResult('sz-uuuuuu', result('sz-uuuuuu'));
+      // The claim's exclusive create, without the running line that follows it.
+      (dead.store as unknown as { createTurnFile(id: string, turn: number, opened: object): boolean }).createTurnFile('sz-uuuuuu', 2, { message: 'm', enqueuedAt: 't' });
+      const later = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      expect(later.readLatest().get('sz-uuuuuu')).toMatchObject({ status: 'completed' });
+      expect(later.sweep()).toEqual(['sz-uuuuuu']);
+      expect(later.readTask('sz-uuuuuu')).toMatchObject({ status: 'abandoned', turn: 2 });
+      expect(later.readLatest().get('sz-uuuuuu')).toMatchObject({ status: 'abandoned', turn: 2 });
+      expect(later.sweep()).toEqual([]);
+    });
+
+    it('leaves alone a turn file newer than the index line while its claiming process lives', () => {
+      const live = setup();
+      live.create('sz-vvvvvv');
+      live.store.writeResult('sz-vvvvvv', result('sz-vvvvvv'));
+      (live.store as unknown as { createTurnFile(id: string, turn: number, opened: object): boolean }).createTurnFile('sz-vvvvvv', 2, { message: 'm', enqueuedAt: 't' });
+      expect(live.store.sweep()).toEqual([]);
+      expect(live.store.readTask('sz-vvvvvv')).toMatchObject({ status: 'running', turn: 2 });
+    });
+
     it('keeps the latest owner line and the first line\'s creation time', () => {
       const first = setup({ owner: { pid: 111, startTime: 'one' } });
       first.create('sz-llllla', 'parent-1');
