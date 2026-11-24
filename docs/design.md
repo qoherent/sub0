@@ -604,7 +604,7 @@ so and changes nothing. If the parent cannot hold a long call open (Codex `tool_
 
 | Parent | Packaging | Mechanism |
 |---|---|---|
-| Claude Code | Plugin (`.claude-plugin/plugin.json`) with an MCP server launched through `bin/subzero`, SessionStart and PreToolUse routing hooks, an async Stop hook, and `init`, `tasks` and `cancel` skills. | MCP stdio; `delegate` and `await` always loaded; progress every ≤30s; optional MCP tasks and an async wake fallback; `/subzero:cancel`. Detail: [target-claude-pi.md](target-claude-pi.md) and §5.4 |
+| Claude Code | Plugin (`.claude-plugin/plugin.json`) with an MCP server launched through `bin/subzero`, SessionStart and PreToolUse routing hooks, an async Stop hook, and `init`, `tasks` and `cancel` skills. | MCP stdio; `delegate` and `await` always loaded; progress every ≤30s; an async wake hook for background results (no MCP tasks, decision 61); `/subzero:cancel`. Detail: [target-claude-pi.md](target-claude-pi.md) and §5.4 |
 | Codex | Codex plugin (skill + MCP server + hooks), or just `[mcp_servers.subzero]` with `tool_timeout_sec` raised | MCP stdio; proxy skills in `.agents/skills` |
 | pi | A pi package installed from a git branch (`pi install git:<repo>@<branch>`) that holds a native TS extension importing the core library directly (`pi.registerTool`), no MCP needed: the `subagent` tool, `subzero_await`, `subzero_tasks` and `subzero_cancel`, and a `/subzero` command. | In-process; background by default; a session widget through `ctx.ui`. Detail: §5.5 and `design/pi-extension.sigil`. |
 
@@ -620,7 +620,7 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/claud
 - **Session start.** The SessionStart hook records the session id and prints the routing text, built
   from the current agent file: each compound-engineering tier word (`small`, `medium`, `large`) whose tier
   is configured goes to `delegate` with that tier; the others stay on the Agent tool. The text also gives
-  the batch pattern (`delegate` in one message without asking to wait, so that each call is a background task when Claude Code supports MCP tasks, and otherwise with `wait: false` and then `await` up to 600 seconds; the text uses mode-neutral wording while no task mode is known), says a
+  the batch pattern (`delegate` with `wait: false` in one message, then `await` up to 600 seconds), says a
   queued task has not launched, keeps fork and worktree spawns on the Agent tool, and explains the
   pass-back. No routable tier word means no text; an agent file that fails to load gives a one-line warning.
 - **The redirect hook.** A PreToolUse hook on `Agent|Task` denies a generic spawn (no agent type,
@@ -641,13 +641,10 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/claud
 - **Session id per session.** The SessionStart hook writes one entry per session id with its ancestor
   processes, and the server takes the newest entry whose ancestors include its own parent process, so two
   Claude sessions in one project never mix their listings.
-- **Background and completion.** An interactive client can select an MCP task on a `delegate` call; its
-  completed task carries the whole result and a completion notice listing the session's still-running tasks.
-  The server records the most recently observed task mode in its readiness marker for routing. Claude Code
-  2.1.322 did not select MCP tasks in the platform probe. For ordinary `wait: false` calls, an `asyncRewake`
-  Stop hook watches per-session completion markers and wakes Claude with the result. It renews its watch
+- **Background and completion.** The server offers no MCP tasks (decision 61): Claude Code 2.1.322 did not
+  select them in the platform probe. For `wait: false` calls, an `asyncRewake` Stop hook watches per-session completion markers and wakes Claude with the result. It renews its watch
   for long-running work. A result already collected, or a cancelled task, does not produce a wake. Calls
-  wait by default without MCP tasks. Non-interactive and unidentifiable parent processes always wait, as
+  wait by default. Non-interactive and unidentifiable parent processes always wait, as
   does the fallback when the session ID is unknown. This conservative check also makes terminal-less IDE
   and SDK sessions wait. The full live checks remain to be run.
 - **Cancel.** Escape does not stop a background task in Claude Code. The `/subzero:cancel` plugin skill (a

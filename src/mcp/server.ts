@@ -3,7 +3,7 @@
 // The plugin's MCP server: four tools backed by DelegationService. Claude Code
 // names them mcp__plugin_subzero_subzero__<tool>.
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { CallToolRequestSchema, ListToolsRequestSchema, McpError, ErrorCode, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { configuredTierNames, LoadError, MissingAgentFileError, routableTiers, TierError, UnknownAgentError, UnresolvedRootError } from '../config/agent-config.js';
 import { mapRequest } from '../config/tier-words.js';
 import { isTaskId } from '../core/ids.js';
@@ -14,7 +14,6 @@ import { describeContinueReply, pendingOf } from '../service/status-text.js';
 import { deliveredTurns, describeReply, formatAwaitWithShown, formatListing, MCP_TOOL_NAMES, REPLY_BUDGET_CHARS } from './format.js';
 import { readCallMarker, readPromptMarker } from './parent-session.js';
 import { ProgressReporter, type ProgressOptions } from './progress.js';
-import { SubzeroTaskStore } from './task-store.js';
 import { WakeMarkers } from './wake-markers.js';
 
 export const SERVER_INSTRUCTIONS = [
@@ -27,12 +26,11 @@ export const SERVER_INSTRUCTIONS = [
 export const MAX_AWAIT_SECONDS = 600;
 
 const DELEGATE_DESCRIPTION =
-  'Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Returns the result with the task id first, or a task handle or id when running in the background.';
+  'Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Returns the result with the task id first, or the task id when running in the background.';
 
 const TOOLS = [
   {
     name: 'delegate',
-    execution: { taskSupport: 'optional' as const },
     description: DELEGATE_DESCRIPTION,
     inputSchema: {
       type: 'object',
@@ -42,7 +40,7 @@ const TOOLS = [
         brief: { type: 'string', description: 'A self-contained brief; the child cannot see this conversation' },
         files: { type: 'array', items: { type: 'string' }, description: 'Paths the child should read' },
         expected_output: { type: 'string', description: 'What the result should contain' },
-        wait: { type: 'boolean', description: 'Wait for the result; defaults to true unless the call requests an MCP task' },
+        wait: { type: 'boolean', description: 'Wait for the result; defaults to true' },
       },
       required: ['brief'],
     },
@@ -95,9 +93,6 @@ export interface SubzeroServerOptions {
   parentSessionId: () => string | undefined;
   progress?: ProgressOptions;
   version?: string;
-  /** Enable only when the parent is known to support interactive MCP tasks. */
-  taskMode?: boolean;
-  onTaskMode?: (enabled: boolean) => void;
   wakeDataDir?: string;
   nonInteractive?: boolean;
 }
@@ -134,18 +129,16 @@ function stringArg(args: Record<string, unknown>, key: string): string | undefin
 
 export function createSubzeroServer(options: SubzeroServerOptions): Server {
   const { service } = options;
-  const taskMode = options.taskMode === true && options.nonInteractive !== true;
-  const taskStore = new SubzeroTaskStore(service);
   const server = new Server(
     { name: 'subzero', version: options.version ?? '0.0.0-dev' },
-    { capabilities: { tools: {}, ...(taskMode ? { tasks: { list: {}, cancel: {}, requests: { tools: { call: {} } } } } : {}) }, ...(taskMode ? { taskStore } : {}), instructions: SERVER_INSTRUCTIONS },
+    { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
   );
   let lastSession: string | undefined;
   let watcher: NodeJS.Timeout | undefined;
   const wakeKey = (taskId: string, turn: number) => (turn >= 2 ? `${taskId}#${turn}` : taskId);
   const wakeMarkers = (): WakeMarkers | undefined =>
     options.wakeDataDir !== undefined && service.projectRoot !== undefined ? new WakeMarkers(options.wakeDataDir, service.projectRoot) : undefined;
-  /** Tell the Stop hook to wake Claude with the result of one turn, whatever the task mode. */
+  /** Tell the Stop hook to wake Claude with the result of one turn. */
   const armWake = (session: string, taskId: string, turn: number): void => {
     const markers = wakeMarkers();
     const done = service.resultOfTurn(taskId, turn);
@@ -193,10 +186,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
     const current = options.parentSessionId();
     const previous = lastSession;
     if (current !== undefined) lastSession = current;
-    if (current !== undefined && previous !== undefined && current !== previous) {
-      taskStore.reset();
-      await service.cancelSession(previous);
-    }
+    if (current !== undefined && previous !== undefined && current !== previous) await service.cancelSession(previous);
     return current;
   };
   const stopWatchingIfIdle = () => {
@@ -207,7 +197,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
     watcher = setInterval(() => void syncSession().catch(() => undefined).finally(stopWatchingIfIdle), 5000);
     watcher.unref();
   };
-  server.onclose = () => { if (watcher) clearInterval(watcher); watcher = undefined; stopSink(); taskStore.cleanup(); };
+  server.onclose = () => { if (watcher) clearInterval(watcher); watcher = undefined; stopSink(); };
 
   // The delegate description names the tiers the agent file holds now, read at each listing.
   async function delegateDescription(): Promise<string> {
@@ -227,11 +217,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try { await syncSession(); } catch { /* A later call reports the root error. */ }
     const description = await delegateDescription();
-    return { tools: TOOLS.map((tool) => {
-      if (tool.name !== 'delegate') return tool;
-      const { execution, ...base } = tool;
-      return { ...base, description, ...(taskMode ? { execution } : {}) };
-    }) };
+    return { tools: TOOLS.map((tool) => (tool.name === 'delegate' ? { ...tool, description } : tool)) };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
@@ -239,22 +225,17 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
     const toolUseId = request.params._meta?.['claudecode/toolUseId'];
     const startedAt = Date.now();
     try {
-      if (request.params.task && request.params.name !== 'delegate') throw new Error('only delegate supports tasks');
       const currentSession = await syncSession();
       switch (request.params.name) {
         case 'delegate': {
-          options.onTaskMode?.(request.params.task !== undefined && taskMode);
           const agent = stringArg(args, 'agent');
           const brief = stringArg(args, 'brief');
-          if (brief === undefined) {
-            if (request.params.task) throw new Error('delegate needs a brief');
-            return text('delegate needs a brief', true);
-          }
+          if (brief === undefined) return text('delegate needs a brief', true);
           const tier = stringArg(args, 'tier');
           const files = Array.isArray(args.files) ? args.files.filter((f): f is string => typeof f === 'string') : undefined;
           const expectedOutput = stringArg(args, 'expected_output');
           const wait = options.nonInteractive === true || args.wait !== false ||
-            (options.wakeDataDir !== undefined && currentSession === undefined && !request.params.task);
+            (options.wakeDataDir !== undefined && currentSession === undefined);
           // Connect first, so the parent session id is read for the resolved root.
           await service.start();
           const parentSessionId = currentSession;
@@ -269,7 +250,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           const mapped = mapRequest(agent, tier, tiers);
           if (mapped.tier.kind === 'unmatched') throw new TierError(mapped.tier.value, tiers);
           const progressToken = request.params._meta?.progressToken;
-          const reporter = (request.params.task ? args.wait === true : wait) && progressToken !== undefined
+          const reporter = wait && progressToken !== undefined
             ? new ProgressReporter(
                 agent ?? 'general',
                 (progress, message) => void extra
@@ -295,54 +276,12 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             watchSessions();
             if (state === 'Settled' || state === 'Failed' || state === 'Cancelled') setImmediate(stopWatchingIfIdle);
           };
-          if (request.params.task) {
-            try {
-              if (!extra.taskStore) throw new Error('task storage unavailable');
-              const reply = await service.delegate(delegation, {
-                wait: false,
-                ...(reporter ? { onEvent: (event) => reporter.onEvent(event) } : {}),
-                onState,
-              });
-              if (reply.kind === 'result') throw new Error('expected a live task');
-              let task;
-              try { task = await extra.taskStore.createTask({ ttl: null, pollInterval: 100 }); }
-              catch (err) { await service.cancel(reply.taskId); throw err; }
-              taskStore.bind(task.taskId, reply.taskId);
-              const store = extra.taskStore;
-              const completion = (async () => {
-                try {
-                  const result = await service.waitForCompletion(reply.taskId);
-                  if ((await store.getTask(task.taskId)).status === 'cancelled') return;
-                  const notice = result.kind === 'result' && parentSessionId !== undefined
-                    ? await service.notice(reply.taskId, result.result.status, parentSessionId, 'await') : '';
-                  const withNotice = reply.notice === undefined ? result : { ...result, notice: reply.notice };
-                  const body = `${describeReply(withNotice)}${notice ? `\n\n${notice}` : ''}`;
-                  await store.storeTaskResult(task.taskId, result.kind === 'result' && result.result.status === 'failed' ? 'failed' : 'completed', text(body));
-                  for (const t of deliveredTurns(result)) service.markDelivered(t.taskId, t.turn);
-                } finally { taskStore.release(task.taskId); }
-              })();
-              if (args.wait === true || options.nonInteractive === true) {
-                const onAbort = () => {
-                  if (Date.now() - startedAt < 120_000 && parentSessionId !== undefined) void service.cancelSession(parentSessionId);
-                  else void service.cancel(reply.taskId);
-                };
-                if (extra.signal.aborted) onAbort();
-                else extra.signal.addEventListener('abort', onAbort, { once: true });
-                try {
-                  await completion;
-                  return { task: await store.getTask(task.taskId) };
-                } finally { extra.signal.removeEventListener('abort', onAbort); }
-              }
-              void completion.catch(() => undefined);
-              return { task };
-            } finally { reporter?.stop(); }
-          }
           if (wait) {
             if (extra.signal.aborted) onAbort();
             else extra.signal.addEventListener('abort', onAbort, { once: true });
           }
 
-          const typing = wait && !request.params.task ? watchTyping(parentSessionId, startedAt, toolUseId) : NO_TYPING;
+          const typing = wait ? watchTyping(parentSessionId, startedAt, toolUseId) : NO_TYPING;
           try {
             const reply = await service.delegate(
               delegation,
@@ -500,10 +439,6 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           return text(`unknown tool ${request.params.name}`, true);
       }
     } catch (err) {
-      if (request.params.task) {
-        const result = toolError(err);
-        throw new McpError(ErrorCode.InvalidParams, result.content.map((part) => part.type === 'text' ? part.text : '').join('\n'));
-      }
       return toolError(err);
     }
   });

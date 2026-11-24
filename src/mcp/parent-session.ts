@@ -119,15 +119,14 @@ function readinessDir(dir: string, projectRoot: string): string {
 export interface ReadinessMarker {
   pid: number;
   ppid: number;
-  taskMode: boolean | null;
 }
 
-export function writeReadinessMarker(dir: string, projectRoot: string, pid: number, ppid: number, taskMode = false): void {
+export function writeReadinessMarker(dir: string, projectRoot: string, pid: number, ppid: number): void {
   const folder = readinessDir(dir, projectRoot);
   mkdirSync(folder, { recursive: true, mode: 0o700 });
   const file = path.join(folder, `${pid}.json`);
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ pid, ppid, projectRoot, taskMode, startedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify({ pid, ppid, projectRoot, startedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
   renameSync(tmp, file);
 }
 
@@ -157,9 +156,9 @@ export function liveReadinessMarkers(dir: string, projectRoot: string): Readines
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
     try {
-      const value = JSON.parse(readFileSync(path.join(folder, name), 'utf8')) as { pid?: unknown; ppid?: unknown; taskMode?: unknown };
+      const value = JSON.parse(readFileSync(path.join(folder, name), 'utf8')) as { pid?: unknown; ppid?: unknown };
       if (Number.isInteger(value.pid) && Number.isInteger(value.ppid) && isAlive(value.pid as number)) {
-        live.push({ pid: value.pid as number, ppid: value.ppid as number, taskMode: typeof value.taskMode === 'boolean' ? value.taskMode : null });
+        live.push({ pid: value.pid as number, ppid: value.ppid as number });
       }
     } catch {
       // An unreadable marker counts as absent.

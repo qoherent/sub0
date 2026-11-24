@@ -55,7 +55,7 @@ export function wordTiers(tiers: RoutableTier[]): RoutableTier[] {
 }
 
 /** The text SessionStart adds to Claude's context for these routable, tier-word tiers. */
-export function buildRoutingText(tiers: RoutableTier[], taskMode: boolean | null = false): string {
+export function buildRoutingText(tiers: RoutableTier[]): string {
   const routed = new Map(tiers.map((t) => [t.tier, t]));
   const lines = [
     'subzero routing is on for this project.',
@@ -72,11 +72,7 @@ export function buildRoutingText(tiers: RoutableTier[], taskMode: boolean | null
   }
   lines.push(
     'Pass the subagent prompt unchanged as brief. A subagent spawn that asks for a fork or for worktree isolation stays on the Agent tool and is never sent to subzero.',
-    taskMode === true
-      ? `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief) in one message; completed tasks deliver their results. Use results returned directly, and wait for every completion notice from background tasks before using their results together.`
-      : taskMode === null
-      ? `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief) in one message. If it returns a task id, collect it with ${AWAIT_TOOL}; wait for every task before using their results together.`
-      : `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
+    `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
     `A task whose result an await reply does not show must be read with ${TASKS_TOOL}(task) before it is used.`,
     'In a non-interactive or unidentified session, delegate waits and returns the result even when asked not to wait.',
     'A queued task has not launched yet: no child is running and it starts when its model has room. A task\'s launch time is its `started` time; the time it waited does not count.',
@@ -106,14 +102,13 @@ export function buildLockWarning(program: string = lockProgram()): string {
  */
 export function routingContext(
   projectRoot: string | undefined,
-  taskMode: boolean | null = false,
   lockReady: () => boolean = lockAvailable,
 ): string | undefined {
   if (projectRoot === undefined) return undefined;
   try {
     const tiers = wordTiers(routableTiers(projectRoot));
     if (tiers.length === 0) return undefined;
-    return lockReady() ? buildRoutingText(tiers, taskMode) : buildLockWarning();
+    return lockReady() ? buildRoutingText(tiers) : buildLockWarning();
   } catch (err) {
     if (err instanceof MissingAgentFileError) return undefined;
     if ((err as { code?: unknown }).code === 'load_error') {
@@ -227,13 +222,9 @@ function sweepDenyMemory(dataDir: string, now: number, keep: string): void {
 }
 
 /** The deny reason Claude sees (KTD8, KTD17). */
-export function buildDenyReason(tier: string, prompt: string, taskMode: boolean | null = false): string {
+export function buildDenyReason(tier: string, prompt: string): string {
   return [
-    taskMode === true
-      ? `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}" and brief set to this Agent call's prompt unchanged.`
-      : taskMode === null
-      ? `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}" and brief set to this Agent call's prompt unchanged. If it returns a task id, collect it with the await tool.`
-      : `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}", brief set to this Agent call's prompt unchanged, and wait: false, then collect it with the await tool.`,
+    `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}", brief set to this Agent call's prompt unchanged, and wait: false, then collect it with the await tool.`,
     'This is a routing rule, not an error; do not call Agent again for this subagent and do not change its model.',
     `Only if ${DELEGATE_TOOL} is refused or returns a tool error and made no task, call Agent again with the prompt unchanged and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails.`,
     `brief:\n${prompt}`,
@@ -283,13 +274,13 @@ export function decideAgentSpawn(spawn: SpawnInput, ctx: HookContext): HookDecis
       const hash = promptHash(prompt);
       const kept = rememberedTier(ctx.dataDir, ctx.sessionId, hash);
       if (kept !== undefined && isPassback(spawn.description)) return ALLOW;
-      if (kept !== undefined && routable.has(kept)) return { decision: 'deny', tier: kept, reason: buildDenyReason(kept, prompt, marker.taskMode) };
+      if (kept !== undefined && routable.has(kept)) return { decision: 'deny', tier: kept, reason: buildDenyReason(kept, prompt) };
 
       if (!isGenericSpawn(spawn, getRouting(ctx.projectRoot).genericAgents)) return ALLOW;
       const tier = aliasTier(spawn.model);
       if (tier === undefined || !routable.has(tier)) return ALLOW;
       remember(ctx.dataDir, ctx.sessionId, hash, tier);
-      return { decision: 'deny', tier, reason: buildDenyReason(tier, prompt, marker.taskMode) };
+      return { decision: 'deny', tier, reason: buildDenyReason(tier, prompt) };
     }) ?? ALLOW;
   } catch {
     return ALLOW;

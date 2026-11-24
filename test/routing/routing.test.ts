@@ -56,20 +56,12 @@ describe('generic spawn test', () => {
 describe('routing text', () => {
   const textFor = (root: string) => buildRoutingText(wordTiers(routableTiers(root)));
 
-  it('omits the await choreography when task mode is on', () => {
-    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), true);
-    expect(text).toMatch(/completed tasks deliver their results/i);
-    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
-    expect(text).toMatch(/one message/);
-    expect(text).toMatch(/every completion notice/);
+  it('always asks for wait false and the await loop, whether or not a readiness marker is known', () => {
+    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))));
+    expect(text).toMatch(/wait: false\) in one message/);
+    expect(text).toMatch(/timeout_s: 600/);
     expect(text).toMatch(/await reply[^\n]*not show[^\n]*tasks/i);
-  });
-
-  it('uses mode-neutral instructions when no readiness marker is known', () => {
-    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), null);
-    expect(text).toMatch(/if it returns a task id, collect it/i);
-    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
-    expect(text).toMatch(/one message/);
+    expect(text).not.toMatch(/completed tasks deliver their results|if it returns a task id/i);
   });
 
   it('AE1: with only medium configured, sends mid-tier to delegate and keeps the other tier words on Claude', () => {
@@ -160,14 +152,14 @@ describe('routingContext', () => {
 
   it('warns that routing is off, naming the utility, when the deny lock utility is missing', () => {
     const routed = project(`models:\n  tiers:\n${tier('medium', 'local/m')}`);
-    const text = routingContext(routed, false, () => false);
+    const text = routingContext(routed, () => false);
     expect(text).toMatch(/^subzero routing is off: the (lockf|flock) utility is not installed/);
     expect(text).not.toContain(DELEGATE_TOOL);
-    expect(routingContext(routed, false, () => true)).toContain('tier: "medium"');
+    expect(routingContext(routed, () => true)).toContain('tier: "medium"');
   });
 
   it('adds nothing for a project that is off, even when the deny lock utility is missing', () => {
-    expect(routingContext(project(), false, () => false)).toBeUndefined();
+    expect(routingContext(project(), () => false)).toBeUndefined();
   });
 
   it('returns nothing with no project file and no global medium', () => {

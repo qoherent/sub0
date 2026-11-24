@@ -470,8 +470,8 @@ export class DelegationService {
     };
   }
 
-  /** Every path that delivers a result to the parent marks its turn collected. A front end that delivers a result by its own path, such as an MCP task result, marks the turn here. */
-  markDelivered(taskId: string, turn: number): void {
+  /** Every path that delivers a result to the parent marks its turn collected. */
+  private markDelivered(taskId: string, turn: number): void {
     try {
       this.connected?.store.markCollected(taskId, turn);
     } catch (err) {
@@ -685,7 +685,7 @@ export class DelegationService {
    * status of the latest turn when it has not settled. `onlyNew` answers "delivered" for a
    * settled task whose result already reached the parent.
    */
-  async collect(taskId: string, options: { onlyNew?: boolean; mark?: boolean } = {}): Promise<CollectReply> {
+  async collect(taskId: string, options: { onlyNew?: boolean } = {}): Promise<CollectReply> {
     const { store } = await this.connect();
     store.sweep();
     this.dropTakenOver(store);
@@ -697,7 +697,7 @@ export class DelegationService {
     const fresh = record.turns.filter((t) => t.result !== undefined && !store.isCollected(taskId, t.turn));
     if (fresh.length > 0) {
       const results = fresh.map((turn) => this.turnResult(record.turns, turn));
-      if (options.mark !== false) for (const { result } of results) this.markDelivered(taskId, result.turn ?? 1);
+      for (const { result } of results) this.markDelivered(taskId, result.turn ?? 1);
       if (results.length === 1 && waiting === null && results[0]!.openedTurn === undefined) return { kind: 'result', result: results[0]!.result };
       return { kind: 'results', taskId, results, ...(waiting !== null ? { then: waiting } : {}) };
     }
@@ -744,14 +744,6 @@ export class DelegationService {
     clearTimeout(timer);
     // Read the task again: it may have been released while this call waited.
     return this.collect(taskId, { onlyNew: true });
-  }
-
-  /** Wait for a task owned by this process without a polling deadline. */
-  async waitForCompletion(taskId: string, options: { until?: AbortSignal } = {}): Promise<CollectReply> {
-    const live = this.registry.get(taskId);
-    if (live !== undefined) await Promise.race([live.result, untilPromise(options.until)]);
-    // An internal wait delivers nothing: the caller marks the turn collected where it delivers it.
-    return this.collect(taskId, { mark: false });
   }
 
   async cancel(taskId: string): Promise<CollectReply> {

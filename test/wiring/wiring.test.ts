@@ -135,8 +135,8 @@ agents:
     expect(out.hookSpecificOutput.hookEventName).toBe('SessionStart');
     expect(out.hookSpecificOutput.additionalContext).toContain('mcp__plugin_subzero_subzero__delegate');
     expect(out.hookSpecificOutput.additionalContext).toContain('tier: "medium"');
-    expect(out.hookSpecificOutput.additionalContext).toMatch(/if it returns a task id, collect it/i);
-    expect(out.hookSpecificOutput.additionalContext).not.toContain('wait: false');
+    expect(out.hookSpecificOutput.additionalContext).toContain('wait: false');
+    expect(out.hookSpecificOutput.additionalContext).not.toMatch(/if it returns a task id, collect it/i);
     expect(out.hookSpecificOutput.additionalContext.length).toBeLessThan(3000);
     expect(readParentSessionId(data, project, process.pid)).toBe('s-1');
   });

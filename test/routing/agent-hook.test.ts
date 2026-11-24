@@ -37,26 +37,14 @@ function setup(yaml: string | undefined, marker = true) {
 const spawnOf = (prompt: string, extra: Partial<SpawnInput> = {}): SpawnInput => ({ prompt, description: 'review things', ...extra });
 
 describe('decideAgentSpawn', () => {
-  it('uses a mode-neutral deny reason for a live marker without a task mode', () => {
+  it('ignores the task mode an older server wrote into its readiness marker: the deny reason still asks for wait false', () => {
     const { root, data, ctx } = setup(config(['medium']));
     const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
     const file = path.join(data, 'ready', key, `${process.pid}.json`);
-    const marker = JSON.parse(readFileSync(file, 'utf8'));
-    delete marker.taskMode;
-    writeFileSync(file, JSON.stringify(marker));
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), taskMode: true }));
     const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
     expect(out.decision).toBe('deny');
-    if (out.decision === 'deny') {
-      expect(out.reason).toMatch(/if it returns a task id, collect it/i);
-      expect(out.reason).not.toContain('wait: false');
-    }
-  });
-  it('omits the await choreography when the matching server has task mode on', () => {
-    const { root, data, ctx } = setup(config(['medium']), false);
-    writeReadinessMarker(data, root, process.pid, process.ppid, true);
-    const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
-    expect(out.decision).toBe('deny');
-    if (out.decision === 'deny') expect(out.reason).not.toMatch(/wait: false|collect it with the await tool/);
+    if (out.decision === 'deny') expect(out.reason).toMatch(/wait: false, then collect it with the await tool/);
   });
   it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and wait false', () => {
     const { ctx } = setup(config(['medium']));

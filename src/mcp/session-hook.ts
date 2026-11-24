@@ -6,7 +6,7 @@
 // (or a one-line warning) to Claude's context. It never blocks a session.
 import { realpathSync } from 'node:fs';
 import { ancestorPids, routingContext } from '../routing/routing.js';
-import { dataDir, liveReadinessMarkers, setting, writeParentSessionId } from './parent-session.js';
+import { dataDir, setting, writeParentSessionId } from './parent-session.js';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -28,9 +28,7 @@ try {
 let output = '';
 try {
   const root = project === undefined ? undefined : realpathSync(project);
-  const ancestors = ancestorPids();
-  const taskMode = root === undefined ? null : liveReadinessMarkers(dataDir(process.env), root).find((marker) => ancestors.has(marker.ppid))?.taskMode ?? null;
-  const context = routingContext(root, taskMode);
+  const context = routingContext(root);
   if (context !== undefined) {
     output = JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }) + '\n';
   }

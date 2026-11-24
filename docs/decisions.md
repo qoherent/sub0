@@ -435,6 +435,15 @@ refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil c
     reply says so. After a pi reload or resume, the parent's next turn carries one notice that lists the tasks a
     session end stopped and the messages that did not reach them, once. Why: a message the parent wrote must not
     vanish silently with a stopped child, and a parent that is not told cannot repeat it.
+61. **The Claude Code server offers no MCP tasks.** This replaces the MCP-task part of 30 (decided 2026-11-24). The
+    server no longer advertises the tasks capability or marks `delegate` as task-capable, and the SDK refuses a
+    task-augmented call without starting a child. `wait` defaults to true, the readiness marker holds no task mode,
+    and the routing text and deny reason always ask for `wait: false` and then `await`. A background result reaches
+    Claude only through a wake marker, so the "whatever the task mode" clauses of 54 and 55 no longer qualify
+    anything. Why: Claude Code 2.1.322 never sent the task parameter, interactive or under `claude -p`, so the branch
+    was never used. It still had to be accounted for in every v0.2 rule, and it left a waited task-mode `delegate`
+    that could not end early when the user typed. If a later Claude Code selects MCP tasks, the branch is rebuilt
+    against what that version actually does.
 
 Checked on pi 1.5.2 on 2026-11-23, with subzero's child flags and a real model: relaunching with
 `--session-id <task id>` and the same `--session-dir`, without `--session`, reopens the existing session (the child

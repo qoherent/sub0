@@ -36,6 +36,11 @@
   covered. `/subzero:init` and `/subzero init` pre-fill each model's limit with
   the old value, show the diff and write only after you confirm, repairing first
   the file that the chosen scope does not write. `init <model>` does not repair.
+- Behavior change: the Claude Code MCP server no longer offers MCP tasks.
+  Claude Code never selected them, so the branch was never used. `delegate`'s
+  `wait` defaults to true, and a background result always arrives through the
+  wake hook. The routing text and the deny reason always ask for `wait: false`
+  and then `await`.
 
 ## 0.1.0-preview.1
 

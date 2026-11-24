@@ -915,7 +915,8 @@ describe('DelegationService continue', () => {
     expect(started[0]!.cancelled).toBe(false);
     started[0]!.emit({ kind: 'prompt_sent' });
     started[0]!.settle({ lastAssistantText: 'finished later' });
-    expect(await svc.waitForCompletion(ids(reply))).toMatchObject({ kind: 'result', result: { summary: 'finished later' } });
+    await until(() => svc.runningTurn(ids(reply)) === undefined);
+    expect(await svc.collect(ids(reply))).toMatchObject({ kind: 'result', result: { summary: 'finished later' } });
   });
 
   it('waits through a held-message turn with followOn: both results, turn 2 last, both turns collected', async () => {

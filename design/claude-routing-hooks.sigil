@@ -5,7 +5,7 @@
 }
 @design/claude-mcp-server.sigil from ClaudeMcpServer import {
   readiness marker, plugin data folder, SessionStart hook, delegate tool,
-  await tool, tasks tool, deferred line, task mode, MCP task, continue tool,
+  await tool, tasks tool, deferred line, continue tool,
 }
 @design/kernel.sigil from Kernel import { parent adapter, parent host, child host }
 @design/delegation-service.sigil from DelegationService import {
@@ -176,24 +176,13 @@ component ClaudeRoutingHooks {
     Agent tool, and list every other tier word as
     staying on Claude. It must say that a subagent spawn that asks for a fork
     or for worktree isolation stays on the Agent tool and is never sent to the
-    delegate tool. While the task mode in the readiness marker is off, it must
-    tell
+    delegate tool. It must tell
     Claude to dispatch every routed subagent
     with wait false in one message and then call the await tool with every
     task id
     and up to 600 seconds until every task is done. A non-interactive server
     waits even for wait false and returns the result in that delegate call.
-    While the task mode is on,
-    it
-    must tell Claude to dispatch every routed subagent in one message without
-    asking to wait, so that each becomes an MCP task, and to wait for every
-    completion notice before it uses the results together. While the
-    readiness marker is absent or holds no task mode, it must tell Claude to
-    dispatch every
-    routed subagent in one message without asking to wait, and to collect a
-    task id
-    that comes back with the await tool, so that the wording works in both
-    modes. It must say that a
+    It must say that a
     queued task has not launched yet and that a task's launch time is its
     start time, and that when the delegate tool is refused or returns a
     tool error
@@ -214,9 +203,7 @@ component ClaudeRoutingHooks {
 
     The deny reason must name the delegate tool by its full name
     mcp__plugin_subzero_subzero__delegate, the model tier as tier, the prompt
-    unchanged as the brief text, and wait false while the task mode is off, the
-    same neutral wording as the routing text while the readiness marker holds
-    no task mode,
+    unchanged as the brief text, and wait false,
     and it must say that this is a routing rule and not an error, and that
     Claude
     must not call Agent again for this subagent or change its model, except
@@ -344,11 +331,8 @@ component ClaudeRoutingHooks {
     that carry a tier word.
 
     At a SessionStart with no readiness marker, the routing text tells Claude
-    to
-    dispatch without asking to wait and to collect any task id with the
-    await tool,
-    and the next SessionStart after the server wrote its task mode uses the
-    wording of that task mode.
+    to dispatch with wait false and collect every task id with the await tool,
+    the same wording as when a readiness marker is found.
 
     With only the model tier medium configured, the routing text sends mid-tier
     work to delegate with the model tier medium and says that cheapest capable
@@ -465,9 +449,7 @@ component ClaudeRoutingHooks {
     The general agent runs with write and shell tools inside its child host,
     outside the permission prompts of the Claude Code parent host, which the
     user
-    accepted so that compound-engineering reviewers keep full fidelity. The
-    routing text reads the task mode from the readiness marker because a hook
-    process cannot see what Claude Code advertised to the server.
+    accepted so that compound-engineering reviewers keep full fidelity.
 
     Two limits are known and left open. The hook input carries the permission
     mode of the session, which the hook does not read, so a generic spawn made

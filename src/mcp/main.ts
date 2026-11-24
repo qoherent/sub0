@@ -40,12 +40,11 @@ const data = dataDir(env);
 // project: written once the project root resolves, removed on exit. A killed server
 // leaves a marker whose pid is dead, which counts as absent.
 let markedRoot: string | undefined;
-let readyTaskMode = false;
 function markReady(): void {
   const root = service.projectRoot;
   if (root === undefined || markedRoot !== undefined) return;
   try {
-    writeReadinessMarker(data, root, process.pid, process.ppid, readyTaskMode);
+    writeReadinessMarker(data, root, process.pid, process.ppid);
     markedRoot = root;
   } catch {
     // Without a marker the hook lets every spawn through, which is the safe side.
@@ -66,19 +65,6 @@ server = createSubzeroServer({
   version,
   wakeDataDir: data,
   nonInteractive,
-  taskMode: !nonInteractive,
-  onTaskMode: (enabled) => {
-    if (readyTaskMode === enabled) return;
-    if (markedRoot !== undefined) {
-      try { writeReadinessMarker(data, markedRoot, process.pid, process.ppid, enabled); }
-      catch {
-        // A stale task-mode marker is unsafe; remove it so routing fails open.
-        try { removeReadinessMarker(data, markedRoot, process.pid); } catch {}
-        markedRoot = undefined;
-      }
-    }
-    readyTaskMode = enabled;
-  },
   parentSessionId: () => {
     markReady(); // a root that resolved later, through a reported root, is marked on the next call
     return readParentSessionId(data, service.projectRoot, process.ppid);

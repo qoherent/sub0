@@ -153,30 +153,18 @@ component ClaudeMcpServer {
     tool result limit, the first section always, or else its deferred line. The
     flow ends there.
 
-    When the *task mode* is on, a delegate call that does not set wait to true
-    is answered with an *MCP task* instead of a task id. The server keeps a
-    *MCP task store* backed by DelegationService: creating the MCP task makes the
-    delegation without waiting, a status request answers working until the task
-    settles, and the completed MCP task gives the whole result text and the
-    completion notice, which names the await tool as its collect tool, or the
-    stop notice for a task that was stopped. A status update to cancelled from
-    Claude Code cancels that one task through DelegationService, which ends the
-    flow. Each MCP task is kept until its parent session id changes or the
-    server
-    exits.
-
-    When the client does not select MCP tasks, the wake marker for a
-    background delegation records its parent session id and task id in the
-    plugin data folder. When that child finishes, the server records its
-    result text and completion notice in the wake marker. Collecting the result
+    The wake marker for a background delegation records its parent session id
+    and task id in the plugin data folder. When that child finishes, the
+    server records its result text and completion notice, which names the
+    await tool as its collect tool, in the wake marker. Collecting the result
     removes its wake marker, so it cannot also wake Claude for an already
     collected result.
     A cancelled child removes its wake marker without waking Claude.
 
     When a turn of a task of this server opens for held follow-up messages,
     with no call that waits for it, record a wake marker for that turn with
-    its parent session id, task id and turn number, whatever the task mode,
-    because no MCP task exists for it. The server receives such a turn through the
+    its parent session id, task id and turn number. The server receives such
+    a turn through the
     notice sink that it registers with DelegationService. When that turn settles,
     record its
     result text and completion notice in the wake marker, so that the wake
@@ -191,7 +179,7 @@ component ClaudeMcpServer {
     status line and say that the user sent a message, and the await call
     returns the status line of each task it waited for that has not settled,
     which ends that flow. A task whose waited call ended this way is followed
-    through a wake marker, whatever the task mode, like a background
+    through a wake marker, like a background
     delegation, which ends that flow. With no known parent session id the
     server watches no prompt marker and the call waits. The server finds the
     call marker of a waited call by the tool-use id that Claude Code gives it as
@@ -219,11 +207,10 @@ component ClaudeMcpServer {
     On a continue call, make a continuation with its task id, its
     follow-up message, the parent session id of the caller and its wait, which
     defaults to true and is forced to true where the wait of a delegate call
-    is. A continue call is never answered with an MCP task, whatever the
-    task mode: return the delivery outcome with the status line at once, or
+    is. Return the delivery outcome with the status line at once, or
     the result text of the new turn when the call waits for it, which ends the
     flow. A new turn that the call does not wait for is followed through a
-    wake marker for that turn, whatever the task mode, which ends that
+    wake marker for that turn, which ends that
     flow. A continue call that waits
     sends a progress notification as a waited delegate call does, and a
     cancel of it by Claude Code within 120 seconds runs a session cancel for
@@ -340,12 +327,10 @@ component ClaudeMcpServer {
     argument must list every task and say that the conversation could not be
     identified.
 
-    The task mode must be on only while Claude Code advertises MCP task support
-    for the call and the session is interactive, because a background result is
-    lost when a non-interactive Claude Code exits. The server must write the
-    task mode into its readiness marker, so that the routing text and the
-    deny reason say how to dispatch for the mode in use. A delegate call that
-    sets wait to true must wait in either task mode.
+    The server must not offer an *MCP task* for any call, and must refuse a
+    call that asks for one without starting a child, because a background
+    result reaches
+    Claude through a wake marker.
 
     The cancel tool must accept a call with no task id that runs a
     session cancel
@@ -464,11 +449,6 @@ component ClaudeMcpServer {
     tier text runs the general agent on its medium tier even when large is
     configured.
 
-    With the task mode on, two delegate calls that set no wait each return an
-    MCP task. When the first settles, its completed MCP task gives the
-    completion notice, which names the second task as still running and says to
-    wait for it.
-
     With one waited call of the await tool and two background tasks running, a
     cancel of that call within 120 seconds runs a session cancel that ends both
     tasks as cancelled, and a cancel of the same call after 120 seconds ends
@@ -484,7 +464,7 @@ component ClaudeMcpServer {
     running ends as cancelled.
 
     In a non-interactive Claude Code session, a delegate call waits and returns
-    the result even when it sets wait false or advertises MCP task support.
+    the result even when it sets wait false.
 
     With a waited delegate call on a live task, a message that the user types
     writes the prompt marker, the call returns the task id with its status line
@@ -499,14 +479,14 @@ component ClaudeMcpServer {
     A continue call for a running task of this conversation returns steered
     with its status line, and the task's later result is collected as before.
     A continue call with wait false for a task of this conversation that
-    settled returns new turn with its status line at once, also with the
-    task mode on, and the wake marker of that turn later gives the
+    settled returns new turn with its status line at once, and the wake
+    marker of that turn later gives the
     result text, which names turn 2.
 
     A continue call for a task of another conversation returns not delivered
     with the first line of its result text and repeats no result.
 
-    With the task mode on, a continue call for a task whose child run is
+    A continue call for a task whose child run is
     Pending returns queued. When that child run settles before the held
     message is delivered, a turn opens for it, a wake marker records that
     turn, and when it settles the wake hook wakes Claude with its result text,
@@ -517,9 +497,8 @@ component ClaudeMcpServer {
     Let the *delegate tool*, mcp__plugin_subzero_subzero__delegate, accept a
     call with an optional agent name, an optional model tier written as medium
     or tier:medium, a brief text, optional files, an optional expected output
-    and an optional wait that defaults to true while the task mode is off and
-    to
-    false while the task mode is on. In a non-interactive or unknown mode it
+    and an optional wait that defaults to true. In a non-interactive or
+    unknown mode it
     waits even when wait is false. Return the result with the task id first.
 
     Record the parent session id of each conversation through the
@@ -563,12 +542,6 @@ component ClaudeMcpServer {
     imports
     and registers the child drivers that process needs.
 
-    Answer a delegate call that does not set wait to true with an MCP task
-    while
-    the
-    task mode is on, and give its completed MCP task the whole result text and
-    the completion notice.
-
     Let the cancel tool run a session cancel for the current parent session id
     when it names no task id.
 
@@ -585,8 +558,9 @@ component ClaudeMcpServer {
   }
 
   decisions {
-    If the client does not select MCP tasks, the wake marker gives the
-    ClaudeRoutingHooks wake hook a way to report completion without reading the
+    The server offers no MCP tasks, because Claude Code 2.1.322 never selected
+    them, so the wake marker gives the ClaudeRoutingHooks wake hook a way to
+    report completion without reading the
     task store.
 
     Only delegate and await are always loaded, so that a parent model can
