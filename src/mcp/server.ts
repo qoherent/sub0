@@ -10,7 +10,7 @@ import { isTaskId } from '../core/ids.js';
 import type { ChildRunState } from '../core/types.js';
 import { UnsupportedHostError } from '../kernel/kernel.js';
 import { EmptyBriefError, type DelegationService } from '../service/delegation-service.js';
-import { describeContinueReply } from '../service/status-text.js';
+import { describeContinueReply, pendingOf } from '../service/status-text.js';
 import { deliveredTurns, describeReply, formatAwaitWithShown, formatListing, REPLY_BUDGET_CHARS } from './format.js';
 import { readCallMarker, readPromptMarker } from './parent-session.js';
 import { ProgressReporter, type ProgressOptions } from './progress.js';
@@ -125,6 +125,9 @@ function toolError(err: unknown): CallToolResult {
   return text(`subzero failed: ${(err as Error)?.message ?? String(err)}`, true);
 }
 
+/** The typing watch of a call that no typed message may end. */
+const NO_TYPING: { signal?: AbortSignal; stop: () => void } = { stop() {} };
+
 function stringArg(args: Record<string, unknown>, key: string): string | undefined {
   return typeof args[key] === 'string' ? (args[key] as string) : undefined;
 }
@@ -168,12 +171,15 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
   const watchTyping = (session: string | undefined, startedAtMs: number, toolUseId: unknown): { signal?: AbortSignal; stop: () => void } => {
     const dir = options.wakeDataDir;
     const root = service.projectRoot;
-    if (dir === undefined || root === undefined || session === undefined || typeof toolUseId !== 'string') return { stop() {} };
+    if (dir === undefined || root === undefined || session === undefined || typeof toolUseId !== 'string') return NO_TYPING;
     const controller = new AbortController();
+    // Once the call marker is found it never changes: a subagent call can never end, so polling stops.
+    let call: ReturnType<typeof readCallMarker>;
     const timer = setInterval(() => {
       try {
-        const call = readCallMarker(dir, root, toolUseId);
-        if (call === undefined || call.agentId !== undefined) return;
+        call ??= readCallMarker(dir, root, toolUseId);
+        if (call === undefined) return;
+        if (call.agentId !== undefined) { clearInterval(timer); return; }
         const at = readPromptMarker(dir, root, session);
         if (at !== undefined && at > startedAtMs) { controller.abort(); clearInterval(timer); }
       } catch { /* An unreadable marker never ends a wait. */ }
@@ -230,6 +236,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    const toolUseId = request.params._meta?.['claudecode/toolUseId'];
     const startedAt = Date.now();
     try {
       if (request.params.task && request.params.name !== 'delegate') throw new Error('only delegate supports tasks');
@@ -335,7 +342,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             else extra.signal.addEventListener('abort', onAbort, { once: true });
           }
 
-          const typing = wait && !request.params.task ? watchTyping(parentSessionId, startedAt, request.params._meta?.['claudecode/toolUseId']) : { stop() {} };
+          const typing = wait && !request.params.task ? watchTyping(parentSessionId, startedAt, toolUseId) : NO_TYPING;
           try {
             const reply = await service.delegate(
               delegation,
@@ -393,7 +400,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           };
           if (extra.signal.aborted) onAbort();
           else extra.signal.addEventListener('abort', onAbort, { once: true });
-          const typing = watchTyping(currentSession, startedAt, request.params._meta?.['claudecode/toolUseId']);
+          const typing = watchTyping(currentSession, startedAt, toolUseId);
           let replies;
           try { replies = await Promise.all(ids.map((id) => service.waitFor(id, seconds * 1000, typing.signal ? { until: typing.signal } : {}))); }
           finally { extra.signal.removeEventListener('abort', onAbort); typing.stop(); }
@@ -410,8 +417,8 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           const endedEarly = typing.signal?.aborted === true;
           if (endedEarly && currentSession !== undefined) {
             for (const reply of replies) {
-              const pending = reply.kind === 'results' ? reply.then : reply;
-              if (pending !== undefined && (pending.kind === 'running' || pending.kind === 'queued')) {
+              const pending = pendingOf(reply);
+              if (pending !== undefined) {
                 const turn = service.runningTurn(pending.taskId);
                 if (turn !== undefined) try { armWake(currentSession, pending.taskId, turn); } catch {}
               }
@@ -441,7 +448,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
             if (extra.signal.aborted) onAbort();
             else extra.signal.addEventListener('abort', onAbort, { once: true });
           }
-          const typing = wait ? watchTyping(currentSession, startedAt, request.params._meta?.['claudecode/toolUseId']) : { stop() {} };
+          const typing = wait ? watchTyping(currentSession, startedAt, toolUseId) : NO_TYPING;
           // A waited continue reports progress as a waited delegate does.
           const progressToken = request.params._meta?.progressToken;
           const reporter = wait && progressToken !== undefined

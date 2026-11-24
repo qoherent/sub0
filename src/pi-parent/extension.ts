@@ -6,7 +6,7 @@ import { configuredTierNames } from '../config/agent-config.js';
 import { TIER_WORDS } from '../config/tier-words.js';
 import type { Kernel } from '../kernel/kernel.js';
 import type { DelegationService, TaskListing } from '../service/delegation-service.js';
-import { describeContinueReply, describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
+import { describeContinueReply, describeTaskReply, listingStatus, pendingOf, withNotice } from '../service/status-text.js';
 import { INIT_SYNTAX, registerPiInit } from './init.js';
 import { mapPiRequest } from './request.js';
 import { sendCompletion, sendReloadReport, sendStopped } from './notices.js';
@@ -65,7 +65,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     if (done === undefined) return;
     void done.then(async (settled) => {
       if (settled.status === 'cancelled' || activeSession.closed) return;
-      const notice = await svc.notice(taskId, settled.status, parentSessionId, 'subzero_await', turn);
+      const notice = await svc.notice(taskId, settled.status, parentSessionId, names.collect, turn);
       if (!activeSession.closed) sendCompletion(pi, notice);
     }).catch(() => {});
   };
@@ -104,7 +104,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
     const svc = service;
     stopNotices = svc.onNotice((notice) => {
       if (notice.phase !== 'settled' || notice.parentSessionId !== sessionId || notice.result.status === 'cancelled' || activeSession.closed) return;
-      void svc.notice(notice.taskId, notice.result.status, sessionId, 'subzero_await', notice.turn).then((text) => {
+      void svc.notice(notice.taskId, notice.result.status, sessionId, names.collect, notice.turn).then((text) => {
         if (!activeSession.closed) sendCompletion(pi, text);
       });
     });
@@ -218,8 +218,8 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
           if (typing.ended()) {
             text += `\n\n${TYPED_NOTE}`;
             for (const reply of replies) {
-              const pending = reply.kind === 'results' ? reply.then : reply;
-              if (pending !== undefined && (pending.kind === 'running' || pending.kind === 'queued')) {
+              const pending = pendingOf(reply);
+              if (pending !== undefined) {
                 const turn = svc.runningTurn(pending.taskId);
                 if (turn !== undefined) notifyWhenSettled(svc, pending.taskId, turn, sessionId);
               }
@@ -294,7 +294,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         const wasLive = (await svc.listLiveSession(sessionId)).some((task) => task.taskId === args.task);
         const reply = await svc.cancel(args.task);
         if (wasLive && reply.kind === 'result' && reply.result.status === 'cancelled' && !session.closed) {
-          sendStopped(pi, await svc.notice(args.task, 'cancelled', sessionId, 'subzero_await'));
+          sendStopped(pi, await svc.notice(args.task, 'cancelled', sessionId, names.collect));
         }
         return describe(reply);
       });
@@ -338,7 +338,7 @@ export function registerPiExtension(pi: ExtensionAPI, createService: (ctx: Exten
         if (!live) { ctx.ui.notify(`task ${id} not found among this session's running tasks`); return; }
         const reply = await svc.cancel(id);
         if (reply.kind === 'result' && reply.result.status === 'cancelled') {
-          sendStopped(pi, await svc.notice(id, 'cancelled', sessionId, 'subzero_await'));
+          sendStopped(pi, await svc.notice(id, 'cancelled', sessionId, names.collect));
           ctx.ui.notify('1 subzero task cancelled');
         } else ctx.ui.notify(describe(reply));
         return;

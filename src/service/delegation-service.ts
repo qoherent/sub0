@@ -9,13 +9,14 @@ import {
   resolveProjectRoot,
   UnknownAgentError,
   UnresolvedRootError,
+  type AgentCatalog,
   type AgentDefinition,
   type RootSources,
 } from '../config/agent-config.js';
 import { Task, TaskCore, type Turn } from '../core/task-core.js';
 import { ENDED_STATES, type ChildHostOptions, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
 import type { Kernel } from '../kernel/kernel.js';
-import { TaskStore, type StopReason, type TaskRecord, type TaskStoreOptions, type TaskView, type TurnFile } from '../store/task-store.js';
+import { TaskStore, type LoggedEvent, type StopReason, type TaskRecord, type TaskStoreOptions, type TaskView, type TurnFile } from '../store/task-store.js';
 import { completionNotice, formatResult, formatStatusLine, statusFacts, stopNotice } from './status-text.js';
 
 /** The request of a front end. */
@@ -181,7 +182,10 @@ export class ModelLimiter {
     const stop = turn.onStateChange((state) => {
       if (state === 'Pending') return;
       stop();
-      if (state === 'Cancelled' && queue.includes(turn)) queue.splice(queue.indexOf(turn), 1);
+      if (state === 'Cancelled' && queue.includes(turn)) {
+        queue.splice(queue.indexOf(turn), 1);
+        this.models.delete(turn);
+      }
     });
     this.drain(model);
   }
@@ -357,11 +361,15 @@ export class DelegationService {
     }
   }
 
+  /** The agent file of the project, with the starter agents of the registry's hosts. */
+  private loadCatalog(projectRoot: string): AgentCatalog {
+    return loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
+  }
+
   /** The limit of the model of a task at its next admission: the agent file's now, else the one it was delegated with. */
-  private limitFor(task: Task): number | null {
-    const { projectRoot } = this.connected!;
+  private limitFor(task: Task, loaded?: AgentCatalog): number | null {
     try {
-      return loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) }).limits.get(task.agent.model) ?? null;
+      return (loaded ?? this.loadCatalog(this.connected!.projectRoot)).limits.get(task.agent.model) ?? null;
     } catch {
       return task.agent.parallel;
     }
@@ -387,14 +395,7 @@ export class DelegationService {
       ...(delegation.parentSessionId !== undefined ? { parentSessionId: delegation.parentSessionId } : {}),
     });
     const turn = task.latest;
-    this.track(task, turn, delegation.parentSessionId);
-    if (options.onEvent) turn.onEvent(options.onEvent);
-    if (options.onState) turn.onStateChange(options.onState);
-    if (options.signal) this.cancelOnAbort(task, turn, options.signal);
-    this.limiter.admit(turn, agent.model, agent.parallel);
-    options.onTask?.(task.taskId);
-    // Only a run the limiter kept back is reported as Pending.
-    if (turn.state === 'Pending') options.onState?.('Pending');
+    this.attachTurn(task, turn, options, agent.parallel, delegation.parentSessionId);
 
     const flags = {
       ...(notice !== undefined ? { notice } : {}),
@@ -405,8 +406,28 @@ export class DelegationService {
     return withFlags(await this.waitTurn(task, turn, options));
   }
 
+  /**
+   * Put a turn a call opened under the service: track it, hook the call's listeners and abort signal,
+   * admit it to the limiter, tell the caller its task id, and report it Pending only when the limiter kept it back.
+   */
+  private attachTurn(
+    task: Task,
+    turn: Turn,
+    options: Pick<DelegateOptions, 'onEvent' | 'onState' | 'signal' | 'onTask'>,
+    limit: number | null,
+    parentSessionId: string | undefined,
+  ): void {
+    this.track(task, turn, parentSessionId);
+    if (options.onEvent) turn.onEvent(options.onEvent);
+    if (options.onState) turn.onStateChange(options.onState);
+    if (options.signal) this.cancelOnAbort(turn, options.signal);
+    this.limiter.admit(turn, task.agent.model, limit);
+    options.onTask?.(task.taskId);
+    if (turn.state === 'Pending') options.onState?.('Pending');
+  }
+
   /** Aborting the signal cancels the turn, and the listener goes once the turn has a result. */
-  private cancelOnAbort(task: Task, turn: Turn, signal: AbortSignal): void {
+  private cancelOnAbort(turn: Turn, signal: AbortSignal): void {
     const onAbort = () => void turn.cancel();
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
@@ -424,7 +445,7 @@ export class DelegationService {
       const outcome = await Promise.race([turn.result, untilPromise(options.until)]);
       if (outcome === UNTIL) return this.liveReply(task);
       results.push(outcome);
-      this.markCollected(task.taskId, outcome);
+      this.markDelivered(task.taskId, outcome.turn ?? 1);
       const next = task.latest !== turn && options.followOn === true ? task.latest : undefined;
       if (next === undefined) break;
       turn = next;
@@ -439,12 +460,7 @@ export class DelegationService {
     };
   }
 
-  /** Every path that delivers a result to the parent marks its turn collected. */
-  private markCollected(taskId: string, result: Result): void {
-    this.markDelivered(taskId, result.turn ?? 1);
-  }
-
-  /** A front end that delivers a result by its own path, such as an MCP task result, marks the turn here. */
+  /** Every path that delivers a result to the parent marks its turn collected. A front end that delivers a result by its own path, such as an MCP task result, marks the turn here. */
   markDelivered(taskId: string, turn: number): void {
     try {
       this.connected?.store.markCollected(taskId, turn);
@@ -478,7 +494,7 @@ export class DelegationService {
     projectRoot: string,
     delegation: Delegation,
   ): { agent: AgentDefinition; tier: string; childHostOptions: ChildHostOptions; notice?: string } {
-    const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
+    const catalog = this.loadCatalog(projectRoot);
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, '').trim();
     const options = { supportedHosts, ...(tier !== undefined && tier !== '' ? { tier } : {}) };
@@ -582,9 +598,10 @@ export class DelegationService {
     }
 
     // Steering and holding use the frozen record; only a turn that opens needs the configuration.
+    let catalog: AgentCatalog | undefined;
     if (ENDED_STATES.has(task.state)) {
       try {
-        const catalog = loadAgentFile(this.connected!.projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
+        catalog = this.loadCatalog(this.connected!.projectRoot);
         task.setChildHostOptions(catalog.childHostOptions[task.agent.host] ?? {});
       } catch (err) {
         return refuse(`the configuration does not load, so no new turn was opened: ${(err as Error).message}`);
@@ -606,12 +623,7 @@ export class DelegationService {
         return { kind: reply.outcome, taskId, turn: task.latest.number };
       case 'new_turn': {
         const turn = reply.turn!;
-        this.track(task, turn, parentSessionId);
-        if (options.onEvent) turn.onEvent(options.onEvent);
-        if (options.onState) turn.onStateChange(options.onState);
-        if (options.signal) this.cancelOnAbort(task, turn, options.signal);
-        this.limiter.admit(turn, task.agent.model, this.limitFor(task));
-        if (turn.state === 'Pending') options.onState?.('Pending');
+        this.attachTurn(task, turn, options, this.limitFor(task, catalog), parentSessionId);
         const status: DelegateReply = options.wait ? await this.waitTurn(task, turn, options) : this.liveReply(task);
         return { kind: 'new_turn', taskId, turn: turn.number, ...(reply.replayed !== undefined ? { replayed: reply.replayed } : {}), status };
       }
@@ -629,8 +641,10 @@ export class DelegationService {
 
   /** A task of this process whose latest turn another process now owns is read from the task record, not held here. */
   private dropTakenOver(store: TaskStore): void {
-    for (const taskId of [...this.registry.keys()]) {
-      const owner = store.latestTurn(taskId)?.owner;
+    for (const [taskId, task] of [...this.registry]) {
+      // A turn of this process that has not settled is ours; only a settled one can have been taken over.
+      if (task.settledResult === undefined) continue;
+      const owner = store.latestTurnOwner(taskId);
       if (owner !== null && owner !== undefined && !store.isOwner(owner)) this.registry.delete(taskId);
     }
   }
@@ -659,10 +673,10 @@ export class DelegationService {
     if (record === null) return { kind: 'not_found', taskId };
     const latestTurn = record.turns[record.turns.length - 1];
     const waiting = this.latestStatus(taskId, live, record);
-    const fresh = store.uncollectedTurns(taskId);
+    const fresh = record.turns.filter((t) => t.result !== undefined && !store.isCollected(taskId, t.turn));
     if (fresh.length > 0) {
       const results = fresh.map((turn) => this.turnResult(record.turns, turn));
-      if (options.mark !== false) for (const { result } of results) this.markCollected(taskId, result);
+      if (options.mark !== false) for (const { result } of results) this.markDelivered(taskId, result.turn ?? 1);
       if (results.length === 1 && waiting === null && results[0]!.openedTurn === undefined) return { kind: 'result', result: results[0]!.result };
       return { kind: 'results', taskId, results, ...(waiting !== null ? { then: waiting } : {}) };
     }
@@ -679,7 +693,7 @@ export class DelegationService {
   }
 
   /** The state of the latest turn when it has no result: running, queued, abandoned or in another process. */
-  private latestStatus(taskId: string, live: Task | undefined, record: NonNullable<ReturnType<TaskStore['readTask']>>): CollectReply | null {
+  private latestStatus(taskId: string, live: Task | undefined, record: TaskRecord): CollectReply | null {
     if (record.result !== null) return null;
     if (live !== undefined && live.settledResult === undefined) {
       const reply = this.liveReply(live);
@@ -755,16 +769,14 @@ export class DelegationService {
     for (const view of store.list(parentSessionId)) {
       const record = store.readTask(view.taskId);
       if (record === null) continue;
-      const events = store.readEvents(view.taskId);
+      let events: LoggedEvent[] | undefined;
       const latest = record.turns[record.turns.length - 1];
       for (const turn of record.turns) {
         const abandoned = turn === latest && turn.result === undefined && record.status === 'abandoned';
         if (turn.stopReason !== 'session_end' && !abandoned) continue;
         if (store.isReported(view.taskId, turn.turn)) continue;
-        const prompted = events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn);
-        const lost = prompted
-          ? []
-          : [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []))];
+        events ??= store.readEvents(view.taskId);
+        const lost = store.undeliveredMessages(view.taskId, turn, events);
         const named = turn.turn >= 2 ? `${view.taskId} (turn ${turn.turn})` : view.taskId;
         lines.push(`- ${named} · ${view.agent} · stopped${lost.length > 0 ? `; it never received ${lost.map((m) => JSON.stringify(m)).join(', ')}` : ''}`);
         try {

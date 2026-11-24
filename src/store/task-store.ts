@@ -70,16 +70,7 @@ export interface TurnFile {
 export type LoggedEvent = DomainEvent & { ts: string; turn?: number };
 
 /** What the caller gives when it opens a turn. */
-export interface OpenedTurn {
-  /** Set when held messages opened the turn, with no call of the caller behind it. */
-  viaHeld?: true;
-  message?: string;
-  replayed?: string[];
-  heldMessages?: string[];
-  /** Set when the turn is released with the brief as its prompt. */
-  briefPrompt?: true;
-  enqueuedAt: string;
-}
+export type OpenedTurn = Pick<TurnFile, 'viaHeld' | 'message' | 'replayed' | 'heldMessages' | 'briefPrompt' | 'enqueuedAt'>;
 
 export interface IndexLine {
   taskId: string;
@@ -212,8 +203,13 @@ export interface TaskRecordWriter {
   writeLaunchSpec(taskId: string, spec: LaunchSpec): void;
   /** Append a domain event to the event log, marked with its turn when it has one. */
   appendEvent(taskId: string, event: DomainEvent, turn?: number): void;
-  /** Every event of the log, oldest first, each with its turn when it was written with one. */
-  readEvents(taskId: string): LoggedEvent[];
+  /**
+   * Every event of the log, oldest first, each with its turn when it was written with one. With
+   * `kinds`, lines that cannot hold an event of one of those kinds are skipped before they are parsed.
+   */
+  readEvents(taskId: string, kinds?: LoggedEvent['kind'][]): LoggedEvent[];
+  /** The messages of a turn that no child run received, in order; none when its prompt was sent. */
+  undeliveredMessages(taskId: string, turn: TurnFile, events: LoggedEvent[]): string[];
   /** True when a child of the task was ever sent a prompt, so the task has a child session. */
   promptWasSent(taskId: string): boolean;
   /** Write the result of a turn (`extra.turn`, else the result's turn, else 1), then its index line. */
@@ -221,6 +217,8 @@ export interface TaskRecordWriter {
   exists(taskId: string): boolean;
   /** Every turn file of a task, oldest first. */
   readTurns(taskId: string): TurnFile[];
+  /** One turn file; null when there is none. */
+  readTurn(taskId: string, turn: number): TurnFile | null;
   /** Read a task record, so a task of another process can be loaded and continued. */
   readTask(taskId: string): TaskRecord | null;
 }
@@ -361,7 +359,7 @@ export class TaskStore implements TaskRecordWriter {
       updatedAt: new Date().toISOString(),
       turn,
       enqueuedAt: opened.enqueuedAt,
-      ...(first?.owner === undefined || first.owner.pid !== this.owner.pid || first.owner.startTime !== this.owner.startTime ? { owner: this.owner } : {}),
+      ...(first?.owner === undefined || !this.isOwner(first.owner) ? { owner: this.owner } : {}),
     });
     return true;
   }
@@ -389,33 +387,38 @@ export class TaskStore implements TaskRecordWriter {
   // ---- collected markers ---------------------------------------------------
 
   private collectedPath(taskId: string, turn: number): string {
-    return path.join(this.taskDir(taskId), 'turns', `${turn}.collected`);
+    return this.markerPath(taskId, turn, 'collected');
+  }
+
+  private markerPath(taskId: string, turn: number, ext: 'collected' | 'reported'): string {
+    return path.join(this.taskDir(taskId), 'turns', `${turn}.${ext}`);
+  }
+
+  /** Create an empty marker file unless it exists. A marker is never removed or rewritten. */
+  private markOnce(taskId: string, turn: number, ext: 'collected' | 'reported'): void {
+    try {
+      writeFileSync(this.markerPath(taskId, turn, ext), '', { flag: 'wx', mode: 0o600 });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+
+  private hasMarker(taskId: string, turn: number, ext: 'collected' | 'reported'): boolean {
+    return existsSync(this.markerPath(taskId, turn, ext));
   }
 
   /** Mark that the result of a turn reached the parent. A marker is never removed or rewritten. */
   markCollected(taskId: string, turn: number): void {
-    try {
-      writeFileSync(this.collectedPath(taskId, turn), '', { flag: 'wx', mode: 0o600 });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
-  }
-
-  private reportedPath(taskId: string, turn: number): string {
-    return path.join(this.taskDir(taskId), 'turns', `${turn}.reported`);
+    this.markOnce(taskId, turn, 'collected');
   }
 
   /** Mark that a stopped turn was named in a reload report. A marker is never removed. */
   markReported(taskId: string, turn: number): void {
-    try {
-      writeFileSync(this.reportedPath(taskId, turn), '', { flag: 'wx', mode: 0o600 });
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-    }
+    this.markOnce(taskId, turn, 'reported');
   }
 
   isReported(taskId: string, turn: number): boolean {
-    return existsSync(this.reportedPath(taskId, turn));
+    return this.hasMarker(taskId, turn, 'reported');
   }
 
   /** Where the collected marker of a turn lives, so a front end can name it for another process to create. */
@@ -424,7 +427,7 @@ export class TaskStore implements TaskRecordWriter {
   }
 
   isCollected(taskId: string, turn: number): boolean {
-    return existsSync(this.collectedPath(taskId, turn));
+    return this.hasMarker(taskId, turn, 'collected');
   }
 
   /** The turns that hold a result no path has delivered to the parent yet, oldest first. */
@@ -444,15 +447,17 @@ export class TaskStore implements TaskRecordWriter {
     appendFileSync(path.join(this.taskDir(taskId), 'events.jsonl'), line, { mode: 0o600 });
   }
 
-  readEvents(taskId: string): LoggedEvent[] {
+  readEvents(taskId: string, kinds?: LoggedEvent['kind'][]): LoggedEvent[] {
     let text: string;
     try {
       text = readFileSync(path.join(this.taskDir(taskId), 'events.jsonl'), 'utf8');
     } catch {
       return [];
     }
+    const needles = kinds?.map((kind) => `"kind":"${kind}"`);
     return text.split('\n').flatMap((raw) => {
       if (raw.trim() === '') return [];
+      if (needles !== undefined && !needles.some((needle) => raw.includes(needle))) return [];
       try {
         return [JSON.parse(raw) as LoggedEvent];
       } catch {
@@ -468,9 +473,20 @@ export class TaskStore implements TaskRecordWriter {
    * before the prompt.
    */
   promptWasSent(taskId: string): boolean {
-    if (this.readEvents(taskId).some((e) => e.kind === 'prompt_sent')) return true;
+    if (this.readEvents(taskId, ['prompt_sent']).some((e) => e.kind === 'prompt_sent')) return true;
     if (this.readTurn(taskId, 1)?.owner != null) return false;
     return this.findSessionFile(taskId) !== undefined;
+  }
+
+  /**
+   * The messages of a turn that no child run received, in the order they were given: those the turn
+   * file records, then the follow-ups the log shows queued for it. None once the turn sent its
+   * prompt; `events` is the log of the task.
+   */
+  undeliveredMessages(taskId: string, turn: TurnFile, events: LoggedEvent[]): string[] {
+    if (events.some((e) => e.kind === 'prompt_sent' && e.turn === turn.turn)) return [];
+    const queued = events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === turn.turn && e.outcome === 'queued' ? [e.text] : []));
+    return [...(turn.replayed ?? []), ...(turn.message !== undefined ? [turn.message] : []), ...(turn.heldMessages ?? []), ...queued];
   }
 
   /** Write the result in one step, and only then the index line that gives its status. */
@@ -553,16 +569,20 @@ export class TaskStore implements TaskRecordWriter {
     return null;
   }
 
-  /** Every turn file of a task, oldest first. */
-  readTurns(taskId: string): TurnFile[] {
+  /** The numbers of the turn files of a task, ascending. */
+  private turnNumbers(taskId: string): number[] {
     let names: string[];
     try {
       names = readdirSync(path.join(this.taskDir(taskId), 'turns'));
     } catch {
       return [];
     }
-    const numbers = names.flatMap((n) => (/^\d+\.json$/.test(n) ? [Number(n.slice(0, -5))] : [])).sort((a, b) => a - b);
-    return numbers.flatMap((n) => {
+    return names.flatMap((n) => (/^\d+\.json$/.test(n) ? [Number(n.slice(0, -5))] : [])).sort((a, b) => a - b);
+  }
+
+  /** Every turn file of a task, oldest first. */
+  readTurns(taskId: string): TurnFile[] {
+    return this.turnNumbers(taskId).flatMap((n) => {
       const turn = this.readTurn(taskId, n);
       return turn === null ? [] : [turn];
     });
@@ -575,6 +595,15 @@ export class TaskStore implements TaskRecordWriter {
   /** The latest turn, which is the turn file with the highest turn number. */
   latestTurn(taskId: string): TurnFile | null {
     return this.readTurns(taskId).at(-1) ?? null;
+  }
+
+  /**
+   * The owner recorded in the turn file with the highest number, reading that one file only: undefined
+   * when the task has no turn file, null for a bare result of a v0.1 record.
+   */
+  latestTurnOwner(taskId: string): OwnerProcess | null | undefined {
+    const latest = this.turnNumbers(taskId).at(-1);
+    return latest === undefined ? undefined : this.readTurn(taskId, latest)?.owner;
   }
 
   /** The result of the latest turn, or null while it runs. */
@@ -593,6 +622,8 @@ export class TaskStore implements TaskRecordWriter {
   private view(line: IndexLine, latest: TurnFile | null): TaskView {
     const status: TaskStatus =
       latest?.result?.status ?? (latest !== null && line.status !== 'abandoned' ? 'running' : line.status);
+    const turn = latest?.turn ?? line.turn;
+    const owner = latest !== null && latest.result === undefined && latest.owner !== null ? latest.owner : line.owner;
     return {
       taskId: line.taskId,
       agent: line.agent,
@@ -601,14 +632,12 @@ export class TaskStore implements TaskRecordWriter {
       createdAt: line.createdAt,
       updatedAt: line.updatedAt,
       ...(line.model !== undefined ? { model: line.model } : {}),
-      ...((latest?.turn ?? line.turn) !== undefined ? { turn: (latest?.turn ?? line.turn)! } : {}),
+      ...(turn !== undefined ? { turn } : {}),
       enqueuedAt: latest?.enqueuedAt ?? line.enqueuedAt ?? line.createdAt,
       ...(latest?.startedAt !== undefined ? { startedAt: latest.startedAt } : {}),
       ...(line.sessionFile !== undefined ? { sessionFile: line.sessionFile } : {}),
       // The owner of a running turn is the one in its turn file.
-      ...((latest !== null && latest.result === undefined && latest.owner !== null ? latest.owner : line.owner) !== undefined
-        ? { owner: (latest !== null && latest.result === undefined && latest.owner !== null ? latest.owner : line.owner)! }
-        : {}),
+      ...(owner !== undefined ? { owner } : {}),
     };
   }
 
@@ -652,11 +681,12 @@ export class TaskStore implements TaskRecordWriter {
       const read = open || line.turn === undefined ? this.latestTurn(line.taskId) : null;
       const latest = open || read?.result !== undefined ? read : null;
       const view = this.view(line, latest);
-      views.push(
-        line.status === 'running' && latest === null && view.startedAt === undefined
-          ? { ...view, ...(this.readTaskJson(line.taskId)?.startedAt !== undefined ? { startedAt: this.readTaskJson(line.taskId)!.startedAt! } : {}) }
-          : view,
-      );
+      if (line.status === 'running' && latest === null && view.startedAt === undefined) {
+        const taskStartedAt = this.readTaskJson(line.taskId)?.startedAt;
+        views.push({ ...view, ...(taskStartedAt !== undefined ? { startedAt: taskStartedAt } : {}) });
+      } else {
+        views.push(view);
+      }
     }
     return views;
   }
@@ -676,10 +706,8 @@ export class TaskStore implements TaskRecordWriter {
       if (latest?.result !== undefined) continue;
       const owner = latest?.owner ?? line.owner;
       if (owner === undefined) continue;
-      const startTime = this.probe.startTime(owner.pid);
-      // A probe that cannot tell never marks a task.
-      if (startTime === undefined) continue;
-      if (startTime !== null && (startTime === owner.startTime || owner.startTime === 'unknown')) continue;
+      // A probe that cannot tell (undefined) never marks a task, and a live owner keeps its task.
+      if (this.ownerAlive(owner) !== false) continue;
 
       // Read again just before appending: the owner may have settled meanwhile.
       const now = this.readLatest().get(line.taskId);

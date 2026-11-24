@@ -67,6 +67,11 @@ type Prompt = { kind: 'brief' } | { kind: 'resume'; message: string };
 /** How long a settling run waits for steering messages still in flight before it is built into a result. */
 const STEER_DRAIN_MS = 1000;
 
+/** The state a settled run ends in, by the status of its result. */
+function stateOfResult(result: Result): ChildRunState {
+  return result.status === 'failed' ? 'Failed' : result.status === 'cancelled' ? 'Cancelled' : 'Settled';
+}
+
 /** One turn of a task: one input, one child run, one result. */
 export class Turn {
   readonly result: Promise<Result>;
@@ -80,7 +85,6 @@ export class Turn {
   private readonly stateListeners = new Set<Listener<ChildRunState>>();
   private startedMs: number | null = null;
   private startedIso: string | null = null;
-  private promptSent = false;
   /** Messages held for a run that has not sent its prompt, in the order received. */
   private held: string[] = [];
   /** Messages that a steer answered "settled" for, which open the next turn. */
@@ -97,6 +101,8 @@ export class Turn {
     private prompt: Prompt,
     held: string[] = [],
     loaded?: { startedAt?: string; result?: Result },
+    /** Whether this turn was opened by messages held for the one before it. */
+    readonly viaHeld = false,
   ) {
     this.held = [...held];
     this.result = new Promise((resolve) => (this.resolveResult = resolve));
@@ -106,7 +112,7 @@ export class Turn {
       if (loaded.result !== undefined) {
         this.finalResult = loaded.result;
         this.resolveResult(loaded.result);
-        this.stateValue = loaded.result.status === 'failed' ? 'Failed' : loaded.result.status === 'cancelled' ? 'Cancelled' : 'Settled';
+        this.stateValue = stateOfResult(loaded.result);
       } else {
         this.stateValue = 'Cancelled';
       }
@@ -132,14 +138,6 @@ export class Turn {
   /** How many state listeners are attached; a settled turn the limiter watched holds none of its own. */
   get stateListenerCount(): number {
     return this.stateListeners.size;
-  }
-
-  /** Whether this turn was opened by messages held for the one before it. */
-  viaHeld = false;
-
-  /** Whether the child of this turn was sent its prompt. */
-  get sentPrompt(): boolean {
-    return this.promptSent;
   }
 
   onEvent(listener: Listener<DomainEvent>): () => void {
@@ -206,7 +204,7 @@ export class Turn {
   }
 
   /** The turn file of a turn released with the brief as its prompt says so. */
-  markBriefPrompt(): void {
+  private markBriefPrompt(): void {
     try {
       this.task.core.store.writeBriefPrompt(this.task.taskId, this.number);
     } catch (err) {
@@ -267,7 +265,6 @@ export class Turn {
       this.task.core.warn(`could not record an event of ${this.task.taskId}: ${(err as Error).message}`);
     }
     if (event.kind === 'prompt_sent') {
-      this.promptSent = true;
       this.task.promptEver = true;
       this.setState('Live');
       this.flushHeld();
@@ -288,7 +285,12 @@ export class Turn {
 
   /** The run ended: let steering messages in flight answer, then build the result. */
   private async settle(outcome: ChildOutcome | null, failed?: Result): Promise<void> {
-    await Promise.race([this.chain, new Promise((r) => setTimeout(r, STEER_DRAIN_MS))]);
+    let drain: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([this.chain, new Promise((r) => (drain = setTimeout(r, STEER_DRAIN_MS)))]);
+    } finally {
+      clearTimeout(drain);
+    }
     if (failed !== undefined) this.finish(failed);
     else this.finish(this.buildResult(outcome!), outcome!.sessionFile, outcome!.unreadSteers);
   }
@@ -341,8 +343,10 @@ export class Turn {
       this.task.core.warn(`could not write the result of ${this.task.taskId}: ${(err as Error).message}`);
     }
     if (clean && waiting.length > 0) this.task.openFollowOn(waiting);
-    const state: ChildRunState = final.status === 'failed' ? 'Failed' : final.status === 'cancelled' ? 'Cancelled' : 'Settled';
-    this.setState(state);
+    this.setState(stateOfResult(final));
+    // The state is terminal: handleEvent returns once the result is set, so no listener hears more.
+    this.eventListeners.clear();
+    this.stateListeners.clear();
     this.resolveResult(final);
   }
 }
@@ -480,10 +484,9 @@ export class Task {
   private replayFor(ended: Turn): string[] {
     if (!ended.abandoned) return [];
     const events = this.core.store.readEvents(this.taskId);
-    if (events.some((e) => e.kind === 'prompt_sent' && e.turn === ended.number)) return [];
-    const file = this.core.store.readTurns(this.taskId).find((t) => t.turn === ended.number);
-    const queued = events.flatMap((e) => (e.kind === 'follow_up_message' && e.turn === ended.number && e.outcome === 'queued' ? [e.text] : []));
-    return [...(file?.replayed ?? []), ...(file?.message !== undefined ? [file.message] : []), ...(file?.heldMessages ?? []), ...queued];
+    // With no turn file, only the queued follow-ups of the log are left.
+    const file = this.core.store.readTurn(this.taskId, ended.number) ?? { turn: ended.number, owner: null, enqueuedAt: ended.enqueuedAt };
+    return this.core.store.undeliveredMessages(this.taskId, file, events);
   }
 
   /** Open the next turn for a message, after a turn that ended. */
@@ -529,8 +532,7 @@ export class Task {
       this.core.warn(`another process opened turn ${number} of ${this.taskId} first, so ${messages.length} message(s) were not delivered`);
       return;
     }
-    const turn = new Turn(this, number, enqueuedAt, { kind: 'resume', message: messages[0]! }, messages.slice(1));
-    turn.viaHeld = true;
+    const turn = new Turn(this, number, enqueuedAt, { kind: 'resume', message: messages[0]! }, messages.slice(1), undefined, true);
     this.turns.push(turn);
     if (this.core.onTurnOpened !== undefined) this.core.onTurnOpened(this, turn);
     else turn.release();

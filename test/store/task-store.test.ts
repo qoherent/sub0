@@ -323,5 +323,44 @@ describe('TaskStore', () => {
       store.markReported('sz-bbbbbb', 2);
       expect(store.isReported('sz-bbbbbb', 2)).toBe(true);
     });
+
+    it('gives the messages of a turn that never sent its prompt: replayed, opening, held, then those queued in the log', () => {
+      const { store, create } = setup();
+      create('sz-undeli');
+      store.writeResult('sz-undeli', result('sz-undeli'));
+      store.claimTurn('sz-undeli', 2, { message: 'now', replayed: ['old one'], heldMessages: ['held one'], enqueuedAt: 't' });
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'queued two', outcome: 'queued' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'steered', outcome: 'steered' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'other turn', outcome: 'queued' }, 1);
+      const turn = store.readTurn('sz-undeli', 2)!;
+      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toEqual(['old one', 'now', 'held one', 'queued two']);
+      // A prompt sent by another turn does not count; one sent by this turn leaves nothing undelivered.
+      store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 1);
+      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toHaveLength(4);
+      store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 2);
+      expect(store.undeliveredMessages('sz-undeli', turn, store.readEvents('sz-undeli'))).toEqual([]);
+    });
+
+    it('parses only the log lines of the kinds asked for', () => {
+      const { store, create } = setup();
+      create('sz-kinds0');
+      store.appendEvent('sz-kinds0', { kind: 'prompt_sent' }, 1);
+      store.appendEvent('sz-kinds0', { kind: 'follow_up_message', text: 'hello', outcome: 'queued' }, 1);
+      appendFileSync(path.join(store.taskDir('sz-kinds0'), 'events.jsonl'), '{"kind":"prompt_sent", broken\n');
+      expect(store.readEvents('sz-kinds0').map((e) => e.kind)).toEqual(['prompt_sent', 'follow_up_message']);
+      expect(store.readEvents('sz-kinds0', ['prompt_sent']).map((e) => e.kind)).toEqual(['prompt_sent']);
+      expect(store.readEvents('sz-kinds0', ['follow_up_message', 'prompt_sent']).map((e) => e.kind)).toEqual(['prompt_sent', 'follow_up_message']);
+      expect(store.readEvents('sz-kinds0', ['run_started'])).toEqual([]);
+    });
+
+    it('reads the owner of the latest turn from that turn file alone', () => {
+      const { store, create } = setup({ owner: { pid: 111, startTime: 'one' } });
+      expect(store.latestTurnOwner('sz-noturn')).toBeUndefined();
+      create('sz-ownerr');
+      store.writeResult('sz-ownerr', result('sz-ownerr'));
+      expect(store.latestTurnOwner('sz-ownerr')).toEqual({ pid: 111, startTime: 'one' });
+      new TaskStore(path.dirname(path.dirname(store.storeFolder)), { owner: { pid: 222, startTime: 'two' }, probe: probe({ 222: 'two' }) }).claimTurn('sz-ownerr', 2, { message: 'm', enqueuedAt: 't' });
+      expect(store.latestTurnOwner('sz-ownerr')).toEqual({ pid: 222, startTime: 'two' });
+    });
   });
 });

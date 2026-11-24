@@ -35,6 +35,7 @@ import {
   THINKING_LEVELS,
   yamlKey,
   type AgentCatalog,
+  type LegacyEndpointLimit,
   type ModelTier,
   type Splicer,
   type ThinkingLevel,
@@ -142,16 +143,9 @@ export interface LimitState {
 }
 
 /** One limit of an old `endpoints:` map that a file still holds, with the models it covered. */
-export interface EndpointState {
-  endpoint: string;
-  /** The old limit; null when the entry has none. */
-  parallel: number | null;
-  /** The file that holds the map. */
-  file: string;
-  /** Which scope writes that file. */
+export interface EndpointState extends LegacyEndpointLimit {
+  /** Which scope writes the file that holds the map. */
   scope: SetupScope;
-  /** The models the old limit covered: the merged configuration's for the agent file, the global file's own tiers' for the global file. */
-  models: string[];
 }
 
 /** The tier and model names this project's agent file names, as an override or a removal of the global file's. */

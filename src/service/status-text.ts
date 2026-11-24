@@ -7,6 +7,12 @@ import type { StarterResult } from '../config/agent-config.js';
 import { isUnavailable, type DomainEvent, type Measure, type Result, type SessionUsage } from '../core/types.js';
 import type { CollectReply, ContinueReply, DelegateReply, TaskListing } from './delegation-service.js';
 
+/** The running or queued status a collect reply ends in, or undefined when none of its turns is unsettled. */
+export function pendingOf(reply: CollectReply): Extract<CollectReply, { kind: 'running' | 'queued' }> | undefined {
+  const last = reply.kind === 'results' ? reply.then : reply;
+  return last !== undefined && (last.kind === 'running' || last.kind === 'queued') ? last : undefined;
+}
+
 export function formatProgress(agent: string, latest: string, elapsedMs: number): string {
   return `${agent} · ${latest} · ${formatElapsed(elapsedMs)}`;
 }
