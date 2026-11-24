@@ -1,16 +1,22 @@
 # subzero
 
-subzero is a Claude Code plugin that hands subagent work to a pi agent running on
-a model you choose, such as a local model or a cheaper hosted one. Claude keeps
-the conversation and gets back only the child's final reply. The child's reading,
+subzero lets Claude Code or pi hand subagent work to a pi agent running on
+a model you choose, such as a local model or a cheaper hosted one. The parent keeps
+the conversation and gets back the child's final reply. The child's reading,
 thinking and tool calls stay in a separate pi session.
 
 It is built for the compound-engineering plugin. That plugin asks for subagents by
-tier ("cheapest capable", "mid-tier", "session model"). When your project has a
-matching tier in its agent file, subzero sends those subagents to your model
-instead of Claude's. Tiers you do not configure stay on Claude.
+tier ("cheapest capable", "mid-tier", "session model"). When your project, or your
+global file in `~/.agents/`, has a matching tier, subzero sends those subagents to
+your model instead of Claude's. Tiers you do not configure stay on Claude.
 
 ## Preview and known limits
+
+The pi extension and updated Claude plugin are built in this branch. The pi
+package branch must be published before the git install command below works.
+The live checks on both parents are still pending. A *parent host* is where you
+work (Claude Code or pi); a *child host* is what subzero starts (pi today).
+See [docs/design.md](docs/design.md) §5.5.
 
 This is an experimental preview, version 0.1.0-preview.1. It makes no
 compatibility promise, and what it does may change between previews. Know these
@@ -23,7 +29,7 @@ limits before you use it:
 - **The general agent can write files and run shell commands inside pi, outside
   Claude Code's permission prompts.** Review what a routed subagent did with git.
 - **The queue is per session.** The `parallel` limit of an endpoint counts only the
-  children of one Claude Code session, so two sessions do not wait for each other.
+  children of one parent session, so two sessions do not wait for each other.
 - **A cloned project's agent file (.agents/subzero.yaml) is executable-grade
   configuration (it chooses models, tools and can enable a general agent with
   shell access); use routing only in repositories you trust.**
@@ -33,9 +39,11 @@ limits before you use it:
   works in the shared checkout.
 
 The plugin's hooks run in every project where it is installed: one when a session
-starts and one on every Agent call. Each costs a short Node process. In a project
-with no agent file the hook does nothing: it prints no message, adds no routing
-text and lets every subagent run on Claude.
+starts, one on every Agent call, and a background completion hook at Stop. In a project
+with no agent file, and no `medium` tier in your global file, the hook does nothing:
+it prints no message, adds no routing text and lets every subagent run on Claude.
+Once your global file has a `medium` tier, subzero is on in every project; put
+`enabled: false` in a project's `.agents/subzero.yaml` to switch it off there.
 
 ## Prerequisites
 
@@ -47,6 +55,11 @@ text and lets every subagent run on Claude.
   `pi --list-models` shows your model. subzero installs nothing and does not edit
   your pi configuration.
 - macOS or Linux. Windows is not supported in this preview.
+- The system `lockf` utility on macOS or `flock` on Linux. The Agent routing
+  hook uses it to coordinate concurrent sessions; if it is unavailable, the
+  hook allows the Agent call through to Claude.
+- `ps`, used to identify the parent session. Minimal Linux images may need the
+  `procps` package.
 
 If Node or pi is missing, `/subzero:init` and the plugin's hooks print one line
 saying what to install.
@@ -66,45 +79,98 @@ In a Claude Code session the same two steps are `/plugin marketplace add
 qoherent/sub0@plugin` and `/plugin install subzero@qoherent`; the install command
 opens the plugin's details, where you choose a scope. Run `/reload-plugins` or
 start a new session. There is nothing to clone or build. Typing `/subzero:` should
-now list `init` and `tasks`.
+now list `init`, `tasks` and `cancel`.
 
 When releases are published, the install command will change to the `qoherent`
 marketplace of the organization. Remove this one first, because both use the name
 `qoherent`: `claude plugin marketplace remove qoherent`.
 
+### Install the pi extension
+
+Remove pi-subagents from `~/.pi/agent/settings.json` before installing: both
+packages register `subagent`. Once the `pi` branch is published, run:
+
+```sh
+pi install git:github.com/qoherent/sub0@pi
+```
+
+For a local checkout, run `npm run release:pi:build` and load the staged
+extension with `pi -e ./dist-pi-package/dist/pi-extension.js`. Set up the
+project from inside pi with `/subzero init` (see
+[Set up a model](#set-up-a-model)). The pi `subagent` tool runs in the background
+by default and reports completed results; `/subzero` shows tasks and
+`/subzero cancel` stops a task or the session's tasks. On Claude, use
+`/subzero:cancel` to stop the current session's tasks.
+
 ## Set up a model
 
-Open Claude Code in the project where you want routing, then run the init command
-with the model name that pi lists, as `provider/model`:
+Open Claude Code in a project, then run the init command with no arguments:
+
+```text
+/subzero:init
+```
+
+This is guided setup. It first asks whether the models are for every project or
+only this one. Then it lists the models pi offers and suggests a model and a
+thinking level for each tier: `small`, `medium` and `large`. You choose each
+one; only `medium` is required. Then it asks how many children may run at once
+on each model server the chosen models use, and offers to check that each
+chosen model answers a one-turn prompt. Last it shows the change as a diff and
+writes it only after you confirm. Claude Code may ask you to allow its commands
+the first time. If pi is not installed, it says so and writes nothing.
+
+Set up once for every project, or per project:
+
+- **Every project** writes `~/.agents/subzero.yaml`, the global file, and
+  creates it when it is missing. After that, subzero is on in every project with
+  built-in `general` and `fallback` agents, with no file of its own. It tells you
+  what this project keeps its own, because the change does not apply there.
+- **Only this one** writes `.agents/subzero.yaml` in the project, which overrides
+  the global file by tier name and limit name.
+
+A project switches subzero off with `enabled: false` in its own file. Guided
+init writes tiers and limits only, never agents.
+
+In pi, with the [pi extension](#install-the-pi-extension) loaded, run
+`/subzero init` instead. It is the same guided setup, with pi's own dialogs.
+
+If you already know the model, the quick path takes the model name that pi
+lists, as `provider/model`:
 
 ```text
 /subzero:init <model>
 ```
 
-For example `/subzero:init local/qwen`. Claude Code may ask you to allow the
-command once. It writes `.agents/subzero.yaml` with a `default` tier on that model,
-a `general` agent that can read, write and run commands, and a read-only `fallback`
-agent. Optional arguments are `--timeout <seconds>` (default 1200) and
+For example `/subzero:init local/qwen`, or `/subzero init local/qwen` in pi. It
+writes the project's `.agents/subzero.yaml`, never the global file, with a `medium` tier on that model, a `general`
+agent that can read, write and run commands, and a read-only `fallback` agent.
+Optional arguments are `--timeout <seconds>` (default 1200) and
 `--thinking <level>` (default medium). If pi is not installed, it says so and
-writes nothing.
+writes nothing. In an existing file, init adds missing starter entries and
+keeps existing settings; it refuses incompatible or invalid entries. Empty or
+flow-style maps are rewritten to add missing entries.
 
-Compound-engineering asks for the tiers `small`, `medium` and `large`, and `init`
-writes none of them. To route its mid-tier subagents, open `.agents/subzero.yaml`
-and add a `medium` tier next to `default`, on the same host and model or another:
+Compound-engineering asks for the tiers `small`, `medium` and `large`. The
+`medium` tier routes mid-tier work, and `small` and `large` route theirs when
+they are set. A tier in the file looks like this:
 
 ```yaml
 models:
   tiers:
-    default: { host: pi, model: local/qwen, thinking: medium }
     medium: { host: pi, model: local/qwen, thinking: medium }
 ```
 
-Start a new Claude Code session in the project, so the session-start hook reads
-the file. Add `small` or `large` the same way to route those tiers too; read
+After init creates a file or adds or removes a tier, start a new Claude Code
+session in the project, so the session-start hook reads the files. A change to
+the global file applies to the next delegation at once, but the routing text is
+built once per session. pi refreshes its tier text in place, so it needs no new
+session. To add `small` or `large`
+later, run `/subzero:init` (or `/subzero init` in pi) again and choose them, or
+add them to a file by hand; read
 [what a `large` tier changes](#what-configuring-a-large-tier-changes) first.
 
-Every key of the file, how a request picks its model, the checks the file must
-pass and what is not supported yet are in the
+Every key of the files, the global file and how it merges, how a request picks
+its model, the checks the files must pass and what is not supported yet are in the
 [configuration reference](docs/configuration.md).
 
 ## Confirm it works
@@ -130,7 +196,7 @@ words go to subzero, and a hook catches a generic subagent spawn for a
 configured tier that slips past. What reaches your model depends on whether the
 request names a tier.
 
-| What you ask Claude | With `default` + `medium` | With `large` added too |
+| What you ask Claude | With `medium` | With `large` added too |
 |---|---|---|
 | "Use a mid-tier subagent to ..." | subzero, `general:medium` | subzero, `general:medium` |
 | "Use the general agent on the medium tier to ..." | subzero, `general:medium` | subzero, `general:medium` |
@@ -142,7 +208,7 @@ request names a tier.
 The table comes from headless runs with Claude Code 2.1.318 and a local model.
 Each cell that says subzero routed every time it was tried; "usually" means the
 plain request went to Claude in two of three runs. The delegate-tool row, and
-`Explore` with `default` + `medium`, follow from how routing works and were not
+`Explore` with `medium`, follow from how routing works and were not
 run separately.
 
 The rules behind it:
@@ -182,7 +248,7 @@ agents:
     skills: [file-facts]     # names from the skills map; leave out for no skills
     tools: [read, grep, find, ls]
     timeout: 120             # seconds, required
-    tier: medium             # optional; without it the agent runs on default
+    tier: medium             # optional; without it the agent runs on medium
 ```
 
 A skill folder holds a `SKILL.md`, as for any Agent Skill. Keep it out of
@@ -217,7 +283,7 @@ Limits of named agents in this preview:
   delegation runs until it is fixed. A skill folder that does not exist fails
   the task as `skill_mismatch` before the child starts work.
 - **Skills are local folders only.** Git sources, a lock file, skills that ship
-  their own agent definition, and per-user or local override files are planned
+  their own agent definition, and a personal local override file are planned
   for v0.2.
 - **The child copies the skill when it starts.** A task keeps the version of the
   skill it started with; an edit applies to the next task.

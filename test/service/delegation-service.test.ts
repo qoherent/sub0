@@ -1,20 +1,23 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { LoadError, TierError, UnknownAgentError, UnresolvedRootError } from '../../src/config/agent-config.js';
-import { unavailableUsage, type ChildPort } from '../../src/core/types.js';
+import { LoadError, MissingAgentFileError, ProjectDisabledError, TierError, UnknownAgentError, UnresolvedRootError } from '../../src/config/agent-config.js';
+import { unavailableUsage, type ChildPort, type StarterTools } from '../../src/core/types.js';
 import { DelegationService, EmptyBriefError, renderBrief } from '../../src/service/delegation-service.js';
 import { TaskStore } from '../../src/store/task-store.js';
 import { Kernel } from '../../src/kernel/kernel.js';
-import { DEFAULT_YAML, FAKE_PI_COMMAND, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until } from '../helpers.js';
+import { DEFAULT_YAML, FAKE_PI_COMMAND, GLOBAL_MEDIUM_YAML, TIERED_YAML, fakePiEnv, isAlive, kernelWithPort, makeProject, manualPort, piKernel, tempDir, until, useDefaultGlobalConfig, useGlobalConfig } from '../helpers.js';
 
-function service(root: string, port: ChildPort) {
+function service(root: string, port: ChildPort, starterTools?: () => StarterTools) {
   return new DelegationService({
     env: { SUBZERO_PROJECT_DIR: root },
     warn: () => {},
-    kernel: kernelWithPort(port),
+    kernel: kernelWithPort(port, starterTools),
   });
 }
+
+/** What a child driver offers for the built-in general and fallback agents. */
+const STARTER: StarterTools = { general: ['read', 'bash'], fallback: ['read'] };
 
 const indexLines = (root: string) => {
   const file = path.join(root, '.agents', 'subzero', 'index.jsonl');
@@ -22,13 +25,37 @@ const indexLines = (root: string) => {
 };
 
 describe('DelegationService', () => {
-  it('returns the unknown agent error and writes no task record', async () => {
+  it('records cancellation when a child does not stop before shutdown expires', async () => {
     const root = makeProject();
-    const svc = service(root, manualPort().port);
-    await expect(svc.delegate({ agent: 'nobody', briefText: 'b' }, { wait: false })).rejects.toBeInstanceOf(UnknownAgentError);
-    expect(existsSync(path.join(root, '.agents', 'subzero'))).toBe(false);
+    const svc = service(root, { start: () => ({ outcome: new Promise(() => {}), cancel: () => {} }) });
+    const reply = await svc.delegate({ agent: 'helper', briefText: 'stuck', parentSessionId: 'A' }, { wait: false });
+    if (reply.kind === 'result') throw new Error('expected live task');
+    expect(await svc.shutdown(10)).toBe(false);
+    expect(svc.store.readTask(reply.taskId)?.status).toBe('cancelled');
+    expect(await svc.collect(reply.taskId)).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
   });
-
+  it('cancels only live and queued tasks of the selected session', async () => {
+    const { port, started } = manualPort();
+    const svc = service(makeProject(), port);
+    const a = await svc.delegate({ agent: 'helper', briefText: 'a', parentSessionId: 'A' }, { wait: false });
+    const queued = await svc.delegate({ agent: 'other', briefText: 'queued', parentSessionId: 'A' }, { wait: false });
+    const otherA = await svc.delegate({ agent: 'free', briefText: 'a2', parentSessionId: 'A' }, { wait: false });
+    const b = await svc.delegate({ agent: 'free', briefText: 'b', parentSessionId: 'B' }, { wait: false });
+    if (a.kind === 'result' || queued.kind === 'result' || otherA.kind === 'result' || b.kind === 'result') throw new Error('expected live tasks');
+    expect((await svc.listLiveSession('A')).map((task) => task.taskId).sort()).toEqual([a.taskId, queued.taskId, otherA.taskId].sort());
+    const notice = await svc.notice(a.taskId, 'completed', 'A', 'subzero_await');
+    expect(notice).toContain(queued.taskId);
+    expect(notice).toContain(otherA.taskId);
+    expect(notice).not.toContain(b.taskId);
+    expect(await svc.notice(a.taskId, 'cancelled', 'A', 'subzero_await')).toMatch(/stopped.*no action/i);
+    expect(await svc.cancelSession(undefined)).toEqual({ kind: 'unknown_session', taskIds: [], count: 0 });
+    expect(await svc.cancelSession('A')).toEqual({ kind: 'cancelled', taskIds: [a.taskId, queued.taskId, otherA.taskId], count: 3 });
+    expect((await svc.collect(a.taskId))).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
+    expect((await svc.collect(queued.taskId))).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
+    expect((await svc.collect(otherA.taskId))).toMatchObject({ kind: 'result', result: { status: 'cancelled' } });
+    expect((await svc.collect(b.taskId)).kind).toBe('running');
+    started[2]!.settle();
+  });
   it('returns the load error while the agent file is malformed and writes no task record', async () => {
     const root = makeProject();
     writeFileSync(path.join(root, '.agents', 'subzero.yaml'), 'agents: [');
@@ -228,6 +255,43 @@ describe('DelegationService', () => {
     });
   });
 
+  it('hands the child port the extensions of the merged config, none when the global file names none', async () => {
+    const root = makeProject();
+    const requests: any[] = [];
+    const port: ChildPort = {
+      start(r) {
+        requests.push(r);
+        return { outcome: Promise.resolve({ lastAssistantText: 'ok', status: 'completed', usage: unavailableUsage('n/a') }), cancel() {} };
+      },
+    };
+    await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    expect(requests[0].childHostOptions ?? {}).toEqual({});
+    const ext = path.join(tempDir(), 'ext.ts');
+    writeFileSync(ext, '');
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n${GLOBAL_MEDIUM_YAML}`);
+    await service(root, port).delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    expect(requests[1].childHostOptions).toEqual({ extensions: [ext] });
+  });
+
+  it('records the extensions in the launch spec of the task record on the fake pi', async () => {
+    const root = makeProject();
+    const ext = path.join(tempDir(), 'ext.ts');
+    writeFileSync(ext, '');
+    useDefaultGlobalConfig(`hosts:\n  pi:\n    extensions:\n      - ${ext}\n`);
+    const fake = fakePiEnv();
+    const svc = new DelegationService({
+      env: { SUBZERO_PROJECT_DIR: root },
+      warn: () => {},
+      kernel: piKernel({ piCommand: FAKE_PI_COMMAND, env: fake.env, piAgentDir: tempDir() }).kernel,
+    });
+    const reply = await svc.delegate({ agent: 'helper', briefText: 'go' }, { wait: true });
+    if (reply.kind !== 'result') throw new Error('expected a result');
+    const command: string[] = svc.store.readTask(reply.result.taskId)!.task!.launchSpec!.command;
+    expect(command.slice(command.indexOf('-ne'), command.indexOf('-ne') + 3)).toEqual(['-ne', '-nc', '-np']);
+    expect(command.slice(command.indexOf('-e'), command.indexOf('-e') + 2)).toEqual(['-e', ext]);
+    expect(fake.log()[0].argv).toContain(ext);
+  });
+
   it('refuses a host with no registered driver, naming the host and the supported hosts, and makes no task', async () => {
     const root = makeProject();
     const kernel = new Kernel();
@@ -245,16 +309,17 @@ describe('DelegationService', () => {
     expect(frozen[0]).toMatchObject({ name: 'other', host: 'pi', model: 'local/qwen-small', thinking: 'low', endpoint: 'local', parallel: 1 });
   });
 
-  it('runs general when no agent is named, and returns the unknown agent error without a general entry', async () => {
-    const withGeneral = makeProject(DEFAULT_YAML + '  general:\n    tools: [read, write]\n    timeout: 9\n');
+  it('runs general when no agent is named, and names the host when its driver has no starter tools for a missing general entry', async () => {
+    const withGeneral = makeProject(DEFAULT_YAML);
     const frozen: any[] = [];
     const { port } = manualPort();
     const svc = service(withGeneral, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) });
     await svc.delegate({ briefText: 'go' }, { wait: false });
-    expect(frozen[0]).toMatchObject({ name: 'general', model: 'local/qwen', tools: ['read', 'write'], timeout: 9 });
+    expect(frozen[0]).toMatchObject({ name: 'general', model: 'local/qwen', tools: ['read', 'bash', 'write', 'edit'], timeout: 9 });
 
-    const bare = service(makeProject(), manualPort().port);
-    await expect(bare.delegate({ briefText: 'go' }, { wait: false })).rejects.toThrow(/no agent was named/);
+    const noGeneral = DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '');
+    const bare = service(makeProject(noGeneral), manualPort().port);
+    await expect(bare.delegate({ briefText: 'go' }, { wait: false })).rejects.toThrow(/child driver of the host "pi" offers no starter tools/);
   });
 
   it('returns the tier error, naming the host and the supported hosts, when the tier host has no driver, and makes no task', async () => {
@@ -396,8 +461,8 @@ describe('DelegationService tiers, general and fallback', () => {
     const none = await svc.delegate({ briefText: 'go' }, { wait: false });
     started[0]!.settle(); // the default endpoint runs one child at a time
     const named = await svc.delegate({ agent: 'general', briefText: 'go' }, { wait: false });
-    expect(frozen[0]).toMatchObject({ name: 'general', model: 'local/qwen' });
-    expect(frozen[1]).toMatchObject({ name: 'general', model: 'local/qwen' });
+    expect(frozen[0]).toMatchObject({ name: 'general', model: 'r9700/Qwen3.8' });
+    expect(frozen[1]).toMatchObject({ name: 'general', model: 'r9700/Qwen3.8' });
     expect(none).not.toHaveProperty('notice');
     expect(named).not.toHaveProperty('notice');
   });
@@ -407,7 +472,7 @@ describe('DelegationService tiers, general and fallback', () => {
     await svc.delegate({ agent: 'reviewer', briefText: 'go', tier: 'large' }, { wait: false });
     await svc.delegate({ agent: 'reviewer', briefText: 'go' }, { wait: false });
     expect(frozen[0]).toMatchObject({ name: 'reviewer:large', model: 'cloud/reviewer-large', thinking: 'high' });
-    expect(frozen[1]).toMatchObject({ name: 'reviewer', model: 'local/qwen' });
+    expect(frozen[1]).toMatchObject({ name: 'reviewer', model: 'r9700/Qwen3.8' });
   });
 
   it('returns the tier error for an unknown tier or a tier host with no driver, and makes no task', async () => {
@@ -445,21 +510,72 @@ describe('DelegationService tiers, general and fallback', () => {
     expect(frozen[1]).toMatchObject({ name: 'fallback:medium', model: 'r9700/Qwen3.8' });
   });
 
-  it('returns the unknown agent error with no task for an unknown name and no fallback entry', async () => {
+  it('runs the built-in fallback with its notice for an unknown name when the file has no fallback entry', async () => {
+    const root = makeProject(TIERED_YAML.replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    const reply: any = await svc.delegate({ agent: 'reviewr', briefText: 'go' }, { wait: false });
+    expect(frozen[0]).toMatchObject({ name: 'fallback', tools: ['read'], timeout: 1200 });
+    expect(reply.notice).toMatch(/the agent "reviewr" is not configured, so the fallback agent ran instead/);
+  });
+
+  it('fails with the host-naming error and no task for a missing general or fallback when the driver has no starter tools', async () => {
     const root = makeProject(TIERED_YAML.replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
     const svc = service(root, manualPort().port);
     const err = await svc.delegate({ agent: 'reviewr', briefText: 'go' }, { wait: false }).catch((e) => e);
-    expect(err).toBeInstanceOf(UnknownAgentError);
-    expect(err.message).toMatch(/helper, other, free, general, reviewer/);
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toMatch(/host "pi" offers no starter tools.*fallback/);
     expect(indexLines(root)).toEqual([]);
   });
 
-  it('never falls back for general or no agent when there is no general entry', async () => {
-    const root = makeProject(DEFAULT_YAML + '  fallback:\n    tools: [read]\n    timeout: 8\n');
-    const svc = service(root, manualPort().port);
-    await expect(svc.delegate({ agent: 'general', briefText: 'go' }, { wait: false })).rejects.toBeInstanceOf(UnknownAgentError);
-    await expect(svc.delegate({ briefText: 'go' }, { wait: false })).rejects.toBeInstanceOf(UnknownAgentError);
-    await expect(svc.delegate({ briefText: 'go', tier: 'small' }, { wait: false })).rejects.toBeInstanceOf(UnknownAgentError);
+  it('fills a missing general from the starter tools of the driver, for no agent, general and a tier alike', async () => {
+    const root = makeProject(DEFAULT_YAML.replace(/  general:\n    tools: \[read, bash, write, edit\]\n    timeout: 9\n/, '').replace('endpoints:\n  local:\n    parallel: 1\n', ''));
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    for (const delegation of [{ briefText: 'go' }, { agent: 'general', briefText: 'go' }, { briefText: 'go', tier: 'small' }]) {
+      await svc.delegate(delegation, { wait: false });
+    }
+    expect(frozen.map((f) => [f.name, f.tools, f.timeout])).toEqual([
+      ['general', ['read', 'bash'], 1200],
+      ['general', ['read', 'bash'], 1200],
+      ['general:small', ['read', 'bash'], 1200],
+    ]);
+  });
+
+  it('covers AE2: with a global medium and no project file, general runs on the medium model with the starter tools of its host', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const frozen: any[] = [];
+    const { port } = manualPort();
+    const svc = service(root, { start: (request, onEvent) => (frozen.push(request.agent), port.start(request, onEvent)) }, () => STARTER);
+    await svc.delegate({ briefText: 'go' }, { wait: false });
+    expect(frozen[0]).toMatchObject({ name: 'general', host: 'pi', model: 'local/global-medium', thinking: 'low', tools: ['read', 'bash'], timeout: 1200 });
+  });
+
+  it('fails with the host-naming error for a global-only project whose child driver has no starter tools', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const root = tempDir('subzero-project-');
+    const err = await service(root, manualPort().port).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toMatch(/host "pi" offers no starter tools/);
+    expect(indexLines(root)).toEqual([]);
+  });
+
+  it('refuses with a missing-file error and no task when there is no project file and no global medium', async () => {
+    const root = tempDir('subzero-project-');
+    const err = await service(root, manualPort().port, () => STARTER).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(MissingAgentFileError);
+    expect(indexLines(root)).toEqual([]);
+  });
+
+  it('covers AE4: enabled false refuses with the disabled error and no task, even with a global medium', async () => {
+    useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const root = makeProject('enabled: false\n');
+    const err = await service(root, manualPort().port, () => STARTER).delegate({ briefText: 'go' }, { wait: false }).catch((e) => e);
+    expect(err).toBeInstanceOf(ProjectDisabledError);
+    expect(err.message).toMatch(/enabled: false/);
     expect(indexLines(root)).toEqual([]);
   });
 

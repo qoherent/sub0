@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { unavailableUsage, type ChildOutcome, type ChildPort } from '../src/core/types.js';
+import { onTestFinished, vi } from 'vitest';
+import { unavailableUsage, type ChildOutcome, type ChildPort, type StarterTools } from '../src/core/types.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { PI_HOST, PiDriver, type PiDriverOptions } from '../src/pi/driver.js';
 
@@ -13,6 +14,42 @@ export function tempDir(prefix = 'subzero-test-'): string {
   return realpathSync(mkdtempSync(path.join(tmpdir(), prefix)));
 }
 
+/** Writes a global file and points SUBZERO_GLOBAL_CONFIG at it until the test ends; returns its path. */
+export function useGlobalConfig(yaml: string): string {
+  const file = path.join(tempDir('subzero-global-'), 'subzero.yaml');
+  writeFileSync(file, yaml);
+  const previous = process.env.SUBZERO_GLOBAL_CONFIG;
+  process.env.SUBZERO_GLOBAL_CONFIG = file;
+  onTestFinished(() => {
+    if (previous === undefined) delete process.env.SUBZERO_GLOBAL_CONFIG;
+    else process.env.SUBZERO_GLOBAL_CONFIG = previous;
+  });
+  return file;
+}
+
+/**
+ * Writes the global file at its default place, ~/.agents/subzero.yaml of a fresh home folder that
+ * os.homedir() answers until the test ends.
+ */
+export function useDefaultGlobalConfig(yaml: string): { home: string; file: string } {
+  const home = tempDir('subzero-home-');
+  const file = path.join(home, '.agents', 'subzero.yaml');
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, yaml);
+  const homedir = vi.spyOn(os, 'homedir').mockReturnValue(home);
+  const previous = process.env.SUBZERO_GLOBAL_CONFIG;
+  process.env.SUBZERO_GLOBAL_CONFIG = '';
+  onTestFinished(() => {
+    homedir.mockRestore();
+    if (previous === undefined) delete process.env.SUBZERO_GLOBAL_CONFIG;
+    else process.env.SUBZERO_GLOBAL_CONFIG = previous;
+  });
+  return { home, file };
+}
+
+/** A global file with a medium tier on the host pi, for the tests of a project with no file of its own. */
+export const GLOBAL_MEDIUM_YAML = 'models:\n  tiers:\n    medium: { host: pi, model: local/global-medium, thinking: low }\n';
+
 export const DEFAULT_YAML = `
 skills:
   alpha: ./skills/alpha
@@ -22,10 +59,16 @@ endpoints:
     parallel: 1
 models:
   tiers:
-    default: { host: pi, model: local/qwen, thinking: high }
+    medium: { host: pi, model: local/qwen, thinking: high }
     small: { host: pi, model: local/qwen-small, thinking: low }
     cloud: { host: pi, model: cloud/model, thinking: low }
 agents:
+  general:
+    tools: [read, bash, write, edit]
+    timeout: 9
+  fallback:
+    tools: [read, grep]
+    timeout: 8
   helper:
     description: A test helper
     skills: [alpha, beta]
@@ -52,19 +95,16 @@ agents:
  */
 export const TIERED_YAML =
   DEFAULT_YAML.replace(
+    '    medium: { host: pi, model: local/qwen, thinking: high }\n',
+    '    default: { host: pi, model: local/qwen, thinking: high }\n' +
+      '    medium: { host: pi, model: r9700/Qwen3.8, thinking: medium }\n',
+  ).replace(
     '    cloud: { host: pi, model: cloud/model, thinking: low }\n',
     '    cloud: { host: pi, model: cloud/model, thinking: low }\n' +
-      '    medium: { host: pi, model: r9700/Qwen3.8, thinking: medium }\n' +
       '    large: { host: pi, model: cloud/large, thinking: high }\n' +
       '    far: { host: claude, model: anthropic/opus, thinking: max }\n',
   ) +
-  `  general:
-    tools: [read, bash, write, edit]
-    timeout: 9
-  fallback:
-    tools: [read, grep]
-    timeout: 8
-  reviewer:
+  `  reviewer:
     description: A reviewer with its own model for large
     tiers:
       large: { model: cloud/reviewer-large }
@@ -129,9 +169,9 @@ export function piKernel(options: PiDriverOptions = {}): { kernel: Kernel; drive
 }
 
 /** A Kernel whose host pi runs the given child port, for tests that settle runs by hand. */
-export function kernelWithPort(port: ChildPort): Kernel {
+export function kernelWithPort(port: ChildPort, starterTools?: () => StarterTools): Kernel {
   const kernel = new Kernel();
-  kernel.registerChildDriver(PI_HOST, { port });
+  kernel.registerChildDriver(PI_HOST, { port, ...(starterTools !== undefined ? { starterTools } : {}) });
   return kernel;
 }
 

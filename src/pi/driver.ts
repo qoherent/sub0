@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { THINKING_LEVELS, modelEndpoint, type ThinkingLevel } from '../config/agent-config.js';
 import {
   unavailableUsage,
   type ChildDriver,
@@ -17,13 +18,18 @@ import {
   type ChildRun,
   type ChildRunRequest,
   type DomainEvent,
+  type ChildHostOptions,
+  type HostModel,
   type LaunchSpec,
   type Measure,
+  type ModelCheckFailure,
+  type ModelCheckRequest,
+  type ModelCheckResult,
   type SessionUsage,
   type StarterTools,
   type Unavailable,
 } from '../core/types.js';
-import { CHILD_ENV, attachCommand, launchArgs } from './launch.js';
+import { CHILD_ENV, attachCommand, childRpcArgs, launchArgs, piExtensionsOf } from './launch.js';
 import { missingSkills, prepareOverlay } from './overlay.js';
 import { PiRpcClient, type PiEvent, type PiResponse } from './rpc-client.js';
 
@@ -44,11 +50,25 @@ export interface PiDriverOptions {
   abortWaitMs?: number;
   /** How long to wait for an exit after closing stdin and after SIGTERM. */
   killWaitMs?: number;
+  /** How long the model listing waits for pi's answer. */
+  listTimeoutMs?: number;
+  /** How long a model check waits for the model to answer. */
+  checkTimeoutMs?: number;
   log?: (message: string) => void;
 }
 
 const MESSAGE_LIMIT = 300;
 const STDERR_TAIL_LIMIT = 4000;
+const LIST_TIMEOUT_MS = 30_000;
+// A cold local model may need this long to load before it answers.
+const CHECK_TIMEOUT_MS = 120_000;
+/** The one prompt a model check sends. */
+const CHECK_PROMPT = 'Reply with the single word: ok';
+/** What pi prints on stderr when it does not know a model, as an error or a warning. */
+const UNKNOWN_MODEL = /model\b.*\bnot found/i;
+const NO_MODELS =
+  'pi offers no models that subzero children can use. Set up a pi provider (log in, set its API key, or add it to ' +
+  "pi's models.json; a provider that only a pi extension adds does not reach children), then try again.";
 
 // pi events that need no domain event. Anything else unrecognized is logged.
 const QUIET_EVENTS = new Set([
@@ -73,6 +93,7 @@ const DIALOG_METHODS = new Set(['select', 'confirm', 'input', 'editor']);
 export class PiDriver implements ChildDriver {
   private version: string | Unavailable | undefined;
   private readonly live = new Set<PiChildRun>();
+  private readonly probes = new Set<PiProbe>();
 
   /** The child port of this driver, which Kernel hands to a caller. */
   readonly port: ChildPort = { start: (request, onEvent) => this.start(request, onEvent) };
@@ -129,6 +150,119 @@ export class PiDriver implements ChildDriver {
     return undefined;
   };
 
+  /**
+   * The models a child can use: pi's get_available_models, asked with the
+   * children's environment, isolation flags and pi command, so that a provider
+   * children cannot reach is not listed. Rejects with a one-line reason; zero
+   * models is an error that points to pi provider setup.
+   */
+  readonly listModels = async (options: { projectRoot?: string; childHostOptions?: ChildHostOptions } = {}): Promise<HostModel[]> => {
+    const { files: piExtensions, problem } = piExtensionsOf(options.childHostOptions);
+    if (problem !== undefined) throw new Error(problem);
+    const timeoutMs = this.options.listTimeoutMs ?? LIST_TIMEOUT_MS;
+    const probe = this.probe([...childRpcArgs(piExtensions), '--no-session'], options.projectRoot, { strict: true });
+    const timer = deadline(timeoutMs);
+    try {
+      const answer = await Promise.race([
+        probe.client.send({ type: 'get_available_models' }).then(
+          (response) => response,
+          () => 'gone' as const,
+        ),
+        probe.gone.then(() => 'gone' as const),
+        timer.promise,
+      ]);
+      if (answer === 'timeout') {
+        probe.mustKill = true;
+        throw new Error(`pi did not list its models within ${seconds(timeoutMs)}`);
+      }
+      if (answer === 'gone') throw new Error(await probe.whyGone('it listed its models'));
+      if (!answer.success) throw new Error(bounded(`pi refused to list its models: ${answer.error ?? 'no reason given'}`));
+      return hostModels(answer.data);
+    } finally {
+      timer.clear();
+      await this.endProbe(probe);
+    }
+  };
+
+  /**
+   * Sends one fixed prompt to a model in a one-turn pi run with the children's
+   * flags, the model and thinking level, no tools and no saved session. Answered,
+   * or failed with a kind and a one-line reason; aborting kills pi.
+   */
+  readonly checkModel = async (request: ModelCheckRequest): Promise<ModelCheckResult> => {
+    const { model, thinking, projectRoot, signal } = request;
+    const { files: piExtensions, problem } = piExtensionsOf(request.childHostOptions);
+    if (signal?.aborted) return checkFailed('cancelled', 'the check was cancelled');
+    if (problem !== undefined) return checkFailed('failed', problem);
+    const timeoutMs = this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS;
+    let lastAssistant: any = null;
+    let markSettled!: () => void;
+    const settled = new Promise<'settled'>((resolve) => (markSettled = () => resolve('settled')));
+    const probe = this.probe(
+      [...childRpcArgs(piExtensions), '--model', model, '--thinking', thinking, '--no-tools', '--no-session'],
+      projectRoot,
+      {
+        strict: false,
+        onEvent: (event) => {
+          if (event.type === 'message_end' && event.message?.role === 'assistant') lastAssistant = event.message;
+          if (event.type === 'agent_settled') markSettled();
+        },
+      },
+    );
+    const timer = deadline(timeoutMs);
+    let onAbort: () => void = () => {};
+    const aborted = new Promise<'cancelled'>((resolve) => {
+      onAbort = () => resolve('cancelled');
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    const ended = Promise.race([timer.promise, aborted, probe.gone.then(() => 'gone' as const)]);
+    const unknown = (message: string): ModelCheckResult =>
+      probe.unknownModel ? checkFailed('unknown_model', `unknown model: ${model}: ${message}`) : checkFailed('failed', message);
+    try {
+      const prompt = await Promise.race([
+        probe.client.send({ type: 'prompt', message: CHECK_PROMPT }).then(
+          (response) => response,
+          () => 'gone' as const,
+        ),
+        ended,
+      ]);
+      const done = typeof prompt === 'string' ? prompt : prompt.success ? await Promise.race([settled, ended]) : prompt;
+      if (done === 'timeout' || done === 'cancelled') {
+        probe.mustKill = true;
+        return done === 'timeout'
+          ? checkFailed('timeout', `no answer within ${seconds(timeoutMs)}`)
+          : checkFailed('cancelled', 'the check was cancelled');
+      }
+      if (done === 'gone') {
+        const reason = await probe.whyGone('the model answered');
+        return probe.unknownModel ? checkFailed('unknown_model', `unknown model: ${model}`) : checkFailed('failed', reason);
+      }
+      if (done !== 'settled') return unknown(`pi refused the prompt: ${done.error ?? 'no reason given'}`);
+      if (lastAssistant === null) return checkFailed('failed', 'no assistant message');
+      if (lastAssistant.stopReason === 'error') return unknown(String(lastAssistant.errorMessage ?? 'pi reported an error'));
+      if (lastAssistant.stopReason === 'aborted') return checkFailed('failed', 'pi aborted the turn');
+      return { ok: true };
+    } finally {
+      timer.clear();
+      signal?.removeEventListener('abort', onAbort);
+      await this.endProbe(probe);
+    }
+  };
+
+  private probe(args: string[], cwd: string | undefined, options: ProbeOptions): PiProbe {
+    const probe = new PiProbe([...this.piCommand, ...args], cwd, this.options.env ?? process.env, options);
+    this.probes.add(probe);
+    return probe;
+  }
+
+  private async endProbe(probe: PiProbe): Promise<void> {
+    try {
+      await probe.end(this.options.killWaitMs ?? 2000);
+    } finally {
+      this.probes.delete(probe);
+    }
+  }
+
   get piCommand(): string[] {
     return this.options.piCommand ?? ['pi'];
   }
@@ -160,7 +294,175 @@ export class PiDriver implements ChildDriver {
   /** Last resort when this process must exit now: SIGKILL every live child run. */
   killAll(): void {
     for (const run of this.live) run.forceKill();
+    for (const probe of this.probes) probe.kill();
   }
+}
+
+interface ProbeOptions {
+  /** A line on stdout that is not JSON ends the run, as a malformed answer. */
+  strict: boolean;
+  onEvent?: (event: PiEvent) => void;
+}
+
+/**
+ * A short pi RPC run that is no task: the model listing and the model check. It
+ * is a process group leader, and end() leaves no member of the group running.
+ */
+class PiProbe {
+  readonly client: PiRpcClient;
+  /** Resolves when pi can no longer answer: it exited, its pipe was lost, or it printed a line that is not JSON. */
+  readonly gone: Promise<void>;
+  unknownModel = false;
+  /** Set when the run timed out or was cancelled: end() kills pi rather than closing stdin. */
+  mustKill = false;
+  private readonly child: ChildProcess;
+  private readonly exit: Promise<{ code: number | null; signal: string | null }>;
+  private exited = false;
+  private spawnError: Error | null = null;
+  private badRecord: string | null = null;
+  private stderrTail = '';
+
+  constructor(
+    private readonly command: string[],
+    cwd: string | undefined,
+    env: NodeJS.ProcessEnv,
+    options: ProbeOptions,
+  ) {
+    const [program, ...args] = command;
+    const child = spawn(program!, args, {
+      ...(cwd !== undefined ? { cwd } : {}),
+      env: { ...env, ...CHILD_ENV },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+    });
+    this.child = child;
+    // 'close' comes after stderr is drained, which the unknown-model match needs;
+    // a short wait after 'exit' covers a descendant that holds the pipes open.
+    this.exit = new Promise((resolve) => {
+      const done = (code: number | null, signal: string | null) => {
+        this.exited = true;
+        resolve({ code, signal });
+      };
+      child.once('close', (code, signal) => done(code, signal));
+      child.once('exit', (code, signal) => setTimeout(() => done(code, signal), 200).unref());
+      child.once('error', (err) => {
+        this.spawnError = err;
+        done(null, null);
+      });
+    });
+    child.stderr!.on('data', (chunk: Buffer) => {
+      this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_LIMIT);
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
+    });
+    let markBad!: () => void;
+    const bad = new Promise<void>((resolve) => (markBad = resolve));
+    this.client = new PiRpcClient(child.stdin!, child.stdout!, {
+      onEvent: options.onEvent ?? (() => {}),
+      onBadRecord: (record) => {
+        if (!options.strict || this.badRecord !== null) return;
+        this.badRecord = record;
+        markBad();
+      },
+    });
+    this.gone = Promise.race([this.exit.then(() => undefined), this.client.lost, bad]);
+  }
+
+  /** One line saying why pi stopped answering before `what`. */
+  async whyGone(what: string): Promise<string> {
+    await this.exitedWithin(300);
+    if (this.spawnError !== null) return bounded(`could not start pi (${this.command[0]}): ${this.spawnError.message}`);
+    if (this.badRecord !== null) return bounded(`pi printed a line that is not JSON before ${what}: ${this.badRecord.slice(0, 120)}`);
+    const tail = this.stderrTail.trim();
+    if (!this.exited) return bounded(`lost the pipe to pi before ${what}${tail ? `: ${tail}` : ''}`);
+    const exit = await this.exit;
+    const how = exit.signal !== null ? `on signal ${exit.signal}` : `with code ${exit.code}`;
+    return bounded(`pi exited ${how} before ${what}${tail ? `: ${tail}` : ''}`);
+  }
+
+  /** Close stdin and wait; then SIGTERM and SIGKILL the group. A killed probe is killed at once. */
+  async end(waitMs: number): Promise<void> {
+    this.client.close();
+    if (!this.mustKill && !(await this.exitedWithin(waitMs))) {
+      this.signal('SIGTERM');
+      await this.exitedWithin(waitMs);
+    }
+    this.kill();
+    await this.exit;
+  }
+
+  kill(): void {
+    this.signal('SIGKILL');
+  }
+
+  private signal(signal: NodeJS.Signals): void {
+    signalProcessTree(this.child.pid, this.exited, signal);
+  }
+
+  private exitedWithin(ms: number): Promise<boolean> {
+    return waitForExit(this.exit, this.exited, ms);
+  }
+}
+
+function checkFailed(kind: ModelCheckFailure, message: string): ModelCheckResult {
+  return { ok: false, kind, message: bounded(message) };
+}
+
+/** pi's model list as tier choices; malformed or empty is an error, never an empty list. */
+function hostModels(data: any): HostModel[] {
+  const list: unknown = data?.models;
+  if (!Array.isArray(list)) throw new Error('pi returned a malformed model list: it has no models array');
+  if (list.length === 0) throw new Error(NO_MODELS);
+  return list.map((model, i) => hostModel(model, i));
+}
+
+function hostModel(model: any, index: number): HostModel {
+  const named = (value: unknown) => typeof value === 'string' && value !== '';
+  if (typeof model !== 'object' || model === null || !named(model.provider) || !named(model.id)) {
+    throw new Error(`pi returned a malformed model list: entry ${index + 1} has no provider or id`);
+  }
+  const name = `${model.provider}/${model.id}`;
+  const reasoning = model.reasoning === true;
+  const cost = model.cost;
+  const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+  return {
+    name,
+    endpoint: modelEndpoint(name),
+    reasoning,
+    thinkingLevels: supportedThinkingLevels(reasoning, model.thinkingLevelMap),
+    ...(number(model.contextWindow) ? { contextWindow: model.contextWindow } : {}),
+    ...(number(model.maxTokens) ? { maxTokens: model.maxTokens } : {}),
+    input: Array.isArray(model.input) ? model.input.filter((kind: unknown) => typeof kind === 'string') : [],
+    ...(typeof cost === 'object' && cost !== null && [cost.input, cost.output, cost.cacheRead, cost.cacheWrite].every(number)
+      ? { cost: { input: cost.input, output: cost.output, cacheRead: cost.cacheRead, cacheWrite: cost.cacheWrite } }
+      : {}),
+  };
+}
+
+/**
+ * The thinking levels a model accepts, as pi-ai's getSupportedThinkingLevels
+ * decides them: only off without reasoning; otherwise every level up to high that
+ * the thinking level map does not mark null, and xhigh or max only when the map
+ * gives them a value. THINKING_LEVELS has pi-ai's order, off to max.
+ */
+function supportedThinkingLevels(reasoning: boolean, thinkingLevelMap: unknown): ThinkingLevel[] {
+  if (!reasoning) return ['off'];
+  const map = typeof thinkingLevelMap === 'object' && thinkingLevelMap !== null ? (thinkingLevelMap as Record<string, unknown>) : {};
+  return THINKING_LEVELS.filter((level) => {
+    const mapped = map[level];
+    if (mapped === null) return false;
+    if (level === 'xhigh' || level === 'max') return mapped !== undefined;
+    return true;
+  });
+}
+
+function seconds(ms: number): string {
+  return `${ms / 1000}s`;
+}
+
+function deadline(ms: number): { promise: Promise<'timeout'>; clear(): void } {
+  let timer: NodeJS.Timeout | undefined;
+  const promise = new Promise<'timeout'>((resolve) => (timer = setTimeout(() => resolve('timeout'), ms)));
+  return { promise, clear: () => clearTimeout(timer) };
 }
 
 type Stop = { status: 'cancelled' } | { status: 'failed'; failureKind: 'timeout'; message: string };
@@ -223,11 +525,13 @@ class PiChildRun {
 
   private async main(): Promise<ChildOutcome> {
     const { agent, taskId, brief, projectRoot, sessionsFolder, driverFilesFolder } = this.request;
+    const { files: piExtensions, problem } = piExtensionsOf(this.request.childHostOptions);
 
     const missing = missingSkills(agent.skills);
     if (missing.length > 0) {
       return failed('skill_mismatch', `missing skill folder: ${missing.map((s) => `${s.name} (${s.folder})`).join(', ')}`);
     }
+    if (problem !== undefined) return failed('error', problem);
     if (this.stop !== null) return this.stoppedBeforeSpawn();
 
     const overlay = prepareOverlay(driverFilesFolder, agent.skills);
@@ -242,7 +546,7 @@ class PiChildRun {
 
     const command = [
       ...this.driver.piCommand,
-      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder }),
+      ...launchArgs({ taskId, agent, overlaySkills: overlay, sessionsFolder, ...(piExtensions.length > 0 ? { piExtensions } : {}) }),
     ];
     const launchSpec: LaunchSpec = {
       command,
@@ -322,7 +626,7 @@ class PiChildRun {
     child.stderr!.on('data', (chunk: Buffer) => {
       this.stderrTail = (this.stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_LIMIT);
       // Remembered, since the warning can leave the tail on a long run.
-      if (/model\b.*\bnot found/i.test(this.stderrTail)) this.unknownModel = true;
+      if (UNKNOWN_MODEL.test(this.stderrTail)) this.unknownModel = true;
     });
     this.client = new PiRpcClient(child.stdin!, child.stdout!, {
       onEvent: (event) => this.onPiEvent(event),
@@ -554,13 +858,8 @@ class PiChildRun {
     await this.exit;
   }
 
-  private async exitedWithin(ms: number): Promise<boolean> {
-    if (this.exited) return true;
-    let timer: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
-    const result = await Promise.race([this.exit!.then(() => true as const), timedOut]);
-    clearTimeout(timer);
-    return result;
+  private exitedWithin(ms: number): Promise<boolean> {
+    return waitForExit(this.exit!, this.exited, ms);
   }
 
   /**
@@ -568,53 +867,68 @@ class PiChildRun {
    * spawns detached shells, which a signal to pi's own group does not reach.
    */
   private signalTree(signal: NodeJS.Signals): void {
-    const pid = this.child?.pid;
-    if (pid === undefined || this.exited) return this.signalGroup(signal);
-    const targets = [pid, ...descendants(pid)];
-    for (const target of targets) {
-      try {
-        process.kill(-target, signal);
-      } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-          // already gone
-        }
-      }
-    }
+    signalProcessTree(this.child?.pid, this.exited, signal);
   }
 
   /** Signal the groups of pi's descendants, not pi itself, while pi is alive. */
   private signalDescendants(signal: NodeJS.Signals): void {
     const pid = this.child?.pid;
     if (pid === undefined || this.exited) return;
-    for (const target of descendants(pid)) {
+    signalTargets(descendants(pid), signal);
+  }
+
+  /** Signal pi's own process group. */
+  private signalGroup(signal: NodeJS.Signals): void {
+    signalOwnGroup(this.child?.pid, this.exited, signal);
+  }
+}
+
+/** True once exit settles within ms; true at once when the process has already exited. */
+async function waitForExit(exit: Promise<unknown>, exited: boolean, ms: number): Promise<boolean> {
+  if (exited) return true;
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), ms)));
+  const result = await Promise.race([exit.then(() => true as const), timedOut]);
+  clearTimeout(timer);
+  return result;
+}
+
+/** Signal each target's process group, or the target alone when it leads no group. */
+function signalTargets(targets: readonly number[], signal: NodeJS.Signals): void {
+  for (const target of targets) {
+    try {
+      process.kill(-target, signal);
+    } catch {
       try {
-        process.kill(-target, signal);
+        process.kill(target, signal);
       } catch {
-        try {
-          process.kill(target, signal);
-        } catch {
-          // already gone
-        }
+        // already gone
       }
     }
   }
+}
 
-  /**
-   * Signal pi's own process group. After pi is reaped its id is safe to use only
-   * while a member of the group is still alive.
-   */
-  private signalGroup(signal: NodeJS.Signals): void {
-    const pid = this.child?.pid;
-    if (pid === undefined) return;
-    if (this.exited && !groupHasMembers(pid)) return;
-    try {
-      process.kill(-pid, signal);
-    } catch {
-      // the group is already gone
-    }
+/**
+ * Signal a process's own group. After the process is reaped its id is safe to use
+ * only while a member of the group is still alive.
+ */
+function signalOwnGroup(pid: number | undefined, exited: boolean, signal: NodeJS.Signals): void {
+  if (pid === undefined) return;
+  if (exited && !groupHasMembers(pid)) return;
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // the group is already gone
   }
+}
+
+/**
+ * Signal a live process's group and the group of every descendant; once it has
+ * exited, only its own group, under signalOwnGroup's guard.
+ */
+function signalProcessTree(pid: number | undefined, exited: boolean, signal: NodeJS.Signals): void {
+  if (pid === undefined || exited) return signalOwnGroup(pid, exited, signal);
+  signalTargets([pid, ...descendants(pid)], signal);
 }
 
 function failed(failureKind: 'skill_mismatch' | 'error', message: string): ChildOutcome {

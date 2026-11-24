@@ -1,10 +1,10 @@
-// @sigil implements design/mcp-server.sigil McpServer (tool result limit, await reply, listing)
+// @sigil implements design/claude-mcp-server.sigil ClaudeMcpServer (tool result limit, await reply, listing)
 //
 // What is specific to the MCP tool replies: the tool result limit, the reply
 // budget it leaves a child, the whole-or-deferred sections of an await reply and
 // the listing cap. The wording of a task's state comes from the service.
 import type { CollectReply, DelegateReply, TaskListing } from '../service/delegation-service.js';
-import { formatResult, formatStatusLine, listingStatus, statusFacts, withNotice } from '../service/status-text.js';
+import { describeTaskReply, listingStatus, withNotice } from '../service/status-text.js';
 
 /**
  * Claude Code's inline limit for an MCP tool result: a longer text result is not
@@ -19,34 +19,9 @@ export const REPLY_RESERVE = 2_000;
 export const REPLY_BUDGET_CHARS = TOOL_RESULT_LIMIT - REPLY_RESERVE;
 export const LISTING_CAP = 50;
 
-/** The status line of a reply that carries no result, or undefined for the other kinds of reply. */
-function replyStatusLine(reply: DelegateReply | CollectReply, now: number): string | undefined {
-  switch (reply.kind) {
-    case 'started':
-    case 'running':
-      return formatStatusLine({ state: 'running', startedAt: reply.startedAt }, now);
-    case 'queued':
-      return formatStatusLine(
-        { state: 'queued', endpoint: reply.endpoint, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt },
-        now,
-      );
-    case 'other_process':
-      return formatStatusLine(
-        statusFacts({
-          ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}),
-          ...(reply.endpoint !== undefined ? { endpoint: reply.endpoint } : {}),
-          createdAt: reply.enqueuedAt,
-        }),
-        now,
-      );
-    default:
-      return undefined;
-  }
-}
-
 /** One reply of delegate, tasks, await or cancel about one task, with the task id first. */
 export function describeReply(reply: DelegateReply | CollectReply, view?: { agent: string; createdAt: string }, now = Date.now()): string {
-  return withNotice(describeOne(reply, view, now), 'notice' in reply ? reply.notice : undefined);
+  return withNotice(describeTaskReply(reply, view, { collect: 'await', cancel: 'cancel' }, now), 'notice' in reply ? reply.notice : undefined);
 }
 
 /** The one line of an await reply that stands for a result left out for the reply's size. */
@@ -64,36 +39,23 @@ function deferredLine(reply: Extract<CollectReply, { kind: 'result' }>): string 
  * keeps its status line.
  */
 export function formatAwait(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): string {
+  return formatAwaitWithShown(replies, limit, now).body;
+}
+
+/** The complete result sections actually included in an await response. */
+export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): { body: string; shown: string[] } {
   const sections: string[] = [];
+  const shown: string[] = [];
   let length = 0;
   for (const reply of replies) {
     const whole = describeReply(reply, undefined, now);
     const joined = length + (sections.length > 0 ? 2 : 0) + whole.length;
     const section = reply.kind === 'result' && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
+    if (reply.kind === 'result' && section === whole) shown.push(reply.result.taskId);
     length += (sections.length > 0 ? 2 : 0) + section.length;
     sections.push(section);
   }
-  return sections.join('\n\n');
-}
-
-function describeOne(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, now: number): string {
-  if (reply.kind === 'result') return formatResult(reply.result);
-  const id = `task: ${reply.taskId}`;
-  const lead = view !== undefined ? `${id} · ${view.agent}` : id;
-  const line = replyStatusLine(reply, now);
-  switch (reply.kind) {
-    case 'started':
-    case 'queued':
-      return `${lead} · ${line}; collect it with await or cancel it with cancel`;
-    case 'running':
-      return `${lead} · ${line}`;
-    case 'other_process':
-      return `${lead} · ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
-    case 'abandoned':
-      return `${lead} · abandoned: its owner process died, so it has no result`;
-    case 'not_found':
-      return `${id} · no such task`;
-  }
+  return { body: sections.join('\n\n'), shown };
 }
 
 /**

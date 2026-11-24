@@ -1,3 +1,4 @@
+@design/kernel.sigil from Kernel import { parent model }
 @design/task-core.sigil from TaskCore import {
   task, task id, child run, child run state, domain event, result, launch spec,
     enqueue time, start time, child session, child driver,
@@ -14,32 +15,48 @@ component TaskStore {
   }
 
   state {
-    The *store folder* is .agents/subzero/ in the project root. A *task record* is
-    the set of files that TaskStore keeps in the directory tasks/<task id>/ of the
-    store folder. It holds task.json with the frozen agent definition and, once the
+    The *store folder* is .agents/subzero/ in the project root. A *task record*
+    is
+    the set of files that TaskStore keeps in the directory tasks/<task id>/ of
+    the
+    store folder. It holds task.json with the frozen agent definition and, once
+    the
     child run has started, the launch spec, the *event log* events.jsonl, and
-    turns/1.json with the exact result the parent received. A task whose child run
-    failed before it started has no launch spec. The same directory also holds the
-    *driver files* of the task, which are what its child driver keeps there beside
+    turns/1.json with the exact result the parent model received. A task whose
+    child run
+    failed before it started has no launch spec. The same directory also holds
+    the
+    *driver files* of the task, which are what its child driver keeps there
+    beside
     the task record and which TaskStore neither writes nor removes.
 
-    A task record also keeps the model endpoint and the enqueue time of its task
+    A task record also keeps the model endpoint and the enqueue time of its
+    task
     from its first write, and the start time once its child run is released.
 
-    The *task status* of a task is running while its child run state is Pending,
-    Starting or Live. It then becomes the status of its result, which is completed,
+    The *task status* of a task is running while its child run state is
+    Pending,
+    Starting or Live. It then becomes the status of its result, which is
+    completed,
     truncated, failed or cancelled, or it becomes abandoned when the
     *start-up sweep* marks it. A task whose task record holds a result has the
-    task status of that result, whatever the latest line of the task index says.
+    task status of that result, whatever the latest line of the task index
+    says.
 
-    The *task index* is index.jsonl in the store folder. It is append-only and has
-    one line for each update of a task status. The latest line for a task wins. A
-    line records the task id, the agent, the task status, the *parent session id*
+    The *task index* is index.jsonl in the store folder. It is append-only and
+    has
+    one line for each update of a task status. The latest line for a task wins.
+    A
+    line records the task id, the agent, the task status, the
+    *parent session id*
     when there is one, the child session, the file that holds it and the
     timestamps. It also records the *owner process*, which is the process that
-    created the task and runs its child run, by its process id and its start time,
-    on the first line written for the task. A parent session id is the id of the
-    conversation that made the delegation, and a delegation from the command line
+    created the task and runs its child run, by its process id and its
+    start time,
+    on the first line written for the task. A parent session id is the id of
+    the
+    conversation that made the delegation, and a delegation from the command
+    line
     has none.
 
     The child session of each task is kept in the *sessions folder* next to the
@@ -64,9 +81,11 @@ component TaskStore {
   constraints {
     A task record must outlive the parent session that created it.
 
-    The task index must be read as the latest line per task, and a corrupt trailing
+    The task index must be read as the latest line per task, and a corrupt
+    trailing
     line must be skipped with a warning. Each line must be appended as a single
-    write, so that two processes never interleave one line, and an abandoned line
+    write, so that two processes never interleave one line, and an abandoned
+    line
     written twice must change nothing.
 
     The result in a task record must be written in one step, so that a reader
@@ -83,22 +102,29 @@ component TaskStore {
     The start time must be kept where a reader in another process sees it
     through the task index or the task record, from the moment of the release.
 
-    TaskStore must receive the project root from its caller and must not resolve
-    one of its own, so that the store folder is the one the start-up sweep read.
+    TaskStore must receive the project root from its caller and must not
+    resolve
+    one of its own, so that the store folder is the one the start-up sweep
+    read.
 
-    The event log must hold each domain event of the task across its child run, and
-    it must never be sent to the parent.
+    The event log must hold each domain event of the task across its child run,
+    and
+    it must never be sent to the parent model.
 
-    The store folder must be created readable by its owner only, with a .gitignore
-    inside it that ignores everything in it, so that the task records, the
+    The store folder must be created readable by its owner only, with a
+    .gitignore
+    inside it that ignores everything in it, so that each task record, the
     sessions folder and the task index never reach a commit,
-    because the event log and the sessions can hold secrets from tool output. An
-    existing .gitignore there must be left unchanged, and the user's own .gitignore
+    because the event log and the sessions can hold secrets from tool output.
+    An
+    existing .gitignore there must be left unchanged, and the user's own
+    .gitignore
     must never be edited.
   }
 
   cases {
-    The task index keeps the latest line for a task after three status updates, and
+    The task index keeps the latest line for a task after three status updates,
+    and
     a corrupt last line is skipped with a warning.
 
     A task whose latest line says running and whose owner process is dead at
@@ -117,13 +143,15 @@ component TaskStore {
     its task status is running.
 
     The first write of a task record creates the store folder with its own
-    .gitignore, and in a git repository nothing in it shows in git status while the
+    .gitignore, and in a git repository nothing in it shows in git status while
+    the
     user's own .gitignore is unchanged.
   }
 
   interface {
     Provide the task record of a task id for writing and reading, including its
-    launch spec and its result. Create the store folder, readable by its owner only
+    launch spec and its result. Create the store folder, readable by its owner
+    only
     and ignoring itself, on the first write of a task record.
 
     Append each domain event to the event log of its task.
@@ -131,11 +159,14 @@ component TaskStore {
     Provide the model endpoint, the enqueue time and the start time of each
     task record to a reader in any process.
 
-    List the task records of one parent session id, or of every parent session id,
+    List each task record of one parent session id, or of every
+    parent session id,
     using the task index, each with its task status.
 
-    TaskStore provides the sessions folder, where the child session of each task is
-    kept, and the folder of the driver files of each task beside its task record,
+    TaskStore provides the sessions folder, where the child session of each
+    task is
+    kept, and the folder of the driver files of each task beside its
+    task record,
     for TaskCore to hand to the child driver of that task.
 
     Run the start-up sweep for a caller at its start-up and whenever it asks
@@ -143,11 +174,17 @@ component TaskStore {
   }
 
   decisions {
-    The owner process is recorded because a run without an exit record is also what
-    a healthy run looks like, so a sweep that did not check its owner would mark
-    the live run of another process abandoned. The store folder ignores itself so
-    that the secrets in it are protected without editing a file the user owns, and
-    abandoned is its own task status because no parent ever receives a result for
+    The owner process is recorded because a run without an exit record is also
+    what
+    a healthy run looks like, so a sweep that did not check its owner would
+    mark
+    the live run of another process abandoned. The store folder ignores itself
+    so
+    that the secrets in it are protected without editing a file the user owns,
+    and
+    abandoned is its own task status because no parent model ever receives a
+    result
+    for
     such a task.
   }
 }

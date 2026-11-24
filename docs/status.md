@@ -1,6 +1,8 @@
 # subzero: implementation status
 
-Status as of 2026-11-10, on branch `feat/subzero-claude-midtire` at commit `a20b3b0`.
+Status as of 2026-11-12 on branch `feat/pi-parent-extension`. The pi parent,
+Claude cancellation paths and background completion fallback are implemented.
+The real two-parent acceptance checks in the plan remain to be run by a person.
 
 This page compares what is built with what the design asks for. It has two
 sources that do different jobs:
@@ -24,14 +26,14 @@ do, what it deferred, and how it was checked.
 
 | Area | State |
 |---|---|
-| Sigil contract (11 components) | Every component has implementing code. `sigilc tree --root .` reports no diagnostics. |
+| Sigil contract (13 components) | Both parent adapters and the Claude plugin commands have implementing code. `sigil check .` reports no diagnostics. |
 | Claude Code parent, pi child | Built and checked live with Claude Code 2.1.318 and pi 0.87. |
 | Tiered subagent routing for compound-engineering | Built and accepted in the R17 live run and its probes. |
-| Plugin distribution (`subzero@qoherent`) | Built and tested locally. The repository is at `qoherent/sub0`, and the `plugin` branch is published and installs from GitHub on a clean profile. The release workflow, the first tag and the model-backed walkthroughs are still to do. |
+| Plugin distribution (`subzero@qoherent`) | Built and tested locally. A previous `plugin` branch is published; these changes and the pi package branch have not been published. The release workflow, first tag and model-backed walkthroughs are still to do. |
 | Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing and no go/no-go decision has been written. |
 | v0.2 and later (task model, config layering, other hosts) | Not started. |
 
-Tests: 25 files, 414 tests pass (`npm test`), with typecheck and build clean.
+The test suite, typecheck and release build are run locally for this branch.
 
 ## What is implemented
 
@@ -45,9 +47,11 @@ Tests: 25 files, 414 tests pass (`npm test`), with typecheck and build clean.
 | DelegationService | [delegation-service.sigil](../design/delegation-service.sigil) | `src/service/` | Project root, start-up sweep, agent lookup per delegation, live task registry, per-endpoint parallel limit (queued vs started), status and result wording. |
 | TaskStore | [task-store.sigil](../design/task-store.sigil) | `src/store/` | `.agents/subzero/` (owner-only, self-ignoring), `index.jsonl`, task records, `abandoned` status. |
 | PiDriver | [pi-driver.sigil](../design/pi-driver.sigil) | `src/pi/` | `pi --mode rpc` with skill isolation (`--no-skills --skill`, `-ne`, `-nc`), skill verification, timeouts, typed failures, cancel, attach, HTML export, `pi --version` prerequisite check. |
-| McpServer | [mcp-server.sigil](../design/mcp-server.sigil) | `src/mcp/` | Four MCP tools (`delegate`, `tasks`, `await`, `cancel`), progress notifications, the 48,000-character reply budget, parent session id per session. It reports the `package.json` version, which the build stamps into the bundle. |
-| RoutingHooks | [routing-hooks.sigil](../design/routing-hooks.sigil) | `src/routing/` | SessionStart routing text; PreToolUse redirect on `Agent\|Task` with readiness marker, deny memory, pass-back, fork and `isolation` exemptions. |
-| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `run`, `tasks`, `attach`, `show`. |
+| ClaudeMcpServer | [claude-mcp-server.sigil](../design/claude-mcp-server.sigil) | `src/mcp/` | Four MCP tools (`delegate`, `tasks`, `await`, `cancel`), progress notifications, the 48,000-character reply budget, parent session id per session. It reports the `package.json` version, which the build stamps into the bundle. |
+| PiExtension | [pi-extension.sigil](../design/pi-extension.sigil) | `src/pi-parent/` | pi as a second parent host: `subagent`, `subzero_await`, `subzero_tasks`, `subzero_cancel`, `/subzero`, `/subzero init` with its run-scoped init tools, and a session core for each pi session. |
+| ClaudePluginCommands | [claude-plugin-commands.sigil](../design/claude-plugin-commands.sigil) | `skills/cancel/` | The user-only `/subzero:cancel` plugin skill. |
+| ClaudeRoutingHooks | [claude-routing-hooks.sigil](../design/claude-routing-hooks.sigil) | `src/routing/` | SessionStart routing text; PreToolUse redirect on `Agent\|Task` with readiness marker, deny memory, pass-back, fork and `isolation` exemptions. |
+| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `config`, `run`, `tasks`, `attach`, `show`. |
 | SigilWiring | [sigil-wiring.sigil](../design/sigil-wiring.sigil) | `examples/sigil/` | The agent file and README of the sigil experiment. |
 | SpikeHarness | [spike-harness.sigil](../design/spike-harness.sigil) | `bench/`, [spike-results.md](spike-results.md) | The measurement harness, scorer and results table. |
 
@@ -80,6 +84,10 @@ The distribution work added:
 
 ### 1. To finish the current work
 
+- Deny-memory cleanup uses per-session operating-system locks so it cannot
+  remove a denial while another hook uses that session. A missing `lockf`
+  (macOS) or `flock` (Linux) makes the hook allow the Agent call through.
+
 **Release (distribution plan U7 and the transfer)**
 - Stage 1 walkthrough: install from `dist-release/local-marketplace` on a clean
   profile and run `init`, `tasks` and a routed task. It needs a logged-in
@@ -93,10 +101,36 @@ The distribution work added:
   one preview to the next (AE1, AE3).
 - A code review of the distribution changes, which has not been run.
 
+**Parent extension changes (2026-11-12)**
+- `AgentConfig`: `medium` is the default tier and `default` has no special role; the file must hold `medium`, `general` and
+  `fallback`; the routing settings moved to the hooks; no `parent session model`, session agent definition or
+  starter general agent.
+- `DelegationService`: the completion notice and the stop notice (one for each stopped task) and the session
+  cancel; the project root is resolved once for each service.
+- `ClaudeMcpServer`: MCP tasks, the task mode in the readiness marker, `wait` defaulting by task mode, `cancel`
+  with no task id, a cancel on session change.
+- `ClaudeRoutingHooks`: mode-neutral routing text and deny reason while no task mode is known; it owns the
+  routing settings.
+- `Cli`: `init` writes the `medium` tier; `SigilWiring`: the example file holds `medium`, `general`, `fallback`.
+- `PiExtension` and `ClaudePluginCommands` are built (see the table above).
+- The plan for this work is [plans/2026-11-11-1012-feat-pi-parent-extension-plan.md](plans/2026-11-11-1012-feat-pi-parent-extension-plan.md).
+
+**Guided init (2026-11-16)**
+- `/subzero:init` with no model in Claude Code and `/subzero init` in pi run the
+  same guided setup: they list the child host's models, suggest a model for
+  `small`, `medium` and `large`, ask each endpoint's `parallel` limit, offer a
+  one-turn reachability check, and write `.agents/subzero.yaml` only after the
+  user confirms subzero's diff. `init <model>` stays as the quick path.
+- One setup service serves both parents. Claude Code reaches it through the
+  `subzero config` commands; pi through init tools that are on only during a
+  `/subzero init` run.
+- `subzero init` with no model in a terminal is a usage error that names both
+  parent commands. Load errors that said "run subzero init" now name them too.
+- The plan for this work is [plans/2026-11-16-1601-feat-guided-subzero-init-plan.md](plans/2026-11-16-1601-feat-guided-subzero-init-plan.md).
+
 **Decisions waiting on the user**
-- `subzero init` writes only a `default` tier, but routing keys on `small`,
-  `medium` and `large`. After `init` alone, nothing routes, and the README tells
-  users to add a `medium` tier by hand. Should `init` write one?
+- Answered and implemented 2026-11-12: `subzero init` writes a `medium` tier,
+  and the file must also hold `general` and `fallback`.
 - The README lists a fifth known limit: a cloned project's agent file is
   executable-grade configuration. It was added as the conservative default and
   needs the user's confirmation.
@@ -157,7 +191,8 @@ From the tiered routing plan:
 - tiers in a user-level config file.
 
 From the distribution plan:
-- a guided `/subzero:setup` and automatic installation of pi;
+- automatic installation of pi (the guided `/subzero:setup` it also deferred is
+  now built as guided `init`; see above);
 - a preview channel beside a stable one;
 - an npm package and a CLI usable outside Claude Code;
 - a central directory listing;

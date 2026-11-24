@@ -9,6 +9,7 @@ import type { TaskRecordWriter } from '../store/task-store.js';
 import { newTaskId } from './ids.js';
 import {
   ENDED_STATES,
+  type ChildHostOptions,
   type ChildOutcome,
   type ChildPort,
   type ChildRun,
@@ -23,6 +24,8 @@ export interface TaskRequest {
   brief: string;
   /** The child port of the host of the agent definition. */
   port: ChildPort;
+  /** The global file's options for the child host of the agent definition, handed to the child port on start. */
+  childHostOptions?: ChildHostOptions;
   parentSessionId?: string;
 }
 
@@ -56,6 +59,7 @@ export class Task {
     private readonly brief: string,
     private readonly port: ChildPort,
     createdAt: string,
+    private readonly childHostOptions: ChildHostOptions = {},
   ) {
     this.taskId = taskId;
     this.agent = agent;
@@ -119,6 +123,7 @@ export class Task {
           projectRoot: this.core.projectRoot,
           sessionsFolder: this.core.store.sessionsFolder,
           driverFilesFolder: this.core.store.driverFilesFolder(this.taskId),
+          ...(Object.keys(this.childHostOptions).length > 0 ? { childHostOptions: this.childHostOptions } : {}),
         },
         (event) => this.handleEvent(event),
       );
@@ -143,6 +148,11 @@ export class Task {
       this.run?.cancel();
     }
     return this.result;
+  }
+
+  /** Record cancellation when a child did not stop before shutdown's deadline. */
+  forceCancel(): void {
+    if (this.finalResult === undefined) this.finish({ taskId: this.taskId, agent: this.agent.name, status: 'cancelled' });
   }
 
   private handleEvent(event: DomainEvent): void {
@@ -235,6 +245,6 @@ export class TaskCore {
       endpoint: agent.endpoint,
       createdAt,
     });
-    return new Task(this, taskId, agent, request.brief, request.port, createdAt);
+    return new Task(this, taskId, agent, request.brief, request.port, createdAt, request.childHostOptions);
   }
 }

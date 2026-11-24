@@ -1,111 +1,193 @@
 @design/task-core.sigil from TaskCore import {
   child driver, child port, attach command, session export, starter tools,
-  prerequisites check,
+  prerequisites check, model listing, model check,
 }
-@design/delegation-service.sigil from DelegationService import { delegation }
+@design/delegation-service.sigil from DelegationService import {
+  delegation, session cancel, completion notice, stop notice, guided setup,
+}
 
 component Kernel {
   goal {
     Keep the core of subzero small and free of any one child driver or
-    parent adapter: child drivers and parent adapters plug in through Kernel, and
-    core services reach a child driver only through it and never reach a parent
-    adapter.
+    parent adapter: child drivers and parent adapters plug in through Kernel,
+    and
+    core services reach a child driver only through it and never reach a
+    parent adapter.
   }
 
   state {
-    The *driver registry* maps each *host* name to the one child driver registered
-    for that host. A *supported host* is a host name that has an entry in the
-    driver registry.
+    A *parent host* is the kind of coding agent a person works in and delegates
+    from, and a *child host* is the kind of coding agent that subzero starts as
+    an
+    isolated child for one task. The same program can be a parent host in one
+    process and a child host in another, and the two names never mean each
+    other.
 
-    A *parent adapter* is an extension that connects one kind of parent, such as a
-    Claude Code session, to the core. Kernel keeps the names of the registered
-    parent adapters only to refuse a second registration of a name.
+    The *parent model* is the model that works inside a parent host: it writes
+    the requests and reads the notices and results.
+
+    The *driver registry* maps each child host name to the one child driver
+    registered for that child host. A *supported child host* is a child host
+    name
+    that has an entry in the driver registry.
+
+    A *parent adapter* is an extension that connects one parent host to the
+    core.
+    Kernel keeps the names of the registered parent adapters only to refuse a
+    second registration of a name.
 
     An *entry point* is the start-up code of one process, such as the command
-    line, the MCP server or a hook. It is outside the core, it is the code of a
-    process that imports a particular child driver or parent adapter in order to
-    register it, and it imports the ones its process needs, which may be none, and
-    registers them with Kernel before the process takes its first request.
+    line, a server, an extension or a hook. It is outside the core, it is the
+    code
+    of a process that imports a particular child driver or parent adapter in
+    order
+    to register it, and it imports the ones its process needs, which may be
+    none,
+    and registers them with Kernel before the process takes its first request.
+    Each entry point creates its own Kernel, so a Kernel holds only the
+    registrations of the entry point that created it.
   }
 
   constraints {
     Kernel must not name, import or depend on any particular child driver or
-    parent adapter. An entry point registers each of them with Kernel, and Kernel
-    loads none of them by name. A child driver or a parent adapter that no entry
-    point of a process registers is absent from that process.
+    parent adapter. An entry point registers each of them with Kernel, and
+    Kernel
+    loads none of them by name. A child driver or a parent adapter that no
+    entry point of a process registers is absent from that process.
 
-    The driver registry must hold at most one child driver for a host. A second
-    registration for a host must be refused with an error that names the host, and
+    The driver registry must hold at most one child driver for a child host. A
+    second
+    registration for a child host must be refused with an error that names the
+    child host, and
     it must not replace the first child driver.
 
     A parent adapter must reach the core only through the delegation of
-    DelegationService, and its collect, cancel and listing, and through AgentConfig
-    for what it shows or decides, such as
-    the agent file, the routable tiers, the routing settings and the error texts,
-    and through Kernel only to list the supported hosts that it gives AgentConfig,
-    and it must never be given a child driver. A parent adapter of one parent may
-    depend on another parent adapter of the same parent. A child driver must never
+    DelegationService and the task operations it offers, such as collect,
+    cancel, session cancel, the completion notice, the stop notice, listing
+    and the guided setup,
+    and
+    through
+    AgentConfig
+    for what it shows, decides or writes, such as
+    the agent file, each routable tier, the starter entries and the error
+    texts,
+    and through Kernel only to list the supported child hosts that it gives
+    AgentConfig and, for an init that a person starts, to ask for the
+    prerequisites check and the starter tools of a child host and to hand
+    Kernel to the guided setup of DelegationService,
+    and it must never be given a child driver. A parent adapter of one
+    parent host may depend on another parent adapter of the same parent host,
+    and
+    never on a parent adapter of another parent host. A child driver must never
     be given a parent adapter.
 
-    No core service may name a particular child driver or parent adapter, or import
+    No core service may name a particular child driver or parent adapter, or
+    import
     from one. A core service reaches a child driver only through the child port
-    that Kernel provides for a host, and the attach command, the session export and
-    the starter tools and the prerequisites check that it offers.
+    that Kernel provides for a child host, and the attach command, the
+    session export,
+    the starter tools, the prerequisites check, the model listing and the
+    model check that it offers.
   }
 
   cases {
-    With the pi child driver registered for the host pi, the driver registry holds
-    pi as a supported host, and a request for the child port of the host pi returns
+    With the pi child driver registered for the child host pi, the
+    driver registry
+    holds
+    pi as a supported child host, and a request for the child port of the
+    child host pi returns
     the child port of that child driver.
 
-    A request for the child port of a host with no registered child driver returns
-    an error that names that host and lists every supported host, and it starts no
+    A request for the child port of a child host with no registered
+    child driver
+    returns
+    an error that names that child host and lists every supported child host,
+    and
+    it starts no
     child run.
 
-    A request for the prerequisites check of the host pi returns the check of its
-    child driver, or nothing when that child driver offers none, and a request for
-    that of a host with no registered child driver returns the same error as for a
+    A request for the prerequisites check of the child host pi returns the
+    check of
+    its
+    child driver, or nothing when that child driver offers none, and a request
+    for
+    that of a child host with no registered child driver returns the same error
+    as
+    for a
     child port.
 
-    A second child driver registered for the host pi is refused with an error that
+    A second child driver registered for the child host pi is refused with an
+    error
+    that
     names pi, and the first child driver stays registered.
 
-    A parent adapter registered under a name that another parent adapter already
+    A parent adapter registered under a name that another parent adapter
+    already
     holds is refused with an error that names that name.
 
-    In a process whose entry point registers no child driver for the host pi, a
-    request for the child port of the host pi returns the error for a host with no
+    The parent adapter claude-code registered by the entry point of one process
+    and the parent adapter pi registered by the entry point of another process
+    are both accepted, because each Kernel holds only the names of its own
+    entry point. A second Kernel created in the same process, such as after a
+    reload of the pi parent host, accepts the parent adapter pi again.
+
+    In a process whose entry point registers no child driver for the child host
+    pi,
+    a
+    request for the child port of the child host pi returns the error for a
+    child host with no
     registered child driver, although another process may support pi.
   }
 
   interface {
-    Register a child driver for a host in the driver registry, refusing a second
-    child driver for the same host.
+    Name the parent host that a person works in, the parent model that works
+    inside it and the child host that subzero starts, so that every contract
+    uses these names for the same three things.
 
-    Provide the child port of the child driver registered for a host, and its
-    attach command, its session export, its starter tools and its prerequisites
-    check when that child driver offers them, and return an error that names the
-    host and lists every
-    supported host when no
+    Register a child driver for a child host in the driver registry, refusing a
+    second
+    child driver for the same child host.
+
+    Provide the child port of the child driver registered for a child host, and
+    its
+    attach command, its session export, its starter tools, its
+    prerequisites check, its model listing and its model check when that
+    child driver offers them, and return an error
+    that names the
+    child host and lists every
+    supported child host when no
     child driver is registered for it.
 
-    List every supported host, so that a caller can check a host or name the
-    supported hosts in an error.
+    List every supported child host, so that a caller can check a child host or
+    name the
+    supported child hosts in an error.
 
-    Register a parent adapter by name, refusing a second parent adapter of the same
-    name.
+    Register a parent adapter by name for one parent host, refusing a second
+    parent adapter of the same name in the same Kernel.
 
-    Take the registrations of an entry point, which registers every child driver
+    Take the registrations of an entry point, which registers every
+    child driver
     and parent adapter its process needs before the process takes its first
     request.
   }
 
   decisions {
-    Child drivers and parent adapters will keep multiplying, such as Claude and
-    Codex children and pi or Codex parents. Registering each of them with a small
-    Kernel, instead of letting a core service name one, keeps the core unchanged
+    Child drivers and parent adapters will keep multiplying, such as a Claude
+    or
+    Codex child host and a pi or Codex parent host. Registering each of them
+    with
+    a small
+    Kernel, instead of letting a core service name one, keeps the core
+    unchanged
     when one is added and lets the child port and the delegation stay the only
-    seams. The driver registry holds one child driver for each host so that a
-    lookup by the host of an agent definition is never ambiguous.
+    seams. The driver registry holds one child driver for each child host so
+    that a
+    lookup by the child host of an agent definition is never ambiguous.
+
+    The second parent host, pi, needed no further use of the names of the
+    registered parent adapters, so Kernel still keeps them only to refuse a
+    duplicate. Parent host and child host are separate names because the same
+    program, pi, is a child host for the Claude Code parent host and a
+    parent host of its own.
   }
 }

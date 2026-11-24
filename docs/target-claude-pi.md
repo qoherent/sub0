@@ -2,6 +2,12 @@
 
 Status: analysis · 2026-10-30 · reads with [design.md](design.md) and [decisions.md](decisions.md).
 
+> **Update 2026-11-12.** This page analyses one parent host (Claude Code) with one child host (pi). The vocabulary is
+> now fixed: *parent host* and *child host*, and the bare "host" below means whichever the sentence is about. pi
+> also becomes a parent host ([design.md](design.md) §5.5), and the Claude Code parent gains background tasks and
+> a cancel command ([design.md](design.md) §5.4). The agent file now requires `medium`, `general` and `fallback`
+> (decision 29 in [decisions.md](decisions.md)).
+
 > **Update 2026-11-03.** Brought into line with the spike's Sigil contracts (`design/*.sigil`), which win
 > where they differ: the result has no changed-file list, a task whose owner process died is `abandoned`
 > (not `parent_gone`), concurrency is an optional parallel limit per model endpoint counted inside one
@@ -139,8 +145,8 @@ and the output you expect. The sub-agent cannot see this conversation. $ARGUMENT
 |---|---|---|
 | Main conversation, interactive | Blocks for up to 120s, then **auto-backgrounds** (2.1.212). Claude gets a task id, keeps working, and is notified when the result lands. | Send `notifications/progress` at least every 60s, which resets the 30-min stdio idle timeout. Nothing else: native background works. |
 | A Claude subagent (Agent tool) | Never auto-backgrounds; blocks the subagent | Progress plus a wall-clock limit. Offer `wait: false` + `await`. |
-| `claude -p` / SDK | Not backgrounded unless `CLAUDE_AUTO_BACKGROUND_TASKS=1`, and a backgrounded result is lost at exit | Default to `wait` in `-p`. Use `CLAUDECODE` and the session mode to choose. |
-| MCP Tasks (2.1.304+, protocol 2026-07-28, TS SDK v2, CLI only) | Claude polls `tasks/get` and cancels with `tasks/cancel` | Phase 2: answer with a task only when the request's `_meta` advertises the extension. |
+| `claude -p` / SDK | Not backgrounded unless `CLAUDE_AUTO_BACKGROUND_TASKS=1`, and a backgrounded result is lost at exit | Wait in non-interactive or unknown mode. The current parent-process check also treats terminal-less IDE and SDK sessions conservatively as non-interactive. |
+| MCP tasks | A task-augmented `tools/call` gets a handle; the client can poll `tasks/get`, collect with `tasks/result`, and cancel with `tasks/cancel`. | Built using SDK 1.32's experimental task protocol when a call carries `params.task`. Claude Code 2.1.322 did not select it in our probe; an `asyncRewake` hook supplies completion notices for ordinary background calls. See [spike-results.md](spike-results.md). |
 
 Progress text should come from domain events, e.g. `semanticizer · turn 3 · read src/model.ts`, so the
 user sees real activity in the collapsed tool view and in `/tasks`. It is one line (agent, kind of the
@@ -211,6 +217,10 @@ The task id comes first, so it is still in Claude's history after compaction. If
 
 ### 3.1 Launch command (🧪 isolation flags checked on pi 0.87)
 
+The current child launch flags were rechecked on pi 1.5.2. A real child started
+through `PiDriver` with a local model completed an RPC request on that version.
+The existing launch test pins the isolation flags and explicitly supplied skills.
+
 ```
 pi --mode rpc --offline -na -ne -nc -np --no-themes [--no-mcp]
    -ns --skill <abs>/skill-a --skill <abs>/skill-b
@@ -227,7 +237,7 @@ Launch options: cwd = project root, env `PI_OFFLINE=1 PI_TELEMETRY=0`, stdio pip
 | `--mode rpc` | Commands (prompt, abort, steer, stats, last text) plus events, and the ability to answer dialogs |
 | `--offline` | No catalog refresh, update check or **auto-install of missing pi packages** at start-up |
 | `-na` | Ignore project `.pi/*` and project `.agents/skills` even when trust was saved |
-| `-ne` | Drops user and package extensions, which could inject skills, tools, context or dialogs. In 1.4.0 it also drops the built-ins (MCP, codemode, tool_search, llama.cpp); add back with `-e builtin:<name>`. On 0.87 the built-in `llama` command remained 🧪. |
+| `-ne` | Drops user and package extensions, which could inject skills, tools, context or dialogs. Explicit `-e <path>` files still load, and subzero adds one for each extension named in `hosts.pi.extensions` of the global file (and only those), after the isolation flags, in child runs, the model listing and the model check. In 1.4.0 it also drops the built-ins (MCP, codemode, tool_search, llama.cpp); add back with `-e builtin:<name>`. On 0.87 the built-in `llama` command remained 🧪. |
 | `--no-mcp` | Since **1.0.4** only, so leave it out on older versions. `-ne` already removes built-in MCP. |
 | `-nc`, `-np`, `--no-themes` | No AGENTS.md/CLAUDE.md, prompt templates or themes |
 | `-ns --skill` | Exactly the declared skills 🧪. The model loads a skill with `read`, so keep `read` enabled. Skills that read siblings by relative path (`../sigil-understand/...`) must sit side by side in the overlay directory. |

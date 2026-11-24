@@ -1,11 +1,8 @@
 // @sigil implements design/delegation-service.sigil DelegationService
-//
-// The one entry every front end uses. It resolves the project root once per
-// process, runs the start-up sweep, asks the Kernel registry for the child port of
-// the host of an agent definition and hands it to TaskCore, and owns the live task
-// registry and the per-endpoint parallel limit. It names no host or child driver.
+
 import {
   FALLBACK_AGENT,
+  DEFAULT_TIER,
   GENERAL_AGENT,
   loadAgentFile,
   resolveAgent,
@@ -16,15 +13,16 @@ import {
   type RootSources,
 } from '../config/agent-config.js';
 import { Task, TaskCore } from '../core/task-core.js';
-import { ENDED_STATES, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
+import { ENDED_STATES, type ChildHostOptions, type ChildRunState, type DomainEvent, type Result } from '../core/types.js';
 import type { Kernel } from '../kernel/kernel.js';
 import { TaskStore, type TaskStoreOptions, type TaskView } from '../store/task-store.js';
+import { completionNotice, stopNotice } from './status-text.js';
 
 /** The request of a front end. */
 export interface Delegation {
   /** The agent entry to run; none runs `general`. */
   agent?: string;
-  /** The model tier to run it on, `medium` or `tier:medium`; none runs the agent's own tier or `default`. */
+  /** The model tier to run it on, `medium` or `tier:medium`; none runs the agent's own tier or `medium`. */
   tier?: string;
   briefText: string;
   files?: string[];
@@ -47,6 +45,7 @@ export class EmptyBriefError extends Error {
 
 export interface DelegateOptions {
   wait: boolean;
+  onTask?: (taskId: string) => void;
   onEvent?: (event: DomainEvent) => void;
   onState?: (state: ChildRunState) => void;
   /** Aborting it cancels the task. */
@@ -88,6 +87,8 @@ export type CollectReply =
 /** A task as a listing shows it: its record, and its queue place while it is Pending in this process. */
 export interface TaskListing extends TaskView {
   queuePlace?: number;
+  model?: string;
+  tier?: string;
 }
 
 export interface DelegationServiceOptions extends RootSources {
@@ -181,6 +182,8 @@ export class DelegationService {
   private connected: Connected | null = null;
   private starting: Promise<Connected> | null = null;
   private readonly registry = new Map<string, Task>();
+  private readonly taskTiers = new Map<string, string>();
+  private readonly sessions = new Map<string, Set<string>>();
   private readonly limiter = new EndpointLimiter();
   private readonly warn: (message: string) => void;
 
@@ -195,6 +198,10 @@ export class DelegationService {
   /** The hosts the Kernel registry runs a child on, for front ends that hand them to AgentConfig. */
   supportedHosts(): string[] {
     return this.options.kernel.supportedHosts();
+  }
+
+  hasLiveSessionTasks(): boolean {
+    return [...this.sessions.values()].some((tasks) => tasks.size > 0);
   }
 
   /** The task store, for front ends that read task records. Requires start(). */
@@ -236,16 +243,28 @@ export class DelegationService {
     const { projectRoot, core } = await this.connect();
     if (delegation.briefText.trim() === '') throw new EmptyBriefError();
     // The host of the definition comes from its tier; the registry's hosts are the only ones that run.
-    const { agent, notice } = this.chooseAgent(projectRoot, delegation);
+    const { agent, notice, tier, childHostOptions } = this.chooseAgent(projectRoot, delegation);
     const port = this.options.kernel.childPort(agent.host);
 
     const task = core.start({
       agent,
       port,
+      childHostOptions,
       brief: renderBrief(delegation),
       ...(delegation.parentSessionId !== undefined ? { parentSessionId: delegation.parentSessionId } : {}),
     });
     this.registry.set(task.taskId, task);
+    this.taskTiers.set(task.taskId, tier);
+    void task.result.then(() => this.taskTiers.delete(task.taskId));
+    if (delegation.parentSessionId !== undefined) {
+      const session = this.sessions.get(delegation.parentSessionId) ?? new Set<string>();
+      this.sessions.set(delegation.parentSessionId, session);
+      session.add(task.taskId);
+      void task.result.finally(() => {
+        session.delete(task.taskId);
+        if (session.size === 0) this.sessions.delete(delegation.parentSessionId!);
+      });
+    }
     if (options.onEvent) task.onEvent(options.onEvent);
     if (options.onState) task.onStateChange(options.onState);
     if (options.signal) {
@@ -256,6 +275,7 @@ export class DelegationService {
       void task.result.finally(() => signal.removeEventListener('abort', onAbort));
     }
     this.limiter.admit(task, agent.endpoint, agent.parallel);
+    options.onTask?.(task.taskId);
     // Only a run the limiter kept back is reported as Pending.
     if (task.state === 'Pending') options.onState?.('Pending');
 
@@ -269,18 +289,29 @@ export class DelegationService {
    * for none or for `general`, or `fallback` for a name the agents map does not hold
    * (with a notice that says so). `general` never falls back.
    */
-  private chooseAgent(projectRoot: string, delegation: Delegation): { agent: AgentDefinition; notice?: string } {
-    const catalog = loadAgentFile(projectRoot);
+  private chooseAgent(
+    projectRoot: string,
+    delegation: Delegation,
+  ): { agent: AgentDefinition; tier: string; childHostOptions: ChildHostOptions; notice?: string } {
+    const catalog = loadAgentFile(projectRoot, { starterAgents: (host) => this.options.kernel.starterTools(host) });
     const supportedHosts = this.options.kernel.supportedHosts();
     const tier = delegation.tier?.trim().replace(/^tier:/, '').trim();
     const options = { supportedHosts, ...(tier !== undefined && tier !== '' ? { tier } : {}) };
     const named = delegation.agent;
     if (named === undefined || named === GENERAL_AGENT || catalog.entries.has(named)) {
-      return { agent: resolveAgent(catalog, named, options) };
+      const agent = resolveAgent(catalog, named, options);
+      return {
+        agent,
+        tier: options.tier ?? catalog.entries.get(named ?? GENERAL_AGENT)?.tier ?? DEFAULT_TIER,
+        childHostOptions: catalog.childHostOptions[agent.host] ?? {},
+      };
     }
     if (!catalog.entries.has(FALLBACK_AGENT)) throw new UnknownAgentError(named, [...catalog.entries.keys()]);
+    const agent = resolveAgent(catalog, FALLBACK_AGENT, options);
     return {
-      agent: resolveAgent(catalog, FALLBACK_AGENT, options),
+      agent,
+      tier: options.tier ?? catalog.entries.get(FALLBACK_AGENT)?.tier ?? DEFAULT_TIER,
+      childHostOptions: catalog.childHostOptions[agent.host] ?? {},
       notice: `the agent "${named}" is not configured, so the ${FALLBACK_AGENT} agent ran instead; configured agents: ${[...catalog.entries.keys()].join(', ')}`,
     };
   }
@@ -324,6 +355,12 @@ export class DelegationService {
     return result === null ? this.collect(taskId) : { kind: 'result', result };
   }
 
+  /** Wait for a task owned by this process without a polling deadline. */
+  async waitForCompletion(taskId: string): Promise<CollectReply> {
+    const live = this.registry.get(taskId);
+    return live === undefined ? this.collect(taskId) : { kind: 'result', result: await live.result };
+  }
+
   async cancel(taskId: string): Promise<CollectReply> {
     const { store } = await this.connect();
     store.sweep();
@@ -331,6 +368,17 @@ export class DelegationService {
     if (live !== undefined) return { kind: 'result', result: await live.cancel() };
     // A settled task returns its stored result unchanged; nothing is signalled.
     return this.fromRecord(store, taskId);
+  }
+
+  async cancelSession(parentSessionId: string | undefined): Promise<{ kind: 'unknown_session' | 'cancelled'; taskIds: string[]; count: number }> {
+    if (parentSessionId === undefined || parentSessionId === '') return { kind: 'unknown_session', taskIds: [], count: 0 };
+    const taskIds = [...(this.sessions.get(parentSessionId) ?? [])];
+    const tasks = taskIds.map((id) => this.registry.get(id)).filter((task): task is Task => task !== undefined && task.settledResult === undefined);
+    const pending = tasks.filter((task) => task.state === 'Pending');
+    const live = tasks.filter((task) => task.state !== 'Pending');
+    await Promise.all(pending.map((task) => task.cancel()));
+    await Promise.all(live.map((task) => task.cancel()));
+    return { kind: 'cancelled', taskIds: tasks.map((task) => task.taskId), count: tasks.length };
   }
 
   async list(parentSessionId?: string): Promise<TaskListing[]> {
@@ -341,6 +389,38 @@ export class DelegationService {
       const place = live !== undefined ? this.limiter.place(live) : null;
       return place !== null ? { ...view, queuePlace: place } : view;
     });
+  }
+
+  async listLiveSession(parentSessionId: string): Promise<TaskListing[]> {
+    const ids = this.sessions.get(parentSessionId) ?? new Set<string>();
+    return (await this.list(parentSessionId)).filter((task) => ids.has(task.taskId) && task.status === 'running').map((task) => ({
+      ...task,
+      model: this.registry.get(task.taskId)?.agent.model,
+      tier: this.taskTiers.get(task.taskId),
+    }));
+  }
+
+  async attachCommand(taskId: string): Promise<{ kind: 'command'; command: string[] } | { kind: 'error'; message: string }> {
+    const { store } = await this.connect();
+    store.sweep();
+    const record = store.readTask(taskId);
+    if (!record) return { kind: 'error', message: `no such task ${taskId}` };
+    if (record.status === 'running') return { kind: 'error', message: `task ${taskId} is still running; wait until it ends before attaching` };
+    const spec = record.task?.launchSpec;
+    if (!spec) return { kind: 'error', message: `no launch spec was recorded for task ${taskId}` };
+    const host = record.task?.agent.host ?? '(not recorded)';
+    try {
+      const attach = this.options.kernel.attachCommand(host);
+      if (!attach) return { kind: 'error', message: `the child driver of host ${host} offers no attach command` };
+      return { kind: 'command', command: attach(spec) };
+    } catch (err) {
+      return { kind: 'error', message: (err as Error).message };
+    }
+  }
+
+  async notice(taskId: string, status: Result['status'], parentSessionId: string, collectTool: string): Promise<string> {
+    if (status === 'cancelled') return stopNotice(taskId);
+    return completionNotice(taskId, status, (await this.listLiveSession(parentSessionId)).filter((task) => task.taskId !== taskId), collectTool);
   }
 
   private fromRecord(store: TaskStore, taskId: string): CollectReply {
@@ -370,6 +450,7 @@ export class DelegationService {
       new Promise<false>((resolve) => (timer = setTimeout(() => resolve(false), deadlineMs))),
     ]);
     clearTimeout(timer);
+    if (!ended) for (const task of live) task.forceCancel();
     return ended;
   }
 }

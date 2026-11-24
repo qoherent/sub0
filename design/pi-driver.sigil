@@ -1,100 +1,168 @@
 @design/task-core.sigil from TaskCore import {
   task id, brief, child run, failure kind, domain event, child port, session usage,
     launch spec, attach command, child session, session export, child driver,
-    starter tools, prerequisites check,
+    child working directory,
+    starter tools, prerequisites check, model listing, model check,
 }
 @design/agent-config.sigil from AgentConfig import {
   agent definition, skill folder, project root, timeout, thinking level,
-  tool list, general agent, fallback agent,
+  tool list, general agent, fallback agent, child host options,
 }
 @design/task-store.sigil from TaskStore import {
   task record, sessions folder, driver files,
 }
-@design/kernel.sigil from Kernel import { driver registry, entry point, host }
+@design/kernel.sigil from Kernel import { driver registry, entry point, child host }
 
 component PiDriver {
   goal {
-    Start an isolated pi child that sees only the declared skills, run one brief to
+    Start an isolated pi child that sees only the declared skills, run one
+    brief to
     settlement, and stop it cleanly in every exit case.
   }
 
   state {
     PiDriver fills the launch spec of each child run with the argv of pi
-    without its prompt, its working directory, the names of its environment
+    without its prompt, its child working directory, the names of its environment
     variables, the pi version, its skill folder paths and the thinking level of
     the agent definition.
 
-    A *skill overlay* is the folder skills/ inside the folder of the driver files
-    that the child port hands over for the task. It is owned by PiDriver and is not
-    part of the task record, and it holds a copy of each declared skill folder side
-    by side, so that relative paths between sibling skills keep working. The skill
-    overlay is among the driver files of the task.
+    A *skill overlay* is the folder skills/ inside the folder of the
+    driver files
+    that the child port hands over for the task. It is owned by PiDriver and is
+    not
+    part of the task record, and it holds a copy of each declared skill folder
+    side
+    by side, so that relative paths between sibling skills keep working. The
+    skill overlay is among the driver files of the task.
 
-    The child session of a task is the pi conversation of that task, kept as a pi
+    The child session of a task is the pi conversation of that task, kept as a
+    pi
     session file.
   }
 
   logic {
-    Before spawning, check that every skill folder of the agent definition exists,
-    and stop with the failure kind skill_mismatch if one is missing. Copy each
-    declared skill folder into the skill overlay, whose paths the launch spec uses.
+    Before spawning, check that every skill folder of the agent definition
+    exists,
+    and stop with the failure kind skill_mismatch if one is missing. Then check
+    the child host options for pi, and stop with the failure kind error and the
+    message of the check if it fails. Copy each
+    declared skill folder into the skill overlay, whose paths the launch spec
+    uses.
     Hand the launch spec to the caller in the run started domain event before
-    spawning, which ends that branch. Spawn pi from the launch spec as the leader
-    of its own process group, with the project root as working directory as the
-    constraints require. Send get_state, whose reply means pi is ready, and then
+    spawning, which ends that branch. Spawn pi from the launch spec as the
+    leader
+    of its own process group, with the project root as child working directory as
+    the
+    constraints require. Send get_state, whose reply means pi is ready, and
+    then
     get_commands, whose reply goes to skill verification. Perform
-    *skill verification* by comparing the skills in the get_commands reply with the
+    *skill verification* by comparing the skills in the get_commands reply with
+    the
     declared skills. On a difference, stop with the failure kind skill_mismatch
-    naming the extra or missing skill, send no prompt and kill the process group.
+    naming the extra or missing skill, send no prompt and kill the process
+    group.
 
-    Otherwise, once skill verification has passed as the constraints require, send
+    Otherwise, once skill verification has passed as the constraints require,
+    send
     the brief as the prompt and read events until agent_settled. Map each
-    *pi event* to a domain event and hand it to the caller, which ends that branch.
-    After agent_settled, read the last assistant text and the session usage, close
-    stdin and wait for the child run to exit, and the exit lets the flow return.
-    Return the last assistant text, the session usage, a status taken from the stop
-    reason of the last assistant message and, for a failed run, its failure kind,
+    *pi event* to a domain event and hand it to the caller, which ends that
+    branch.
+    After agent_settled, read the last assistant text and the session usage,
+    close
+    stdin and wait for the child run to exit, and the exit lets the flow
+    return.
+    Return the last assistant text, the session usage, a status taken from the
+    stop
+    reason of the last assistant message and, for a failed run, its
+    failure kind,
     which ends the flow. A stop reason of stop means completed, length means
-    truncated, error means failed with the failure kind error and a short bounded
-    message from pi, and aborted means cancelled with no failure kind. A child run
-    that exits cleanly with no assistant message is failed with the failure kind
-    error and the message no assistant message. Fill the session usage from what pi
+    truncated, error means failed with the failure kind error and a short
+    bounded
+    message from pi, and aborted means cancelled with no failure kind. A
+    child run
+    that exits cleanly with no assistant message is failed with the
+    failure kind
+    error and the message no assistant message. Fill the session usage from
+    what pi
     reports, and mark each field that pi does not report as unavailable.
   }
 
   constraints {
     The driver must start a child run with exactly this flag set in its
-    launch spec, with the project root as working directory and with PI_OFFLINE=1
-    and PI_TELEMETRY=0 in its environment. It must not add --session, because pi
+    launch spec, with the project root as child working directory and with
+    PI_OFFLINE=1
+    and PI_TELEMETRY=0 in its environment. It must not add --session, because
+    pi
     exits when that is combined with --session-id:
     ```
     pi --mode rpc --offline -na -ne -nc -np --no-themes -ns
+       [-e <extension> ...]
        --skill <overlay>/<name> ... --model <provider/id> --thinking <level>
        --tools <tools> --session-dir <sessions folder>
        --session-id <task id> --name subzero:<agent>:<task id>
     ```
 
-    PiDriver receives the project root, the sessions folder and the folder of its
-    driver files through the child port each time it starts a child run, resolves
+    PiDriver owns the meaning of the child host options for pi: a list under
+    the key extensions of paths to the files of a *pi extension*, each path
+    absolute or starting with ~/, which the driver expands from the home folder
+    and de-duplicates, keeping the first. The driver adds one -e flag with its
+    path for each pi extension, in the order given, and no -e flag when the
+    caller gives none. The attach command carries the same -e flags. Before it
+    starts pi for a child run, a model listing or a model check, the driver must
+    check the child host options for pi, and when they hold a key other than
+    extensions, the list is malformed or one pi extension names no file it must
+    fail without starting pi, so that a misspelled key is not ignored; a map
+    that holds nothing counts as no pi extension. with a one-line
+    message that names the problem and the path, because pi gives no warning of
+    a missing path and the models of that pi extension would then show only as
+    unknown. For a child run it makes that check right after the check of the
+    skill folders and before it hands over the launch spec.
+
+    A pi extension is code of the user, which the user named in the child host
+    options, and PiDriver treats it as trusted. Against a pi extension the driver
+    guarantees only two things, and every other constraint of PiDriver still
+    holds: the tools of the child run are those of its tool list, because pi
+    1.5.2 applies that tool list to the tools that a pi extension adds, which
+    PiDriver verifies with its child flags on that version, and the skills are
+    exactly the declared skills. A pi extension may still change the prompt or run
+    code of
+    its own, so a read-only tool list of the fallback agent limits its tools
+    and is no sandbox against a pi extension.
+
+    PiDriver receives the project root, the sessions folder, the folder of
+    its driver files and the child host options through the child port each
+    time it starts a child run,
+    resolves
     none of its own, and calls neither TaskStore nor the delegation service.
     PiDriver must not write the task record, and hands the
     launch spec to the caller so that TaskCore writes it.
 
     A child run must see exactly the declared skills and no user or project
-    extensions, context files, prompt templates or other skills. It must run under
+    extensions other than the pi extensions in its child host options, and no
+    context files, prompt templates or other skills. It must run
+    under
     the user's own pi login, and no credentials may be copied.
 
     A missing skill folder, or any difference found by skill verification, must
     fail the call as skill_mismatch before the brief is sent.
 
-    The driver must use its own *pi RPC client* for pi 0.87 and not the client that
-    pi exports. It must split stdout on LF only, strip a trailing CR, decode UTF-8
-    from a byte buffer, correlate each response to its command by id, and never use
-    Node readline. A reply to a command of a child run must not be subject to the
+    The driver must use its own *pi RPC client* for pi 1.5.2, the version the
+    plan
+    targets, and must verify its child flags on that version before use, and
+    not
+    the
+    client that
+    pi exports. It must split stdout on LF only, strip a trailing CR, decode
+    UTF-8
+    from a byte buffer, correlate each response to its command by id, and never
+    use
+    Node readline. A reply to a command of a child run must not be subject to
+    the
     60-second wait of the exported client.
 
     The status of a child run that the driver ends by timeout, cancel, crash or
-    unknown model must come from that termination and not from the stop reason of
+    unknown model must come from that termination and not from the stop reason
+    of
     its last assistant message, and so must its failure kind when it is failed.
     When a cancel and a timeout coincide, the first termination wins and is
     recorded once, and a cancel that arrives after the child run has settled
@@ -105,64 +173,87 @@ component PiDriver {
     A pi event of an unrecognized type must be logged and ignored, and the
     child run must continue.
 
-    Agent message deltas must be buffered into one domain event and not forwarded
+    Agent message deltas must be buffered into one domain event and not
+    forwarded
     per token.
 
     The timeout of the agent definition must start when the driver spawns the
     child run and cover skill verification and the turn, and it must not count
     the time that the child run waited Pending for its caller.
 
-    When a child run exceeds its timeout, exits non-zero in mid-turn or names an
-    unknown model, it must end with the failure kind timeout, crashed or error. A
+    When a child run exceeds its timeout, exits non-zero in mid-turn or names
+    an
+    unknown model, it must end with the failure kind with value timeout, crashed or
+    error.
+    A
     crashed child run records the stderr tail as a domain event, and an unknown
-    model error names the model. A crashed child run is a process failure, which is
-    a non-zero exit in mid-turn or a lost pipe, and an error is a run-level error
-    that pi reports through its stop reason, or an unknown model.
+    model error names the model. A crashed child run is a process failure,
+    which is
+    a non-zero exit in mid-turn or a lost pipe, and an error is a run-level
+    error
+    that pi reports through its stop reason, an unknown model, or a precondition
+    that the driver found missing before it started pi, such as a pi extension
+    that names no file.
 
-    The driver must not remove the skill overlay of a task while its task record
+    The driver must not remove the skill overlay of a task while its
+    task record
     exists, because pi ignores a missing --skill path without an error and an
     attached child session would then have no skills.
 
-    Cancel and timeout of a child run must send clear_queue, then abort and wait up
-    to five seconds, then close stdin, then send SIGTERM and then SIGKILL to the
+    Cancel and timeout of a child run must send clear_queue, then abort and
+    wait up
+    to five seconds, then close stdin, then send SIGTERM and then SIGKILL to
+    the
     process group. No process of the group may remain, including a grandchild.
 
-    The driver must not unref a child run or let it outlive the server: the child
-    run starts as the leader of its own process group only so that the whole group
-    can be killed, and it keeps the pipes of its stdio. When the server dies, stdin
-    of the child run is closed and pi must exit, so no process of a child run may
-    outlive Esc, a timeout or the end of the Claude session.
+    The driver must not unref a child run or let it outlive its process: the
+    child run starts as the leader of its own process group only so that the
+    whole
+    group
+    can be killed, and it keeps the pipes of its stdio. When the process that
+    runs
+    the driver dies, stdin of the child run is closed and pi must exit, so no
+    process of a child run may outlive Esc, a timeout or the end of the parent
+    session.
 
     When ~/.pi/agent/SYSTEM.md exists, the driver must record a warning as a
     domain event and still start the child run, because -nc does not cover it.
 
-    The id of the child session must be the task id, and the sessions folder must
+    The id of the child session must be the task id, and the sessions folder
+    must
     be inside the project root and not the user's own pi sessions.
   }
 
   cases {
-    When skill verification finds exactly the declared skills, the brief is sent
+    When skill verification finds exactly the declared skills, the brief is
+    sent
     and the child run settles with the last assistant text as its summary.
 
     When skill verification finds one extra skill, the child run fails as
     skill_mismatch naming it, no prompt is sent and the process is killed.
 
-    When pi emits agent_end, then more events, then agent_settled, the child run
+    When pi emits agent_end, then more events, then agent_settled, the
+    child run
     settles only at agent_settled.
 
-    A message of a child run that contains U+2028 is delivered as one record, and a
-    multi-byte UTF-8 character split across two stdout chunks decodes correctly.
+    A message of a child run that contains U+2028 is delivered as one record,
+    and a
+    multi-byte UTF-8 character split across two stdout chunks decodes
+    correctly.
   }
 
   interface {
     PiDriver provides the child port: for an agent definition, a brief and a
     task id, start a child run, perform skill verification, run the brief to
-    settlement, and return the last assistant text, the status, the failure kind of
+    settlement, and return the last assistant text, the status, the
+    failure kind of
     a failed run and the session usage. Allow a live child run to be cancelled.
     Keep the skill overlay of each task for as long as its task record exists.
 
-    Hand each domain event of a live child run to the caller as it happens, with
-    the tool name and its target path in the domain event of each tool activity.
+    Hand each domain event of a live child run to the caller as it happens,
+    with
+    the tool name and its target path in the domain event of each tool
+    activity.
 
     Build the attach command from the launch spec of a task, without --mode rpc
     and without --session, so that the child session can be reopened in the pi
@@ -172,16 +263,42 @@ component PiDriver {
     domain event, so that the task record keeps it.
 
     Export the child session of a task as HTML with pi --export, as the
-    session export of the child driver for the host pi.
+    session export of the child driver for the child host pi.
 
     Offer a prerequisites check that runs the configured pi command with
     --version, passes when it exits zero, and otherwise returns a message that
     names pi, says whether it was not found or did not run, and says to install
     pi and run subzero init again.
 
-    Register with the driver registry of Kernel as the child driver for the host pi
-    when an entry point of a process registers it, and offer the attach command,
-    the session export, the starter tools and the prerequisites check through it.
+    Offer a model listing that asks pi for get_available_models with the
+    configured pi command, the environment, the isolation flags of a
+    child run and the pi extensions in the child host options that the caller
+    gives, and no saved
+    session, so that a model that a child run cannot reach is not listed and a
+    model that a pi extension provides is. Give each model the thinking levels
+    it accepts: only off for a model that does not reason, and otherwise each level
+    from off to
+    high that its thinking level map does not mark null, and xhigh or max only
+    when the map gives them a value. Fail with a one-line reason when pi does
+    not answer within 30 seconds, and with a reason that says to set up a pi
+    provider when pi lists no model.
+
+    Offer a model check that starts pi with the same command, environment,
+    flags and child host options, the model, the thinking level, no tools and no
+    saved session, sends one fixed prompt and reports that the model answered when
+    the turn settles
+    without an error. Report unknown_model when pi does not know the model,
+    timeout when no answer comes within 120 seconds, cancelled when the caller
+    aborts it, and failed with the reason from pi otherwise, or with the reason
+    of the check of the child host options for pi when that check fails before
+    pi starts, and end the pi process in every case.
+
+    Register with the driver registry of Kernel as the child driver for the
+    child host pi
+    when an entry point of a process registers it, and offer the
+    attach command,
+    the session export, the starter tools, the prerequisites check, the
+    model listing and the model check through it.
     The starter tools are the tool list read, bash, edit, write, grep, find and
     ls for a general agent, and the tool list read, grep, find and ls for a
     fallback agent.
@@ -189,7 +306,8 @@ component PiDriver {
 
   decisions {
     The driver spawns the user's installed pi and does not embed the pi SDK, so
-    that it uses the same login, models and version, can kill by process group, and
+    that it uses the same login, models and version, can kill by process group,
+    and
     a crash in the child cannot take down the server. A failure kind is still
     decided by the driver from what pi did.
   }

@@ -1,72 +1,96 @@
 @design/delegation-service.sigil from DelegationService import { delegation, brief text }
+@design/kernel.sigil from Kernel import { child host }
 @design/agent-config.sigil from AgentConfig import {
-    agent definition, agent entry, agent file, default tier, skill folder,
+    agent definition, agent entry, agent file, medium tier, skill folder,
   thinking level, tool list, model endpoint,
   parallel limit,
 }
-@design/mcp-server.sigil from McpServer import { allow rule }
+@design/claude-mcp-server.sigil from ClaudeMcpServer import { allow rule }
+@design/claude-routing-hooks.sigil from ClaudeRoutingHooks import { Agent tool }
 @design/task-store.sigil from TaskStore import { store folder, parent session id }
 @design/spike-harness.sigil from SpikeHarness import { pass directory, staged sigil skills }
 
 component SigilWiring {
   goal {
-    Express the experiment as files: the subzero agent for the interpreter, and the
-    evaluator agent definitions of each experiment arm, so that arms A and B differ
-    only in where interpreters run, with A-cheap and B-control as their controls
+    Express the experiment as files: the subzero agent for the interpreter, and
+    the
+    evaluator agent definitions of each experiment arm, so that arms A and B
+    differ
+    only in where interpreters run, with A-cheap and B-control as their
+    controls
     and B-low as the control for the thinking level.
   }
 
   state {
     An *experiment arm* is one of five setups. A is the evaluator subagent with
     Claude interpreter subagents. A-cheap is A with the interpreter subagent on
-    Haiku. B is the evaluator subagent with interpreters delegated to pi. B-control
+    Haiku. B is the evaluator subagent with interpreters delegated to pi.
+    B-control
     is B with the pi interpreter on the Claude model that A's interpreters use.
     B-low is B with the pi interpreter at the thinking level low.
 
-    The *evaluator subagent* is a native Claude Code subagent that reviews a design
-    with the sigil skills. The *interpreter agent* reads one prepared source and
+    The *evaluator subagent* is a native Claude Code subagent that reviews a
+    design
+    with the sigil skills. The *interpreter agent* reads one prepared source
+    and
     writes its claim rows to the *answer file* that its brief text names.
 
-    The agent file holds three model tiers on the host pi: the default tier on the
-    r9700/Qwen3.8 model at the thinking level high, the tier low on that model at
+    The agent file holds three model tiers on the child host pi, the
+    general agent and the fallback agent: the medium tier
+    on the
+    r9700/Qwen3.8 model at the thinking level high, the tier low on that model
+    at
     the thinking level low, and the tier control on the Claude model of A's
-    interpreters at the thinking level high. The sigil-interpreter agent entry runs
-    on the default tier with the sigil-understand and sigil-egglog skills and
-    the tools read, grep, find, ls and write. The sigil-interpreter-low agent entry
-    is the same on the tier low, and the sigil-interpreter-control agent entry is
+    interpreters at the thinking level high. The sigil-interpreter agent entry
+    runs
+    on the medium tier with the sigil-understand and sigil-egglog skills and
+    the tools read, grep, find, ls and write. The sigil-interpreter-low
+    agent entry
+    is the same on the tier low, and the sigil-interpreter-control agent entry
+    is
     the same on the tier control.
   }
 
   constraints {
-    In experiment arm B, the evaluator subagent must start every interpreter agent
-    through a delegation and none through the Agent tool, and its definition must
+    In experiment arm B, the evaluator subagent must start every
+    interpreter agent
+    through a delegation and none through the Agent tool, and its definition
+    must
     disallow the Agent tool.
 
     The *main conversation* must load no sigil skill or reference. The
     staged sigil skills stay outside every Claude discovery path, and the
-    evaluator subagent is given their SKILL.md paths in its prompt, not through a
+    evaluator subagent is given their SKILL.md paths in its prompt, not through
+    a
     skills preload.
 
     An interpreter agent must write its claim rows to the exact answer file its
     brief text names, in the form that sigilc ingest accepts, and must write no
-    other file. Its only writing tool is write. The brief text carries this rule,
-    nothing in subzero enforces it, and SpikeHarness reports each write outside the
+    other file. Its only writing tool is write. The brief text carries this
+    rule,
+    nothing in subzero enforces it, and SpikeHarness reports each write outside
+    the
     answer file.
 
-    The brief text of a delegation to an interpreter agent must carry the request
-    path, the binding path, the guidance paths, the exact answer file path and the
+    The brief text of a delegation to an interpreter agent must carry the
+    request
+    path, the binding path, the guidance paths, the exact answer file path and
+    the
     round.
 
     Experiment arms A and B must use the same Claude model and effort for the
     evaluator subagent. B-control routes its delegation to
-    sigil-interpreter-control, B-low routes to sigil-interpreter-low, and B routes
+    sigil-interpreter-control, B-low routes to sigil-interpreter-low, and B
+    routes
     to sigil-interpreter.
 
-    The evaluator subagent definitions of B, B-control and B-low must be identical
+    The evaluator subagent definitions of B, B-control and B-low must be
+    identical
     except for the interpreter agent they route to, and those of A and A-cheap
     except for the interpreter subagent they point to.
 
-    The interpreter agent's tool list must drop grep and find if they fail under
+    The interpreter agent's tool list must drop grep and find if they fail
+    under
     pi's offline mode.
 
     The wiring of each experiment arm must not modify the *sigil repository*.
@@ -77,13 +101,17 @@ component SigilWiring {
     sigil-interpreter-low agent entry in examples/sigil/.agents/subzero.yaml,
     whose skill folder entries point at the staged sigil skills of the
     pass directory, without modifying the sigil repository. The same file holds
-    an endpoints entry for the model endpoint r9700 with a parallel limit of 1, so
+    an endpoints entry for the model endpoint r9700 with a parallel limit of 1,
+    so
     that sigil-interpreter and sigil-interpreter-low share it.
 
-    Provide an evaluator subagent definition for each experiment arm, and provide
-    the interpreter agent as a Claude subagent for A and for A-cheap. SigilWiring
+    Provide an evaluator subagent definition for each experiment arm, and
+    provide
+    the interpreter agent as a Claude subagent for A and for A-cheap.
+    SigilWiring
     provides the answer file of each interpreter agent by making its
-    evaluator subagent name the file in the brief text, and the interpreter agent
+    evaluator subagent name the file in the brief text, and the
+    interpreter agent
     writes only that answer file.
 
     Provide a *README* that tells the user to copy the evaluator subagent for B
@@ -104,11 +132,14 @@ component SigilWiring {
   }
 
   decisions {
-    The evaluator is a Claude subagent and only its interpreters go to pi, so that
+    The evaluator is a Claude subagent and only its interpreters go to pi, so
+    that
     Claude keeps the judgment and the local model gets the narrow repeated job.
-    Delegation inside subzero itself moves to a later version. B-low is a separate
+    Delegation inside subzero itself moves to a later version. B-low is a
+    separate
     agent definition and not a setting on the delegation, so that the
-    thinking level comes from files and not from what the evaluator model chooses
+    thinking level comes from files and not from what the evaluator model
+    chooses
     to pass.
   }
 }

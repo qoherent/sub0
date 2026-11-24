@@ -1,13 +1,27 @@
-// @sigil implements design/mcp-server.sigil McpServer (parent session id, readiness marker)
+// @sigil implements design/claude-mcp-server.sigil ClaudeMcpServer (parent session id, readiness marker)
 //
 // The SessionStart hook records each Claude session id in its own file under the
 // project, with its ancestor pids, and the server reads the newest entry of its own
 // Claude Code process on each call, so a listing stays with this conversation after
 // /clear and two sessions of one project never take each other's id.
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+
+/** A parent without a terminal, or one whose command requests print mode, cannot retain background results. */
+export function parentIsNonInteractive(pid = process.ppid): boolean {
+  try {
+    const row = execFileSync('ps', ['-ww', '-p', String(pid), '-o', 'tty=', '-o', 'command='], { encoding: 'utf8', timeout: 2000 }).trim();
+    const [, tty, command] = /^(\S+)\s+([\s\S]+)$/.exec(row) ?? [];
+    if (!tty || !command || /^\?+$/.test(tty)) return true;
+    return /(?:^|\s)(?:--print(?:=\S*)?|-p\S*)(?:\s|$)/.test(command);
+  } catch {
+    // Unknown mode is treated as non-interactive, so results cannot be lost.
+    return true;
+  }
+}
 
 /** A ${VAR} that the host left unsubstituted counts as unset. */
 export function setting(value: string | undefined): string | undefined {
@@ -105,14 +119,15 @@ function readinessDir(dir: string, projectRoot: string): string {
 export interface ReadinessMarker {
   pid: number;
   ppid: number;
+  taskMode: boolean | null;
 }
 
-export function writeReadinessMarker(dir: string, projectRoot: string, pid: number, ppid: number): void {
+export function writeReadinessMarker(dir: string, projectRoot: string, pid: number, ppid: number, taskMode = false): void {
   const folder = readinessDir(dir, projectRoot);
   mkdirSync(folder, { recursive: true, mode: 0o700 });
   const file = path.join(folder, `${pid}.json`);
   const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ pid, ppid, projectRoot, startedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
+  writeFileSync(tmp, JSON.stringify({ pid, ppid, projectRoot, taskMode, startedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
   renameSync(tmp, file);
 }
 
@@ -142,9 +157,9 @@ export function liveReadinessMarkers(dir: string, projectRoot: string): Readines
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
     try {
-      const value = JSON.parse(readFileSync(path.join(folder, name), 'utf8')) as { pid?: unknown; ppid?: unknown };
+      const value = JSON.parse(readFileSync(path.join(folder, name), 'utf8')) as { pid?: unknown; ppid?: unknown; taskMode?: unknown };
       if (Number.isInteger(value.pid) && Number.isInteger(value.ppid) && isAlive(value.pid as number)) {
-        live.push({ pid: value.pid as number, ppid: value.ppid as number });
+        live.push({ pid: value.pid as number, ppid: value.ppid as number, taskMode: typeof value.taskMode === 'boolean' ? value.taskMode : null });
       }
     } catch {
       // An unreadable marker counts as absent.

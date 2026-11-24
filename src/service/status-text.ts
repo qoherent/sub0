@@ -3,8 +3,29 @@
 // The one owner of the wording of a task's state: every reply that tells a parent
 // or a person whether a child has started, and every result text, comes through
 // here, so that no front end imports another front end for it.
+import type { StarterResult } from '../config/agent-config.js';
 import { isUnavailable, type DomainEvent, type Measure, type Result, type SessionUsage } from '../core/types.js';
-import type { TaskListing } from './delegation-service.js';
+import type { CollectReply, DelegateReply, TaskListing } from './delegation-service.js';
+
+export function formatProgress(agent: string, latest: string, elapsedMs: number): string {
+  return `${agent} · ${latest} · ${formatElapsed(elapsedMs)}`;
+}
+
+export function describeTaskReply(reply: DelegateReply | CollectReply, view: { agent: string; createdAt: string } | undefined, tools: { collect: string; cancel: string }, now = Date.now()): string {
+  if (reply.kind === 'result') return formatResult(reply.result);
+  const id = `task: ${reply.taskId}`;
+  const lead = view !== undefined ? `${id} · ${view.agent}` : id;
+  if (reply.kind === 'abandoned') return `${lead} · abandoned: its owner process died, so it has no result`;
+  if (reply.kind === 'not_found') return `${id} · no such task`;
+  const line = reply.kind === 'started' || reply.kind === 'running'
+    ? formatStatusLine({ state: 'running', startedAt: reply.startedAt }, now)
+    : reply.kind === 'queued'
+      ? formatStatusLine({ state: 'queued', endpoint: reply.endpoint, ...(reply.place !== undefined ? { place: reply.place } : {}), enqueuedAt: reply.enqueuedAt }, now)
+      : formatStatusLine(statusFacts({ ...(reply.startedAt !== undefined ? { startedAt: reply.startedAt } : {}), ...(reply.endpoint !== undefined ? { endpoint: reply.endpoint } : {}), createdAt: reply.enqueuedAt }), now);
+  if (reply.kind === 'started' || reply.kind === 'queued') return `${lead} · ${line}; collect it with ${tools.collect} or cancel it with ${tools.cancel}`;
+  if (reply.kind === 'other_process') return `${lead} · ${line}; it belongs to another process, so it cannot be collected or cancelled here`;
+  return `${lead} · ${line}`;
+}
 
 export function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -86,4 +107,29 @@ export function withNotice(text: string, notice: string | undefined): string {
 /** The row of a listing: queued or running by its status line, anything else by its stored status. */
 export function listingStatus(t: TaskListing, now = Date.now()): string {
   return t.status === 'running' ? formatStatusLine(statusFacts(t), now) : t.status;
+}
+
+export function completionNotice(taskId: string, status: string, live: TaskListing[], collectTool: string, now = Date.now()): string {
+  const lines = [`task ${taskId} ${status}; collect its result with ${collectTool}.`];
+  if (live.length > 0) {
+    lines.push('Still running:');
+    for (const task of live) lines.push(`- ${task.taskId} · ${task.agent} · ${listingStatus(task, now)}`);
+    lines.push('Wait for these tasks before using their results together.');
+  }
+  return lines.join('\n');
+}
+
+export function stopNotice(taskId: string): string {
+  return `task ${taskId} was stopped; no action is needed.`;
+}
+
+/** What `init <model>` reports about the starter entries: one line each. */
+export function formatStarterResult(result: StarterResult): string[] {
+  if (result.added.length === 0) {
+    return ['all three entries (the medium tier, the general agent and the fallback agent) are already there; nothing changed'];
+  }
+  const name = (entry: string) => (entry === 'medium' ? 'the medium tier' : `the ${entry} agent`);
+  const lines = [`added ${result.added.map(name).join(', ')}`];
+  if (result.present.length > 0) lines.push(`already there: ${result.present.map(name).join(', ')}`);
+  return lines;
 }

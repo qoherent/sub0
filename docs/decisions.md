@@ -207,7 +207,7 @@ apply to the spike; the contracts win where they differ from the rest of these d
     prompt stays denied". A task id that came back is never passed back. A server-verified permit and a hook-side
     host check were left for later.
 18. (2026-11-09) **Round 10 answers.** Entry points register child drivers and parent adapters, and the hook process
-    registers none; `Cli` and `McpServer` do not own their entry points. `init` takes an optional timeout (default
+    registers none; `Cli` and `ClaudeMcpServer` (then `McpServer`) do not own their entry points. `init` takes an optional timeout (default
     1200 seconds, CE's reviewer budget) and thinking level (default `medium`) and uses the project root that the
     Delegation service hands over. `general` and `fallback` moved under `agents:` as entries with no description, so no
     agent name is reserved and an explicit `fallback` runs without a "not configured" notice. `skills map` is a Tag.
@@ -243,3 +243,52 @@ apply to the spike; the contracts win where they differ from the rest of these d
     saves it to a file in the session's tool-results folder and gives Claude the path (code.claude.com/docs/en/mcp,
     "MCP output limits and warnings"), so nothing is lost by sending it whole. This reverses the equal share of the
     result limit per `await` section (KTD11 and R22 of the tiered routing plan) and the earlier result budget (D16).
+
+## Decisions made while adding pi as a parent host (2026-11-12)
+
+These supersede the `default` tier, the optional `general` and `fallback` entries and the routable-tier rule of
+16, 19, 21, 22 and 23 above. The contracts are `design/pi-extension.sigil`, `design/claude-plugin-commands.sigil`
+and the revised `design/*.sigil`; the plan is `plans/2026-11-11-1012-feat-pi-parent-extension-plan.md`.
+
+25. **Parent host and child host.** A *parent host* is where you work (Claude Code, pi) and a *child host* is what
+    subzero starts (pi today). The bare word "host" is retired from shared components and docs; the agent-file key
+    `host:` stays and means the child host. The model working inside a parent host is the *parent model*. Host
+    names (Claude Code, pi) appear only in host-specific components (child drivers, the Claude hooks and MCP
+    server, the pi extension) and in cases and decisions. The contracts `mcp-server` and `routing-hooks` became
+    `claude-mcp-server` and `claude-routing-hooks`.
+26. **pi is a second parent host.** One pi package, installed from a git branch, holds the extension. Its factory
+    builds a Kernel and registers the pi child driver; each pi session builds its own Delegation service (the
+    session core). The `subagent` tool takes the name compound-engineering asks for and replaces pi-subagents for
+    CE, with a clash warning when both are loaded. Why: pi-subagents' tool name would otherwise be bypassed.
+27. **Background by default, one wake for each finished child.** A finished background task wakes the parent model
+    with a completion notice that names the task and its status, says how to collect the result, lists the
+    session's tasks still running and says to wait for them. The notice carries no result text, so a long result
+    is fetched once. A stopped task does not wake the model; the model gets one stop notice for each stopped task
+    on its next turn, which says the task was stopped and does not say who stopped it (the model can cancel too).
+28. **Cancel.** Aborting a turn cancels every child of the pi session; `/subzero cancel` does it when pi is idle
+    (pi has no idle Escape event); the end of a pi session for any reason cancels all and shows a count. On Claude
+    Code, Escape does not stop background tasks, so a user-only `/subzero:cancel` plugin skill (its own contract,
+    `claude-plugin-commands`) and the `cancel` tool with no task id run a session cancel; a session change cancels
+    the old session's tasks.
+29. **No session-model fallback; `medium` is the default tier.** There is no special `default` tier. The model tier named
+    `medium` runs a request that names no tier and whose agent names none. The file must hold `medium`, `general`
+    and `fallback`, or the load fails and names the missing one; `subzero init` creates all three. A pi project
+    with no agent file is refused with an error that says to run `subzero init`. An unmatched tier value is ignored
+    on pi (the reply says it was not used) and returned as a tier error with a pass-back on Claude Code. An
+    endpoint with no entry has no parallel limit. Why: a session-model fallback needed a starter general agent, a
+    session agent definition, a fallback child host and a second limit, which was more than the feature earned.
+30. **Claude parity.** When Claude Code advertises MCP task support and the session is interactive, a `delegate`
+    call that does not set `wait` becomes an MCP task and `wait` defaults to false; otherwise it defaults to true.
+    While the readiness marker holds no task mode, the routing text and the deny reason use mode-neutral wording:
+    dispatch without asking to wait and collect any task id with `await`. If a platform check shows MCP tasks do
+    not work, a Stop hook watches per-session completion markers and wakes Claude with the result. The
+    Claude Code 2.1.322 probe did not select MCP tasks, so this fallback is in use.
+31. **Ownership moved.** The routing settings (`routing.hook`, `routing.generic_agents`) belong to the Claude hook
+    processes, not to the agent configuration. The server owns the rule that records the Claude session id.
+32. **pi 1.5.2.** The pi RPC client targets pi 1.5.2, and the child flags, tested on 0.87, are verified on 1.5.2
+    before use (plan unit U3).
+33. **The CE tier word stays.** `session model` is compound-engineering's phrase and maps to `large`; it is not a
+    fallback to the model of the parent session.
+34. **The approval boundary.** A pi child gets the tools its agent entry lists. The starter `general` entry may
+    write files and run shell commands, children run isolated from pi's own extensions, and installing the package
+    is the opt-in. Capping a child to the parent's active tools is left for later.

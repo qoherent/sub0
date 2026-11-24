@@ -127,6 +127,19 @@ Users receive a new version only when its number changes in the branch's
 `.claude-plugin/plugin.json`. A new commit with the same version is not picked up.
 Never edit the branch by hand: the next publish replaces every file.
 
+## pi package branch
+
+Run `npm run release:pi:build` to stage the pi package in `dist-pi-package`.
+The stage contains the extension bundle, license, changelog and a package
+manifest whose pi and TypeBox dependencies are supplied by the host. The
+version must match the Claude plugin manifest.
+
+Run `npm run release:pi:branch` to prepare the `pi` branch in a temporary
+checkout and inspect its path in the command output. Nothing is pushed unless
+`--push` is passed to `scripts/publish-pi-branch.mjs`. After review, publish
+with `npm run release:pi:branch -- --push`; the script refuses a dirty tracked
+tree and refuses to publish to `main` or `master`.
+
 ## Cut a release
 
 1. Set the same new version in `.claude-plugin/plugin.json` and `package.json`

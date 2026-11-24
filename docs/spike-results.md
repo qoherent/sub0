@@ -117,3 +117,48 @@ Plan: [docs/plans/2026-11-06-0953-feat-tiered-subagent-routing-plan.md](plans/20
 ## Decision
 
 _Written by the user, citing the table above: build subzero v0.2 or not, and why._
+
+## Parent adapter platform probe (2026-11-12)
+
+On pi 1.5.2, `pi.sendMessage` with `{ triggerTurn: true, deliverAs: "steer" }`
+starts a turn when idle and steers a running turn, according to the installed
+extension documentation. A temporary extension sent that message to an idle
+RPC session, and the local model ran to `agent_settled`. The same documentation
+says `agent_settled.aborted` identifies an aborted turn, including Escape; the
+interactive Escape check remains part of the live verification.
+
+On Claude Code 2.1.322, temporary local MCP servers advertised optional task
+support to both an interactive session and `claude -p`. Each session called the
+test tool without the MCP task parameter. These observations do not establish
+that every Claude configuration behaves the same way. SDK 1.32.2 implements
+the low-level task protocol, but these calls do not demonstrate that the client
+will select it. No reliable environment flag distinguishing the two modes was
+established.
+
+A follow-up process probe launched Claude Code 2.1.322 in a terminal: `ps`
+reported its process with a `ttys...` terminal and command `claude`. The
+earlier `claude -p` server probe reported no controlling terminal and a
+command containing `-p`. The server therefore treats a parent without a
+terminal, one with a print flag, or one it cannot inspect as non-interactive.
+This is deliberately conservative: an IDE or SDK client without a controlling
+terminal also waits, even if a human is interacting with it.
+
+On 2026-11-13, a clean Debian Bookworm arm64 container with Node 22, `flock`
+and `procps` built the committed tree and passed 68 routing, deny-lock and
+wake-marker tests. The minimal Node image did not include `ps` until `procps`
+was installed. A second pass including the simplified server and parent-mode
+check passed 74 MCP, routing, deny-lock and wake-marker tests.
+
+A separate interactive probe registered an `asyncRewake` Stop hook. After the
+first assistant turn ended, the hook exited with code 2 and feedback; Claude
+started another turn without a user prompt, and the second Stop hook ran. This
+confirms the hook wake mechanism for the fallback. The probe used only temporary
+files and did not install a hook in the project.
+
+The two-parent acceptance run in the pi parent plan is still pending. A person
+must check a real compound-engineering review and local child on pi, including
+notices, Escape, `/subzero cancel`, `/new`, and the shell task listing. On Claude
+Code, the remaining checks cover background delivery, Escape during `await`,
+stopping one task, the 120-second boundary, `/subzero:cancel`, and `/clear`.
+The 2.1.322 probe above did not select MCP tasks, so it does not establish that
+delegations appear as MCP tasks in Claude's `/tasks` view.

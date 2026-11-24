@@ -5,71 +5,96 @@
   session usage, transcript, launch spec,
 }
 @design/agent-config.sigil from AgentConfig import { thinking level }
-@design/mcp-server.sigil from McpServer import { allow rule }
+@design/claude-mcp-server.sigil from ClaudeMcpServer import { allow rule }
 @design/task-store.sigil from TaskStore import { task record }
 
 component SpikeHarness {
   goal {
-    Run an experiment arm on a fresh copy of the planted Slotted design, score it,
-    and write one row of measures, so that a person can decide from a table whether
+    Run an experiment arm on a fresh copy of the planted Slotted design, score
+    it,
+    and write one row of measures, so that a person can decide from a table
+    whether
     delegating interpreters to a local model is good enough.
   }
 
   state {
-    A *pass directory* is the Claude working directory of one run. It holds root,
+    A *pass directory* is the Claude working directory of one run. It holds
+    root,
     the fixture copy, store, an empty private *claims store*, run, skills, the
     *staged sigil skills*, and .agents/subzero.yaml.
 
     A *planted problem* is one of the four known faults in the planted Slotted
     design. A *measurement row* holds the outcome of each planted problem, the
-    final ingest state, the re-asks used, the units left unread, the token usage
+    final ingest state, the re-asks used, the units left unread, the token
+    usage
     split into main conversation, evaluator subagent and interpreters, the wall
     time and the context use at settle of the interpreters. It also holds the
-    thinking level that the launch spec of each pi interpreter declares, and the
-    stray writes of each interpreter, which are its writes outside its answer file.
+    thinking level that the launch spec of each pi interpreter declares, and
+    the
+    stray writes of each interpreter, which are its writes outside its
+    answer file.
     The *spike results document* is docs/spike-results.md.
   }
 
   logic {
-    Stage a fresh pass directory from the planted fixture with no claims store. Run
-    the experiment arm with claude -p from the pass directory. Run sigilc check on
-    the pass directory itself and score the planted problems from that report
-    against the answer key. Read usage from the stream, the subagent transcripts
+    Stage a fresh pass directory from the planted fixture with no claims store.
+    Run
+    the experiment arm with claude -p from the pass directory. Run sigilc check
+    on
+    the pass directory itself and score each planted problem from that report
+    against the answer key. Read usage from the stream, the transcript of each
+    subagent
     and, for the interpreter agent on pi, the session usage in the task record.
     List the files that the write calls of each interpreter name in its own
-    transcript or pi session, and compare each with the answer file of its brief.
-    Append a measurement row to the table. The flow ends when the row is appended,
+    transcript or pi session, and compare each with the answer file of its
+    brief.
+    Append a measurement row to the table. The flow ends when the row is
+    appended,
     and a run without an evaluator report is appended as failed.
   }
 
   constraints {
-    The sigil repository must stay read-only. The harness may import its fixture,
-    preflight, design view and evidence validation by path, and must re-implement
+    The sigil repository must stay read-only. The harness may import its
+    fixture,
+    preflight, design view and evidence validation by path, and must
+    re-implement
     the *issue matcher* that scores each planted problem without changing it.
 
-    The score of each planted problem must come from the sigilc check the harness
-    runs itself, so that it reflects what the interpreters read and not whether a
+    The score of each planted problem must come from the sigilc check the
+    harness
+    runs itself, so that it reflects what the interpreters read and not whether
+    a
     write-back succeeded.
 
-    A run in a pass directory must use dontAsk with an explicit allow-list, so that
+    A run in a pass directory must use dontAsk with an explicit allow-list, so
+    that
     an unlisted tool is denied and never prompted. SpikeHarness provides the
-    allow rule for the subzero tools in the allow-list of each experiment arm that
+    allow rule for the subzero tools in the allow-list of each experiment arm
+    that
     uses delegation. It must not use --no-session-persistence, because that
-    suppresses the subagent transcripts, and not --strict-mcp-config, because that
+    suppresses the transcript of each subagent, and not --strict-mcp-config,
+    because
+    that
     drops the plugin's MCP server in B.
 
-    An *anchor Facet* that was not read must score its planted problem as N/A and
+    An *anchor Facet* that was not read must score its planted problem as N/A
+    and
     not as missed. A finding with the right class and law but the wrong subject
-    must count as extra and not as a match. A *cumulative token counter* must be
+    must count as extra and not as a match. A *cumulative token counter* must
+    be
     counted once and not once per event.
 
     A run that ends without the evaluator's report must be kept as a failed
     measurement row and never dropped.
 
-    The writes of each interpreter must be read from its own transcript, with every
-    path normalized against the pass directory. A pass with a write other than the
-    answer file must be kept and flagged, never failed or dropped, and a write into
-    the claims store of the pass directory must be called out as making the score
+    The writes of each interpreter must be read from its own transcript, with
+    every
+    path normalized against the pass directory. A pass with a write other than
+    the
+    answer file must be kept and flagged, never failed or dropped, and a write
+    into
+    the claims store of the pass directory must be called out as making the
+    score
     untrustworthy.
 
     The measurement row must record the thinking level that the launch spec
@@ -77,8 +102,10 @@ component SpikeHarness {
     session usage marks unavailable must stay unavailable in the row with its
     reason, and must never become zero.
 
-    The harness must run each experiment arm on the same *design revision* and the
-    same Claude model and effort. The comparison is three matched passes each of A
+    The harness must run each experiment arm on the same *design revision* and
+    the
+    same Claude model and effort. The comparison is three matched passes each
+    of A
     and B, plus one B-low pass, one A-cheap pass and one B-control pass.
 
     No threshold applies. The decision of whether to build the next version is
@@ -86,34 +113,47 @@ component SpikeHarness {
   }
 
   cases {
-    Scoring the stored workspace of an existing sigil benchmark run gives the same
+    Scoring the stored workspace of an existing sigil benchmark run gives the
+    same
     outcome for each planted problem as that run's own report.
 
-    A measurement row built from a stream with two subagent transcripts splits the
+    A measurement row built from a stream with a transcript from each of two
+    subagents splits
+    the
     usage per subagent.
 
-    A pass in which an interpreter writes a second file is kept and flagged, and
+    A pass in which an interpreter writes a second file is kept and flagged,
+    and
     its measurement row shows the path.
   }
 
   interface {
-    Run one experiment arm on a fresh pass directory with its staged sigil skills,
-    and append one measurement row, with every measure filled or marked unavailable
+    Run one experiment arm on a fresh pass directory with its
+    staged sigil skills,
+    and append one measurement row, with every measure filled or marked
+    unavailable
     with a reason.
 
-    Produce a table with one measurement row per pass, keeping each failed pass.
+    Produce a table with one measurement row per pass, keeping each failed
+    pass.
 
-    Provide the spike results document with the table, the plumbing checks of the
-    delegation requirements with evidence pointers, and a place for the decision
+    Provide the spike results document with the table, the plumbing checks of
+    the
+    delegation requirements with evidence pointers, and a place for the
+    decision
     that the user writes.
   }
 
   decisions {
     The harness is Deno because it imports the sigil benchmark's own Deno
-    TypeScript by path. The review quality of the evaluator subagent stays a manual
-    record. The writes of an interpreter are detected from its transcript and not
-    from a before and after listing, because the evaluator writes many files in the
-    same directory at the same time. The context use is named at settle because the
+    TypeScript by path. The review quality of the evaluator subagent stays a
+    manual
+    record. The writes of an interpreter are detected from its transcript and
+    not
+    from a before and after listing, because the evaluator writes many files in
+    the
+    same directory at the same time. The context use is named at settle because
+    the
     session usage reports the value at the end of the run and not its peak.
   }
 }

@@ -7,7 +7,7 @@ import { tempDir } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const SCRIPT = path.join(REPO, 'scripts', 'build-plugin.mjs');
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
 const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** Exactly what a release ships (KTD4): any other file in the staged plugin is a leak. */
@@ -20,6 +20,8 @@ const ALLOWLIST = [
   'hooks/hooks.json',
   'package.json',
   'skills/init/SKILL.md',
+  'skills/init/guided-init.md',
+  'skills/cancel/SKILL.md',
   'skills/tasks/SKILL.md',
 ];
 
@@ -53,7 +55,7 @@ function sourceTree(dist: 'real' | 'stub' | 'none' = 'stub'): string {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     cpSync(path.join(REPO, file), path.join(root, file));
   }
-  for (const skill of ['init', 'tasks', 'review']) cpSync(path.join(REPO, 'skills', skill), path.join(root, 'skills', skill), { recursive: true });
+  for (const skill of ['init', 'tasks', 'cancel', 'review']) cpSync(path.join(REPO, 'skills', skill), path.join(root, 'skills', skill), { recursive: true });
   for (const decoy of ['src/a.ts', 'test/a.test.ts', 'bench/a.md', 'examples/a.md', 'design/a.sigil', 'docs/a.md', 'node_modules/a/index.js', '.agents/a.md', 'subzero.yaml']) {
     mkdirSync(path.dirname(path.join(root, decoy)), { recursive: true });
     writeFileSync(path.join(root, decoy), 'decoy\n');
@@ -99,6 +101,12 @@ function editJson(file: string, edit: (data: Record<string, any>) => void): void
 }
 
 describe('scripts/build-plugin.mjs', () => {
+  it('packages the user-invoked cancel skill with its preapproved cancel tool', () => {
+    const skill = readFileSync(path.join(REPO, 'skills/cancel/SKILL.md'), 'utf8');
+    expect(skill).toMatch(/^disable-model-invocation: true$/m);
+    expect(skill).toContain('mcp__plugin_subzero_subzero__cancel');
+    expect(skill).toMatch(/no arguments when no id was supplied/);
+  });
   it('stages exactly the allowlist, with a package.json that only makes the bundles ES modules', () => {
     const run = build(sourceTree());
     expect(run.status, run.stderr).toBe(0);

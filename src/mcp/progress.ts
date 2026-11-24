@@ -1,10 +1,10 @@
-// @sigil implements design/mcp-server.sigil McpServer (progress notification)
+// @sigil implements design/claude-mcp-server.sigil ClaudeMcpServer (progress notification)
 //
 // One line per notification: the agent, the kind of the latest domain event, the
 // tool and its target path for tool activity, and the elapsed time. Never agent
 // text, tool output, other tool arguments, the stderr tail or skill content.
 import type { ChildRunState, DomainEvent } from '../core/types.js';
-import { describeEvent, formatElapsed } from '../service/status-text.js';
+import { describeEvent, formatProgress } from '../service/status-text.js';
 
 export interface ProgressOptions {
   minIntervalMs?: number;
@@ -69,7 +69,7 @@ export class ProgressReporter {
   }
 
   private line(): string {
-    return `${this.agent} · ${this.latest} · ${formatElapsed(this.now() - this.started)}`;
+    return formatProgress(this.agent, this.latest, this.now() - this.started);
   }
 
   private flush(): void {

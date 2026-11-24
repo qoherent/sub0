@@ -23,7 +23,14 @@ if (args.includes('--export')) {
 function log(entry) {
   if (logFile) appendFileSync(logFile, JSON.stringify(entry) + '\n');
 }
-log({ argv: args, env: { PI_OFFLINE: process.env.PI_OFFLINE, PI_TELEMETRY: process.env.PI_TELEMETRY }, pid: process.pid });
+log({ argv: args, env: { PI_OFFLINE: process.env.PI_OFFLINE, PI_TELEMETRY: process.env.PI_TELEMETRY }, pid: process.pid, cwd: process.cwd() });
+
+// Like pi with a model on a provider it does not know: it says so and exits.
+const modelArg = args.includes('--model') ? args[args.indexOf('--model') + 1] : undefined;
+if (modelArg !== undefined && (scenario.unknownModels ?? []).includes(modelArg)) {
+  process.stderr.write(`Model "${modelArg}" not found\n`);
+  process.exit(1);
+}
 
 if (scenario.stderrAtStart) process.stderr.write(scenario.stderrAtStart);
 if (scenario.exitBeforeReady) {
@@ -78,6 +85,11 @@ const defaultTurn = [
   { emit: { type: 'agent_settled' } },
 ];
 
+// Like pi's get_available_models: full model objects.
+const defaultModels = [
+  { id: 'qwen', name: 'Qwen', api: 'openai-completions', provider: 'local', baseUrl: 'http://localhost:8080/v1', reasoning: true, input: ['text'], contextWindow: 131072, maxTokens: 8192, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } },
+];
+
 async function runTurn(steps) {
   for (const step of steps) {
     if (aborted) break;
@@ -125,6 +137,11 @@ async function handle(cmd) {
           contextUsage: { tokens: 1500, contextWindow: 131072, percent: 1.1 },
         },
       );
+    case 'get_available_models':
+      if (scenario.hangModels) return;
+      if (scenario.modelsRaw !== undefined) return sendRaw(scenario.modelsRaw);
+      if (scenario.refuseModels) return reply(undefined, false, scenario.refuseModels);
+      return reply({ models: scenario.models ?? defaultModels });
     case 'clear_queue':
       return reply({ steering: [], followUp: [] });
     case 'abort':
