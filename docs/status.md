@@ -185,8 +185,8 @@ These are listed on the install page and are not fixed:
   a Claude Code subagent never ends early.
 - A model with no `models.parallel` entry has no limit, including the model of
   a continued task.
-- A steer answer that arrives more than a second after its run ended is neither
-  replayed nor counted in the result.
+- A held message whose steer answer arrives more than a second after its run
+  ended is counted as not delivered, even if pi took it.
 - If the MCP server fails to start, the session-start text still says routing is
   on, and every subagent runs on Claude.
 - The routing hook needs `lockf` (macOS) or `flock` (Linux) for its per-session

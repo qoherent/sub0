@@ -93,6 +93,8 @@ export class Turn {
   private undelivered: string[] = [];
   /** A cancel was asked for: a run that still settles cleanly opens no next turn. */
   private cancelRequested = false;
+  /** Held messages handed to turn steering whose answer has not come back yet. */
+  private readonly unanswered = new Set<{ message: string }>();
   /** Steering messages are sent one at a time, so a late message never overtakes a held one. */
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -279,7 +281,11 @@ export class Turn {
   private flushHeld(): void {
     const batch = this.held.splice(0);
     for (const message of batch) {
+      const entry = { message };
+      this.unanswered.add(entry);
       void this.steer(message).then((answer) => {
+        // An answer after the result was built is ignored: the result already counted the message.
+        if (!this.unanswered.delete(entry)) return;
         if (answer === 'settled') this.leftover.push(message);
         else if (answer !== 'delivered') this.undelivered.push(message);
       });
@@ -337,7 +343,9 @@ export class Turn {
     const waiting = [...unreadSteers, ...this.leftover, ...this.held];
     // A run that settles cleanly after a cancel was asked for opens no next turn: the cancel wins the race.
     const opens = (result.status === 'completed' || result.status === 'truncated') && !this.cancelRequested;
-    const lost = opens ? this.undelivered.length : waiting.length + this.undelivered.length;
+    // A held message whose steer answer did not come back within the drain counts as not delivered.
+    const lost = (opens ? this.undelivered.length : waiting.length + this.undelivered.length) + this.unanswered.size;
+    this.unanswered.clear();
     const final: Result = lost > 0 ? { ...result, heldNotDelivered: lost } : result;
     this.finalResult = final;
     this.held = [];

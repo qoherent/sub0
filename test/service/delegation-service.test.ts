@@ -961,6 +961,24 @@ describe('DelegationService continue', () => {
     expect(await svc.collect(taskId)).toMatchObject({ kind: 'result', result: { status: 'completed', heldNotDelivered: 1 } });
   });
 
+  it('counts a held message whose steer answer comes after the drain as not delivered, and a late answer opens no turn', async () => {
+    const { port, started } = manualPort({ steers: true, resume: true });
+    const svc = service(makeProject(), port);
+    void svc.delegate({ agent: 'helper', briefText: 'first', parentSessionId: 'A' }, { wait: false });
+    await until(() => started.length === 1);
+    const taskId = (await svc.list('A'))[0]!.taskId;
+    expect(await svc.continue({ taskId, message: 'held', parentSessionId: 'A' }, { wait: false })).toMatchObject({ kind: 'queued' });
+    let answerLate!: (answer: 'settled') => void;
+    started[0]!.steerAnswer = () => new Promise((resolve) => (answerLate = resolve));
+    started[0]!.emit({ kind: 'prompt_sent' });
+    started[0]!.settle({ lastAssistantText: 'done' });
+    await until(() => svc.runningTurn(taskId) === undefined, 3000);
+    expect(await svc.collect(taskId)).toMatchObject({ kind: 'result', result: { status: 'completed', heldNotDelivered: 1 } });
+    answerLate('settled');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(started).toHaveLength(1);
+  });
+
   it('keeps turn 1\'s result when the until signal ends a followOn wait while turn 2 still runs', async () => {
     const { port, started } = live();
     const svc = service(makeProject(), port);
