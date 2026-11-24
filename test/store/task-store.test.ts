@@ -150,7 +150,7 @@ describe('TaskStore', () => {
     expect(queued.startedAt).toBeUndefined();
     expect(queued.task!.model).toBe('local/qwen');
 
-    store.writeStartTime('sz-qqqqqa', '2026-01-01T00:00:05.000Z');
+    store.writeStartTime('sz-qqqqqa', '2026-01-01T00:00:05.000Z', 1);
     const started = store.readTask('sz-qqqqqa')!;
     expect(started).toMatchObject({ status: 'running', model: 'local/qwen', startedAt: '2026-01-01T00:00:05.000Z', createdAt: queued.createdAt });
     // The settled line that follows keeps what the first lines wrote.
@@ -162,7 +162,7 @@ describe('TaskStore', () => {
     const { root, store, create } = setup();
     create('sz-qqqqqb');
     create('sz-qqqqqc');
-    store.writeStartTime('sz-qqqqqb', '2026-01-01T00:00:05.000Z');
+    store.writeStartTime('sz-qqqqqb', '2026-01-01T00:00:05.000Z', 1);
     const second = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
     const views = new Map(second.list().map((v) => [v.taskId, v]));
     expect(views.get('sz-qqqqqb')).toMatchObject({ status: 'running', startedAt: '2026-01-01T00:00:05.000Z', model: 'local/qwen' });
@@ -195,7 +195,7 @@ describe('TaskStore', () => {
     it('reads a task settled at turn 1 with turn 2 opened as running, and lists turn 2\'s enqueue time, not turn 1\'s start time', () => {
       const { store, create } = setup();
       create('sz-tttttt');
-      store.writeStartTime('sz-tttttt', '2026-01-01T00:00:05.000Z');
+      store.writeStartTime('sz-tttttt', '2026-01-01T00:00:05.000Z', 1);
       store.writeResult('sz-tttttt', result('sz-tttttt'));
       expect(store.claimTurn('sz-tttttt', 2, { message: 'more', enqueuedAt: '2026-01-01T01:00:00.000Z' })).toBe(true);
       const view = store.list().find((t) => t.taskId === 'sz-tttttt')!;
@@ -265,6 +265,69 @@ describe('TaskStore', () => {
       (live.store as unknown as { createTurnFile(id: string, turn: number, opened: object): boolean }).createTurnFile('sz-vvvvvv', 2, { message: 'm', enqueuedAt: 't' });
       expect(live.store.sweep()).toEqual([]);
       expect(live.store.readTask('sz-vvvvvv')).toMatchObject({ status: 'running', turn: 2 });
+    });
+
+    it('appends no abandoned line for a turn another process claimed while the sweep was deciding', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-rrrrra');
+      const taker = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      let claimed = false;
+      const racing: ProcessProbe = {
+        startTime: (pid) => {
+          if (pid === process.pid) return 'now';
+          // The takeover lands after the sweep read the turn files and before it appends.
+          if (!claimed) { claimed = true; taker.claimTurn('sz-rrrrra', 2, { message: 'm', enqueuedAt: 't' }); }
+          return null;
+        },
+      };
+      const sweeper = new TaskStore(dead.root, { probe: racing, owner: { pid: process.pid, startTime: 'now' } });
+      expect(sweeper.sweep()).toEqual([]);
+      expect(sweeper.readTask('sz-rrrrra')).toMatchObject({ status: 'running', turn: 2 });
+      expect(sweeper.readLatest().get('sz-rrrrra')).toMatchObject({ status: 'running', turn: 2 });
+    });
+
+    it('creates no turn file for a stop reason of a turn that has none, so a settled task stays settled', () => {
+      const { store, create, warnings } = setup();
+      create('sz-sssssa');
+      store.writeResult('sz-sssssa', result('sz-sssssa'));
+      store.writeStopReason('sz-sssssa', 2, 'session_end');
+      expect(store.readTurn('sz-sssssa', 2)).toBeNull();
+      expect(store.readTask('sz-sssssa')).toMatchObject({ status: 'completed', turn: 1 });
+      expect(warnings.join('\n')).toMatch(/no turn 2 of sz-sssssa/);
+    });
+
+    it('marks the other tasks when one task cannot be checked, and warns about it', () => {
+      const first = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      first.create('sz-ppppa1');
+      const second = new TaskStore(first.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: DEAD + 1, startTime: 'then' } });
+      second.createTaskRecord({ taskId: 'sz-ppppa2', agent: getAgent(first.root, 'helper'), brief: 'b', createdAt: new Date().toISOString() });
+      const warned: string[] = [];
+      const breaking: ProcessProbe = {
+        startTime: (pid) => {
+          if (pid === process.pid) return 'now';
+          if (pid === DEAD + 1) throw new Error('probe broke');
+          return null;
+        },
+      };
+      const sweeper = new TaskStore(first.root, { probe: breaking, owner: { pid: process.pid, startTime: 'now' }, warn: (m) => warned.push(m) });
+      expect(sweeper.sweep()).toEqual(['sz-ppppa1']);
+      expect(warned.join('\n')).toMatch(/could not check sz-ppppa2: probe broke/);
+    });
+
+    it('keeps the agent name when a claim finds no index line for the task', () => {
+      const { root, store, create } = setup();
+      create('sz-aaaaan');
+      writeFileSync(path.join(root, '.agents', 'subzero', 'index.jsonl'), '');
+      expect(store.claimTurn('sz-aaaaan', 2, { message: 'm', enqueuedAt: 't' })).toBe(true);
+      expect(store.readLatest().get('sz-aaaaan')!.agent).toBe('helper');
+    });
+
+    it('returns only events of the kinds asked for, even when another event holds that kind inside it', () => {
+      const { store, create } = setup();
+      create('sz-eeeeek');
+      store.appendEvent('sz-eeeeek', { kind: 'tool_activity', phase: 'start', tool: 'bash', nested: { kind: 'prompt_sent' } } as never, 1);
+      expect(store.readEvents('sz-eeeeek', ['prompt_sent'])).toEqual([]);
+      expect(store.promptWasSent('sz-eeeeek')).toBe(false);
     });
 
     it('keeps the latest owner line and the first line\'s creation time', () => {

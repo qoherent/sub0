@@ -281,7 +281,13 @@ export class TaskStore implements TaskRecordWriter {
       chmodSync(this.storeFolder, 0o700);
     }
     const ignore = path.join(this.storeFolder, '.gitignore');
-    if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx' });
+    if (existsSync(ignore)) return;
+    try {
+      writeFileSync(ignore, '*\n', { flag: 'wx' });
+    } catch (err) {
+      // Another process wrote it first.
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
   }
 
   exists(taskId: string): boolean {
@@ -350,7 +356,7 @@ export class TaskStore implements TaskRecordWriter {
     // The running line follows only a claim that succeeded, with the owner when it changes.
     this.appendIndex({
       taskId,
-      agent: first?.agent ?? '',
+      agent: first?.agent ?? this.readTaskJson(taskId)?.agent.name ?? '',
       status: 'running',
       ...(first?.parentSessionId !== undefined ? { parentSessionId: first.parentSessionId } : {}),
       childSession: taskId,
@@ -364,14 +370,22 @@ export class TaskStore implements TaskRecordWriter {
     return true;
   }
 
-  /** Change one turn file in place, keeping the rest of it. A bare result is read as turn 1 first. */
-  private updateTurn(taskId: string, turn: number, change: (file: TurnFile) => TurnFile): void {
-    const current = this.readTurn(taskId, turn) ?? { turn, owner: this.owner, enqueuedAt: this.readLatest().get(taskId)?.createdAt ?? new Date().toISOString() };
+  /**
+   * Change one turn file in place, keeping the rest of it. A bare result is read as turn 1 first.
+   * Only a result may create a missing turn file: a file with no result reads as a running turn.
+   */
+  private updateTurn(taskId: string, turn: number, change: (file: TurnFile) => TurnFile, create = false): void {
+    const existing = this.readTurn(taskId, turn);
+    if (existing === null && !create) {
+      this.warn(`no turn ${turn} of ${taskId} to update`);
+      return;
+    }
+    const current = existing ?? { turn, owner: this.owner, enqueuedAt: this.readLatest().get(taskId)?.createdAt ?? new Date().toISOString() };
     writeAtomic(this.turnPath(taskId, turn), change(current));
   }
 
   /** Write the start time into the turn file: no index line, so the task status is still running. */
-  writeStartTime(taskId: string, startedAt: string, turn = this.latestTurnNumber(taskId)): void {
+  writeStartTime(taskId: string, startedAt: string, turn: number): void {
     if (!this.exists(taskId)) throw new Error(`no task record for ${taskId}`);
     this.updateTurn(taskId, turn, (file) => ({ ...file, startedAt }));
   }
@@ -459,7 +473,8 @@ export class TaskStore implements TaskRecordWriter {
       if (raw.trim() === '') return [];
       if (needles !== undefined && !needles.some((needle) => raw.includes(needle))) return [];
       try {
-        return [JSON.parse(raw) as LoggedEvent];
+        const event = JSON.parse(raw) as LoggedEvent;
+        return kinds === undefined || kinds.includes(event.kind) ? [event] : [];
       } catch {
         return [];
       }
@@ -492,7 +507,7 @@ export class TaskStore implements TaskRecordWriter {
   /** Write the result in one step, and only then the index line that gives its status. */
   writeResult(taskId: string, result: Result, extra: { sessionFile?: string; turn?: number } = {}): void {
     const turn = extra.turn ?? result.turn ?? 1;
-    this.updateTurn(taskId, turn, (file) => ({ ...file, result }));
+    this.updateTurn(taskId, turn, (file) => ({ ...file, result }), true);
     const first = this.readLatest().get(taskId);
     this.appendIndex({
       taskId,
@@ -588,9 +603,6 @@ export class TaskStore implements TaskRecordWriter {
     });
   }
 
-  private latestTurnNumber(taskId: string): number {
-    return this.readTurns(taskId).at(-1)?.turn ?? 1;
-  }
 
   /** The latest turn, which is the turn file with the highest turn number. */
   latestTurn(taskId: string): TurnFile | null {
@@ -701,36 +713,48 @@ export class TaskStore implements TaskRecordWriter {
     // A probe that cannot even read this process cannot tell anyone is gone.
     if (typeof this.probe.startTime(process.pid) !== 'string') return marked;
     for (const line of this.readLatest().values()) {
-      const latest = this.latestTurn(line.taskId);
-      // A turn that settled is nobody's to abandon; the owner of a running turn is the one in its turn file.
-      if (latest?.result !== undefined) continue;
-      // A process that died between claiming a turn and writing its running line left only the turn file.
-      const unindexed = (indexed: IndexLine) => latest !== null && latest.turn > (indexed.turn ?? 1);
-      if (line.status !== 'running' && !unindexed(line)) continue;
-      const owner = latest?.owner ?? line.owner;
-      if (owner === undefined) continue;
-      // A probe that cannot tell (undefined) never marks a task, and a live owner keeps its task.
-      if (this.ownerAlive(owner) !== false) continue;
-
-      // Read again just before appending: the owner may have settled meanwhile.
-      const now = this.readLatest().get(line.taskId);
-      if (now === undefined || (now.status !== 'running' && !unindexed(now))) continue;
-      if (this.readResult(line.taskId) !== null) continue;
-      this.appendIndex({
-        taskId: line.taskId,
-        agent: line.agent,
-        status: 'abandoned',
-        ...(now.parentSessionId !== undefined ? { parentSessionId: now.parentSessionId } : {}),
-        childSession: line.taskId,
-        ...sessionField(now.sessionFile ?? this.findSessionFile(line.taskId)),
-        createdAt: now.createdAt,
-        updatedAt: new Date().toISOString(),
-        // The turn it abandons, so that a turn file with no running line is marked once.
-        ...(latest !== null ? { turn: latest.turn } : {}),
-      });
-      marked.push(line.taskId);
+      try {
+        if (this.abandonIfGone(line)) marked.push(line.taskId);
+      } catch (err) {
+        // One task that cannot be read or marked must not keep the sweep from the others.
+        this.warn(`the sweep could not check ${line.taskId}: ${(err as Error).message}`);
+      }
     }
     return marked;
+  }
+
+  /** Mark one task abandoned when its owner process is gone; true when it was marked. */
+  private abandonIfGone(line: IndexLine): boolean {
+    const latest = this.latestTurn(line.taskId);
+    // A turn that settled is nobody's to abandon; the owner of a running turn is the one in its turn file.
+    if (latest?.result !== undefined) return false;
+    // A process that died between claiming a turn and writing its running line left only the turn file.
+    const unindexed = (indexed: IndexLine) => latest !== null && latest.turn > (indexed.turn ?? 1);
+    if (line.status !== 'running' && !unindexed(line)) return false;
+    const owner = latest?.owner ?? line.owner;
+    if (owner === undefined) return false;
+    // A probe that cannot tell (undefined) never marks a task, and a live owner keeps its task.
+    if (this.ownerAlive(owner) !== false) return false;
+
+    // Read again just before appending: the owner may have settled meanwhile, or another
+    // process may have taken the task over by claiming a newer turn.
+    const now = this.readLatest().get(line.taskId);
+    if (now === undefined || (now.status !== 'running' && !unindexed(now))) return false;
+    const fresh = this.latestTurn(line.taskId);
+    if (fresh?.result !== undefined || fresh?.turn !== latest?.turn) return false;
+    this.appendIndex({
+      taskId: line.taskId,
+      agent: line.agent,
+      status: 'abandoned',
+      ...(now.parentSessionId !== undefined ? { parentSessionId: now.parentSessionId } : {}),
+      childSession: line.taskId,
+      ...sessionField(now.sessionFile ?? this.findSessionFile(line.taskId)),
+      createdAt: now.createdAt,
+      updatedAt: new Date().toISOString(),
+      // The turn it abandons, so that a turn file with no running line is marked once.
+      ...(latest !== null ? { turn: latest.turn } : {}),
+    });
+    return true;
   }
 }
 
