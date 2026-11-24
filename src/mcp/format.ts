@@ -19,13 +19,20 @@ export const REPLY_RESERVE = 2_000;
 export const REPLY_BUDGET_CHARS = TOOL_RESULT_LIMIT - REPLY_RESERVE;
 export const LISTING_CAP = 50;
 
+/** The tool names a reply of the Claude Code server points the parent at. */
+export const MCP_TOOL_NAMES = { collect: 'await', cancel: 'cancel', read: 'tasks' };
+
 /** One reply of delegate, tasks, await or cancel about one task, with the task id first. */
 export function describeReply(reply: DelegateReply | CollectReply, view?: { agent: string; createdAt: string }, now = Date.now()): string {
-  return withNotice(describeTaskReply(reply, view, { collect: 'await', cancel: 'cancel' }, now), 'notice' in reply ? reply.notice : undefined);
+  return withNotice(describeTaskReply(reply, view, MCP_TOOL_NAMES, now), 'notice' in reply ? reply.notice : undefined);
 }
 
-/** The one line of an await reply that stands for a result left out for the reply's size. */
-function deferredLine(reply: Extract<CollectReply, { kind: 'result' }>): string {
+/** The one line of an await reply that stands for the result, or the several turn results, left out for the reply's size. */
+function deferredLine(reply: Extract<CollectReply, { kind: 'result' | 'results' }>): string {
+  if (reply.kind === 'results') {
+    const { agent } = reply.results[0]!.result;
+    return `task: ${reply.taskId} · ${agent} · ${reply.results.length} turn results not shown here (reply size); read them whole with tasks(${reply.taskId})`;
+  }
   const { taskId, agent, status } = reply.result;
   return `task: ${taskId} · ${agent} · ${status} · result not shown here (reply size); read it whole with tasks(${taskId})`;
 }
@@ -35,23 +42,30 @@ function deferredLine(reply: Extract<CollectReply, { kind: 'result' }>): string 
  * Each result section is given whole while the joined reply stays within the limit,
  * and the first is always given whole, even alone over the limit, since Claude Code
  * then saves the reply to a file and loses nothing. A later result that does not
- * fit is deferred to one line that points to tasks(<id>). A task with no result
- * keeps its status line.
+ * fit is deferred to one line that points to tasks(<id>), whether it is one result or
+ * the several turn results of a task. A task with no result keeps its status line.
  */
 export function formatAwait(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): string {
   return formatAwaitWithShown(replies, limit, now).body;
 }
 
+/** The turns of a reply whose results it gives whole: what a collect delivered. */
+export function deliveredTurns(reply: DelegateReply | CollectReply): { taskId: string; turn: number }[] {
+  if (reply.kind === 'result') return [{ taskId: reply.result.taskId, turn: reply.result.turn ?? 1 }];
+  if (reply.kind === 'results') return [...reply.results.map((r) => ({ taskId: r.result.taskId, turn: r.result.turn ?? 1 })), ...(reply.then !== undefined ? deliveredTurns(reply.then) : [])];
+  return [];
+}
+
 /** The complete result sections actually included in an await response. */
-export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): { body: string; shown: string[] } {
+export function formatAwaitWithShown(replies: CollectReply[], limit = TOOL_RESULT_LIMIT, now = Date.now()): { body: string; shown: { taskId: string; turn: number }[] } {
   const sections: string[] = [];
-  const shown: string[] = [];
+  const shown: { taskId: string; turn: number }[] = [];
   let length = 0;
   for (const reply of replies) {
     const whole = describeReply(reply, undefined, now);
     const joined = length + (sections.length > 0 ? 2 : 0) + whole.length;
-    const section = reply.kind === 'result' && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
-    if (reply.kind === 'result' && section === whole) shown.push(reply.result.taskId);
+    const section = (reply.kind === 'result' || reply.kind === 'results') && sections.length > 0 && joined > limit ? deferredLine(reply) : whole;
+    if (section === whole) shown.push(...deliveredTurns(reply));
     length += (sections.length > 0 ? 2 : 0) + section.length;
     sections.push(section);
   }

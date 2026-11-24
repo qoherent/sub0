@@ -4,7 +4,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildSync } from 'esbuild';
 import { describe, expect, it } from 'vitest';
-import { withDenyLock } from '../../src/routing/deny-lock.js';
+import { lockAvailable, withDenyLock } from '../../src/routing/deny-lock.js';
 import { tempDir, until } from '../helpers.js';
 
 describe('deny-memory lock', () => {
@@ -17,6 +17,14 @@ describe('deny-memory lock', () => {
       return 'recorded';
     });
     expect(result).toBe('recorded');
+  });
+
+  it('reports the lock utility as unavailable when it cannot be started, and available otherwise', () => {
+    expect(lockAvailable()).toBe(true);
+    const previous = process.env.PATH;
+    process.env.PATH = '';
+    try { expect(lockAvailable()).toBe(false); }
+    finally { if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous; }
   });
 
   it('fails open when the operating-system lock utility is unavailable', () => {

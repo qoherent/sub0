@@ -6,14 +6,13 @@ import { tempDir } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
 const SCRIPT = path.join(REPO, 'scripts', 'publish-plugin-branch.mjs');
-const BUNDLES = ['agent-hook', 'cli', 'hook', 'server', 'wake-hook'];
+const BUNDLES = ['agent-hook', 'cli', 'hook', 'prompt-hook', 'server', 'wake-hook'];
 const HAS_CLAUDE = spawnSync('claude', ['--version'], { encoding: 'utf8' }).status === 0;
 
 /** What the plugin branch holds: the staged plugin (the release allowlist) and its marketplace file. */
 const BRANCH_FILES = [
   '.claude-plugin/marketplace.json',
   '.claude-plugin/plugin.json',
-  '.mcp.json',
   'LICENSE',
   'bin/subzero',
   ...BUNDLES.map((name) => `dist/${name}.js`),
@@ -37,7 +36,7 @@ function git(cwd: string, ...args: string[]): string {
 /** A repository-shaped source tree with stub bundles that the script can build from (--root). */
 function sourceTree(options: { dist?: boolean; version?: string } = {}): string {
   const root = tempDir('subzero-pubsrc-');
-  for (const file of ['.claude-plugin/plugin.json', '.mcp.json', 'LICENSE', 'bin/subzero', 'hooks/hooks.json', 'package.json']) {
+  for (const file of ['.claude-plugin/plugin.json', 'LICENSE', 'bin/subzero', 'hooks/hooks.json', 'package.json']) {
     mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     cpSync(path.join(REPO, file), path.join(root, file));
   }

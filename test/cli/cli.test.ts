@@ -111,7 +111,7 @@ describe('Cli', () => {
     const agent = { name: 'helper' } as never;
     store.createTaskRecord({ taskId: 'sz-queued', agent, brief: 'b', createdAt: new Date().toISOString() });
     store.createTaskRecord({ taskId: 'sz-runnin', agent, brief: 'b', createdAt: new Date().toISOString() });
-    store.writeStartTime('sz-runnin', new Date().toISOString());
+    store.writeStartTime('sz-runnin', new Date().toISOString(), 1);
     const { run, out } = cli(root);
     expect(await run('tasks')).toBe(0);
     const queued = out.find((l) => l.startsWith('sz-queued'))!;
@@ -126,7 +126,7 @@ describe('Cli', () => {
     const agent = { name: 'helper' } as never;
     store.createTaskRecord({ taskId: 'sz-queued', agent, brief: 'b', createdAt: new Date().toISOString() });
     store.createTaskRecord({ taskId: 'sz-runnin', agent, brief: 'b', createdAt: new Date().toISOString() });
-    store.writeStartTime('sz-runnin', new Date().toISOString());
+    store.writeStartTime('sz-runnin', new Date().toISOString(), 1);
     const { run, err } = cli(root);
     expect(await run('attach', 'sz-queued')).toBe(1);
     expect(err.at(-1)).toMatch(/task sz-queued is queued, not launched yet/);

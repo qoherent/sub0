@@ -1,5 +1,5 @@
 // @sigil implements design/claude-routing-hooks.sigil ClaudeRoutingHooks (deny memory)
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -8,13 +8,23 @@ const pause = new Int32Array(new SharedArrayBuffer(4));
 // The helper holds the OS lock until its stdin closes, including when the hook dies.
 const helper = "require('node:fs').writeFileSync(process.argv[1], 'ready', { mode: 0o600 }); process.stdin.resume(); process.stdin.on('end', () => process.exit(0));";
 
+/** The operating-system lock utility the deny lock runs on this platform. */
+export function lockProgram(): string {
+  return process.platform === 'darwin' ? 'lockf' : 'flock';
+}
+
+/** Whether the lock utility starts; without it every routing decision fails open. */
+export function lockAvailable(): boolean {
+  return spawnSync(lockProgram(), [], { stdio: 'ignore', timeout: 2000 }).error === undefined;
+}
+
 /** Hold a crash-released per-session lock. An unavailable or busy lock fails open. */
 export function withDenyLock<T>(dataDir: string, sessionKey: string, action: () => T, wait = true): T | undefined {
   const root = path.join(dataDir, 'sessions', 'deny-locks');
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const lock = path.join(root, `${sessionKey}.lock`);
   const ready = path.join(root, `${process.pid}-${randomUUID()}.ready`);
-  const program = process.platform === 'darwin' ? 'lockf' : 'flock';
+  const program = lockProgram();
   const args = process.platform === 'darwin'
     ? ['-k', '-t', wait ? '2' : '0', lock, process.execPath, '-e', helper, ready]
     : ['-w', wait ? '2' : '0', lock, process.execPath, '-e', helper, ready];

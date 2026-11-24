@@ -47,7 +47,7 @@ export interface CliIo {
   err: (text: string) => void;
 }
 
-const CHANGE_FLAGS = '[--tier <tier>=<model>:<thinking>]... [--unset <tier>]... [--limit <endpoint>=<n>]... [--no-limit <endpoint>]...';
+const CHANGE_FLAGS = '[--tier <tier>=<model>:<thinking>]... [--unset <tier>]... [--limit <model>=<n>]... [--no-limit <model>]...';
 
 const USAGE = `usage:
   subzero init <model> [--host <host>] [--timeout <seconds>] [--thinking <level>]
@@ -212,6 +212,15 @@ function nameAndValue(flag: string, arg: string, shape: string): [string, string
   return [name, value];
 }
 
+/** Split `<model>=<n>` at the last equals sign: a model id may hold slashes and colons, and the limit is the digits after the last `=`. */
+function modelAndLimit(arg: string): [string, string] {
+  const eq = arg.lastIndexOf('=');
+  const model = eq === -1 ? '' : arg.slice(0, eq);
+  const value = eq === -1 ? '' : arg.slice(eq + 1);
+  if (model.trim() === '' || value === '') throw new ConfigUsageError(`--limit "${arg}" must have the form <model>=<n>`);
+  return [model, value];
+}
+
 function nonEmptyArg(flag: string, arg: string): string {
   if (arg.trim() === '') throw new ConfigUsageError(`${flag} needs a non-empty name`);
   return arg;
@@ -233,13 +242,13 @@ function parseChanges(values: { tier?: string[]; unset?: string[]; limit?: strin
   }
   for (const arg of values.unset ?? []) changes.push({ op: 'unsetTier', tier: nonEmptyArg('--unset', arg) });
   for (const arg of values.limit ?? []) {
-    const [endpoint, n] = nameAndValue('--limit', arg, '<endpoint>=<n>');
+    const [model, n] = modelAndLimit(arg);
     if (!/^[1-9][0-9]*$/.test(n) || !Number.isSafeInteger(Number(n))) {
       throw new ConfigUsageError(`--limit "${arg}": the limit must be a positive whole number`);
     }
-    changes.push({ op: 'setLimit', endpoint, parallel: Number(n) });
+    changes.push({ op: 'setLimit', model, parallel: Number(n) });
   }
-  for (const arg of values['no-limit'] ?? []) changes.push({ op: 'clearLimit', endpoint: nonEmptyArg('--no-limit', arg) });
+  for (const arg of values['no-limit'] ?? []) changes.push({ op: 'clearLimit', model: nonEmptyArg('--no-limit', arg) });
   return changes;
 }
 
@@ -353,7 +362,7 @@ async function run(service: DelegationService, args: string[], io: CliIo): Promi
           if (event.kind === 'tool_activity' && event.phase === 'start') io.err(`· ${describeEvent(event)}`);
         },
         onState: (state) => {
-          if (state === 'Pending') io.err('· waiting for the endpoint');
+          if (state === 'Pending') io.err('· waiting for the model');
         },
       },
     );

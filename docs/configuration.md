@@ -3,14 +3,15 @@
 subzero reads one file per project, `.agents/subzero.yaml`, and can read a
 global file, `~/.agents/subzero.yaml`, under it. The files say which models the
 children run on, which agents you can ask for by name, and how routing behaves.
-This page is the full reference for both, for version `0.1.0-preview.1`. The
+This page is the full reference for both, for version `0.1.0-preview.1` plus the v0.2 changes on this branch (parallel
+limits per model, `continue`), which are marked as they come. The
 README has the short path: install, then run `/subzero:init` in Claude Code or
 `/subzero init` in pi. You do not have to write either file by hand; see
 [Writing the file with init](#writing-the-file-with-init).
 
 What is documented here is what the code accepts today. The design in
 [design.md](design.md) §4 describes more (a personal override file, skill
-manifests, endpoint connection fields). Those parts are not built; see
+manifests, model server connection fields). Those parts are not built; see
 [Not supported yet](#not-supported-yet).
 
 ## Where the file lives
@@ -43,14 +44,12 @@ in that project; see
 skills:
   file-facts: ../subzero-skills/file-facts
 
-endpoints:
-  local:
-    parallel: 1
-
 models:
   tiers:
     small:   { host: pi, model: local/qwen3-4b, thinking: off }
     medium:  { host: pi, model: local/qwen3-coder-30b, thinking: medium }
+  parallel:
+    local/qwen3-coder-30b: 1
 
 routing:
   hook: true
@@ -73,8 +72,10 @@ agents:
       medium: { thinking: high }
 ```
 
-The top-level keys are `enabled`, `skills`, `endpoints`, `models`, `routing` and
-`agents`. After merging with the global file, the configuration must contain
+The top-level keys are `enabled`, `skills`, `models`, `routing` and `agents`.
+`models` holds `tiers` and `parallel`. A file that still holds an `endpoints`
+key fails to load; see [`endpoints:` is a load error](#endpoints-is-a-load-error).
+After merging with the global file, the configuration must contain
 the `medium` tier. The `general` and `fallback` agents are required too, but a
 project that does not define them gets built-in ones (see
 [Built-in agents](#built-in-agents)).
@@ -98,7 +99,7 @@ models:
 | Key | Required | Meaning |
 |---|---|---|
 | `host` | yes | The kind of child. `pi` is the only host that exists in this preview. |
-| `model` | yes | `provider/model`, as `pi --list-models` shows it. The part before the first slash is the **endpoint** that the parallel limit counts. |
+| `model` | yes | `provider/model`, as `pi --list-models` shows it. The whole id is what a [parallel limit](#modelsparallel-limits-per-model) belongs to. |
 | `thinking` | yes | One of `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. It is passed to pi's `--thinking`. |
 
 Rules:
@@ -128,7 +129,7 @@ agents:
 |---|---|---|
 | `description` | yes, except on `general` and `fallback` | What the agent is for. It is not shown to Claude in this preview (see [Limits](#limits)). On `general` and `fallback` a description is an error. |
 | `tools` | yes | The pi tools the child may use, at least one: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`. Passed to pi's `--tools`. subzero does not check the names. |
-| `timeout` | yes | Seconds from the child's start until it settles. Time spent waiting in the queue does not count. A child past it is stopped and the task fails with `timeout`. |
+| `timeout` | yes | Seconds from the child's start until it settles. Time spent waiting in the queue does not count. A child past it is stopped and the task fails with `timeout`. A turn added by [`continue`](../README.md#continue-a-task-and-steer-a-running-one) gets the full timeout, and each steering message delivered to a running child restarts it; nothing caps the total time of a task. |
 | `skills` | no | Names from the top-level `skills:` map. Default none. |
 | `tier` | no | The agent's own tier when a request names none. Must exist in `models.tiers`. Default `medium`. |
 | `tiers` | no | Per-tier overrides of `host`, `model` and `thinking` for this agent only, field by field. Each key must be a configured tier. |
@@ -186,7 +187,44 @@ folder when it starts; a task keeps the copy it started with.
 - Keep skill folders out of `.claude/skills/` (Claude would load the skill
   itself) and out of `.agents/subzero/` (git ignores that folder).
 
-## `endpoints`: limits per model server
+## `models.parallel`: limits per model
+
+```yaml
+models:
+  tiers:
+    small:  { host: pi, model: r9700/Qwen3.8, thinking: off }
+    medium: { host: pi, model: r9700/Qwen3.8, thinking: medium }
+  parallel:
+    r9700/Qwen3.8: 1
+```
+
+The key is a full model id, as a tier's `model` writes it (`r9700/Qwen3.8`).
+The value is the most children that run at once on that model; it must be a
+positive whole number. The limit belongs to the one model id, so every tier that
+names it shares the limit: in the example `small` and `medium` together run one
+child at a time. Past the limit a delegation waits as queued, first come first
+served, and starts when a child ends. A one-GPU model server usually wants 1 for
+each model it serves; a server that runs several models at once needs a limit
+for each of them.
+
+- The count is per process. A second Claude Code window or pi session is not
+  counted, and nothing is locked across processes.
+- A model with no entry has no limit. That includes the model of a continued
+  task: a task whose model has no limit runs unlimited when you continue it.
+- A limit in the agent file for a model that no tier or tier override uses is
+  a load error that names the model; it catches a mistyped id. A limit in the
+  global file that no tier of the project uses is ignored in that project.
+- A limit is not tied to a provider. Two models of one provider have separate
+  limits, and a limit on `a/x` says nothing about `a/y`.
+- The model server's address and key are in pi's own configuration
+  (`~/.pi/agent/models.json`).
+- `models.parallel` goes in the global file and in the agent file.
+
+### `endpoints:` is a load error
+
+Earlier previews kept limits under a top-level `endpoints:` key, counted per
+provider. It was replaced by `models.parallel`, and a file that holds it no
+longer loads:
 
 ```yaml
 endpoints:
@@ -194,19 +232,23 @@ endpoints:
     parallel: 1
 ```
 
-The key is an endpoint name, the part of a model before its first slash
-(`local` in `local/qwen3-coder-30b`). `parallel` is the most children one
-Claude Code session runs at once on it; it must be a positive whole number.
-Past the limit a delegation waits as queued, first come first served, and
-starts when a child ends. A one-GPU model server usually wants `parallel: 1`.
+The error names the file, says that `models.parallel` replaced it, lists each
+old limit with the models it covered, and points to guided init. For the
+agent file the models are those of the merged configuration (its tiers and tier
+overrides, with the global file's tiers); for the global file they are the
+models of the global file's own tiers, because another project's tiers are not
+its business. An old limit that covered several models is offered as the default
+for each of them, and you can give each model its own value. The key counts even
+when it holds nothing (`endpoints: {}` or a bare `endpoints:`): the error then says
+the map is empty and the key goes, and init removes it.
 
-- The count is per session. A second Claude Code window is not counted, and
-  nothing is locked across processes.
-- An endpoint with no entry has no limit.
-- An entry that no tier or tier override uses is a load error, which catches a
-  mistyped endpoint name.
-- An entry holds only `parallel` in this preview. The model server's address and
-  key are in pi's own configuration (`~/.pi/agent/models.json`).
+Guided init repairs the file. It pre-fills each listed model's limit with the
+old value, shows the diff, and writes only after you confirm. When the file that
+the chosen scope does not write holds `endpoints:`, init repairs that one first,
+in its own confirmed step. `init <model>` does not repair it; it refuses a file
+that fails to load for this reason. You can also edit the file by hand: replace
+the `endpoints:` map with a `models.parallel` entry for each model that should
+keep a limit.
 
 ## `routing`: Claude Code subagent routing
 
@@ -253,10 +295,8 @@ models:
   tiers:
     small:  { host: pi, model: local/qwen3-4b, thinking: off }
     medium: { host: pi, model: local/qwen3-coder-30b, thinking: medium }
-
-endpoints:
-  local:
-    parallel: 1
+  parallel:
+    local/qwen3-coder-30b: 1
 
 routing:
   hook: true
@@ -271,12 +311,12 @@ models:
 ```
 
 Here the project runs `medium` with its own thinking level, drops `small`, and
-inherits the limit of `local`.
+inherits the limit of `local/qwen3-coder-30b`.
 
 - **Path.** `~/.agents/subzero.yaml`, or the full file path in
   `SUBZERO_GLOBAL_CONFIG` (an empty value counts as unset). A missing file
   means there is no global layer.
-- **Allowed keys.** Only `models.tiers`, `endpoints.<endpoint>.parallel`,
+- **Allowed keys.** Only `models.tiers`, `models.parallel`,
   `routing` and `hosts.pi.extensions` (next section). Any other key, such as `agents`,
   `skills` or `enabled`, is a load error that names the file and the key. Agents
   and skills stay in the project, so a file in your home folder cannot give
@@ -340,20 +380,20 @@ hosts:
 
 ### How the two files merge
 
-- **By name.** Tiers merge by tier name, limits by endpoint and routing by key.
+- **By name.** Tiers merge by tier name, limits by model id and routing by key.
   A project entry replaces the global entry of the same name whole: a project
   `medium` replaces the model and the thinking level together, so a model never
   keeps a thinking level chosen for another one. Entries the project does not
   name are inherited.
 - **Removing an inherited entry.** The project writes the tier or limit name
-  with nothing after the colon: `large:` under `models.tiers`, or `local:` under
-  `endpoints`. Only the project file accepts this; in the global file it is an
+  with nothing after the colon: `large:` under `models.tiers`, or
+  `local/qwen3-coder-30b:` under `models.parallel`. Only the project file accepts this; in the global file it is an
   error. A tier removed this way that an agent still names is the usual load
   error for an agent with an unknown tier.
-- **Unused inherited limits.** A limit from the global file that no model of
-  the project's tiers (or of an agent's `tiers:` overrides) uses is ignored in
-  that project. A limit the project writes itself that no model uses is still a
-  load error.
+- **Unused inherited limits.** A limit from the global file for a model that no
+  tier of the project (or agent `tiers:` override) uses is ignored in that
+  project. A limit the project writes itself for such a model is a load error:
+  `model "<id>": no tier or tier override uses it, so it cannot have a parallel limit`.
 - **Agents and skills** come from the project file only, and so does nothing
   under `hosts`: `hosts.pi.extensions` comes from the global file only.
 
@@ -427,13 +467,19 @@ Run init with no model for guided setup: `/subzero:init` in Claude Code, or
   `large`. A tier that is set keeps its model unless you change it. You can
   leave `small` and `large` unset, or remove them. Tiers with other names are
   left alone.
-- It asks the `parallel` limit of each endpoint the chosen tiers use.
+- It asks the `parallel` limit of each model the chosen tiers use, once per
+  model even when several tiers name it.
+- When a file still holds the old `endpoints:` key, it says so, pre-fills the
+  limit of each model that key covered with the old value, and removes the key
+  in the diff. A file that the chosen scope does not write is repaired first,
+  with its own diff and its own confirmation. See
+  [`endpoints:` is a load error](#endpoints-is-a-load-error).
 - It offers to check that each chosen model answers a one-turn prompt.
 - It shows the change as a diff and writes it only after you confirm. For an
   every-project write it first reads out what this project keeps its own, so
   you know the change does not apply here. It also says the change is checked
   against this project only: another project whose agents use a tier you remove,
-  or whose own limit uses an endpoint you move away from, may fail to load until
+  or whose own limit belongs to a model you move away from, may fail to load until
   it is fixed.
 - When you answer "every project", the defaults it offers are the tiers and
   limits that come from the global file. A tier or limit this project
@@ -454,7 +500,9 @@ users. `config apply` writes only with the fingerprint of a matching
 `config preview`. `config preview` and `config apply` take
 `--scope global|project` (default `project`), and apply must repeat the
 preview's scope. `config show` marks each tier and limit as coming from the
-global file or from the project. In pi the same steps are tools that are on
+global file or from the project, and lists any `endpoints:` entries a file still
+holds. Changes are `--tier <tier>=<model>:<thinking>`, `--unset <tier>`,
+`--limit <model>=<n>` and `--no-limit <model>`. In pi the same steps are tools that are on
 only during a `/subzero init` run.
 
 The quick path takes a model and writes only the starter entries:
@@ -505,8 +553,8 @@ These appear in design.md but are not read by this preview. The global file
   (`agents/subzero.yaml`).
 - **Skill sources.** Local folders only. No git or npm sources and no
   `subzero.lock`.
-- **Endpoint fields** `base_url`, `api` and `api_key`; pi's `models.json`
-  holds them.
+- **Model server fields** `base_url`, `api` and `api_key`; pi's `models.json`
+  holds them. An entry under `models.parallel` is a number and nothing else.
 - **Agent fields** `instructions`, `permissions`, `delegates`, `expose`,
   `result`, `output`, `process`, `record`, `retention` and `workspace`; setting
   one on an agent is an unknown-key error.
@@ -524,7 +572,9 @@ These appear in design.md but are not read by this preview. The global file
   one with `bash`, `edit` or `write` can change anything.
 - **Claude does not see your agents.** Names and descriptions are not shown to
   Claude, so only a request that names an agent runs it.
-- **Each task is one turn.** There is no `continue` or `ask` yet.
+- **There is no `ask` yet.** `continue` sends a task more work, but a read-only
+  probe of a finished task's session is not built. A task can be continued only
+  from the conversation that made it.
 
 ## Errors you may see
 
@@ -533,7 +583,7 @@ These appear in design.md but are not read by this preview. The global file
 | `agent file is missing` | There is no `.agents/subzero.yaml` under the project root and the global file has no `medium` tier. Run `/subzero:init` in Claude Code or `/subzero init` in pi. |
 | `agent file is malformed` | The YAML does not parse, or a top-level section has the wrong type. The message names the file and says where. |
 | `global file is malformed` | The same for `~/.agents/subzero.yaml`. It fails every project that is on. |
-| `the global file holds only` | The global file has a key other than `models.tiers`, `endpoints` and `routing`. The message names the file and the key. |
+| `the global file holds only` | The global file has a key other than `models.tiers`, `models.parallel`, `routing` and `hosts`. The message names the file and the key. |
 | `subzero is switched off for this project` | The project file says `enabled: false`. Remove it to turn subzero on here. |
 | `the medium tier is required in models.tiers` | The file has no `medium` tier. Add one, or run `init`. |
 | `agent "<name>": description is required` | A named agent has no description. |
@@ -541,7 +591,9 @@ These appear in design.md but are not read by this preview. The global file
 | `<agent>: unknown key "<key>"` | A key this preview does not read. See [Not supported yet](#not-supported-yet). |
 | `<agent>: timeout is required (seconds)` | Every agent needs its own `timeout`. |
 | `<agent>: skill "<name>" is not in the skills map` | Add the skill to the top-level `skills:` map, or fix the name. |
-| `endpoint "<name>": no model of a tier ... belongs to it` | An `endpoints:` entry matches no tier's model. Fix the name. |
+| `the agent file holds "endpoints:"` (or `the global file holds ...`) | The file still has the old `endpoints:` key, which `models.parallel` replaced. The message lists each old limit with the models it covered. Run guided init, which repairs it, or move each limit under `models.parallel` by hand. |
+| `model "<id>": no tier or tier override uses it, so it cannot have a parallel limit` | A `models.parallel` entry in the agent file names a model that no tier or tier override uses. Fix the id, or add the tier. |
+| `model "<id>": parallel must be a positive whole number` | A limit is zero, negative, fractional or not a number. |
 | `the fallback agent is required` | Only a load made without built-in agents says this. Add a `fallback` agent. |
 | `the general agent is required` | The same for `general`. |
 | `offers no starter tools` | The `medium` tier's child driver has no starter tools, so a built-in agent cannot be filled. The message names the host. |

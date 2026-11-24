@@ -2,7 +2,7 @@
 @design/kernel.sigil from Kernel import { child host }
 @design/agent-config.sigil from AgentConfig import {
     agent definition, agent entry, agent file, medium tier, skill folder,
-  thinking level, tool list, model endpoint,
+  thinking level, tool list, model,
   parallel limit,
 }
 @design/claude-mcp-server.sigil from ClaudeMcpServer import { allow rule }
@@ -101,9 +101,9 @@ component SigilWiring {
     sigil-interpreter-low agent entry in examples/sigil/.agents/subzero.yaml,
     whose skill folder entries point at the staged sigil skills of the
     pass directory, without modifying the sigil repository. The same file holds
-    an endpoints entry for the model endpoint r9700 with a parallel limit of 1,
-    so
-    that sigil-interpreter and sigil-interpreter-low share it.
+    a parallel limit of 1 for the model r9700/Qwen3.8, which the model tiers of
+    sigil-interpreter and sigil-interpreter-low both name, so
+    that the two share it.
 
     Provide an evaluator subagent definition for each experiment arm, and
     provide
@@ -125,7 +125,7 @@ component SigilWiring {
     tasks listed for their parent session id. It also says that a
     parallel limit holds only among the child runs of one process, so that a
     terminal command or a second session is not counted, and that a
-    model endpoint with no entry, such as a Claude model, has no
+    model with no entry, such as a Claude model, has no
     parallel limit. It says that the command line has no cancel, so that a task
     started with subzero run ends only by Ctrl-C in its terminal and the server
     reports it as running in another process.

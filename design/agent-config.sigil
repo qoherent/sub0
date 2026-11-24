@@ -1,7 +1,9 @@
 @design/kernel.sigil from Kernel import {
   supported child host, parent adapter, child host, parent model,
 }
-@design/task-core.sigil from TaskCore import { starter tools }
+@design/task-core.sigil from TaskCore import {
+  starter tools, steering message, turn,
+}
 
 component AgentConfig {
   goal {
@@ -14,11 +16,11 @@ component AgentConfig {
   state {
     The configuration is two layers. The *agent file*, .agents/subzero.yaml
     under the project root, holds a *skills map* from skill name to
-    *skill folder*, an *endpoints map*, a *models map* and an *agents map* of
+    *skill folder*, a *models map* and an *agents map* of
     named agents, each an *agent entry*. The *global file*,
     ~/.agents/subzero.yaml, whose path *SUBZERO_GLOBAL_CONFIG* may name instead,
     holds only a models map with its
-    tiers map, an endpoints map, the *routing block* that the agent file may
+    tiers map and its parallel map, the *routing block* that the agent file may
     also hold and the child host options, which the agent file may not hold. A
     hosts map under the key hosts gives the child host options of a child host,
     from the name of a child host to a map. AgentConfig keeps each map as
@@ -28,16 +30,18 @@ component AgentConfig {
     whose project root is the home folder.
 
     The *merged configuration* is the global file and the agent file combined
-    by name: each model tier by its name, each endpoints entry by its model
-    endpoint and each key of the routing block by its key. An entry of the agent
+    by name: each model tier by its name, each parallel limit by its model
+    and each key of the routing block by its key. An entry of the agent
     file replaces the entry of the global file with that name whole, and an
     entry that the agent file does not name is taken from the global file. An
-    agent file that names a model tier or an endpoints entry with no value
-    holds a *removal entry*, which takes it out of the merged configuration.
+    agent file that names a model tier or the model of a parallel limit with no
+    value holds a *removal entry*, which takes it out of the merged
+    configuration.
     The agent file may hold an *enabled switch*, and an agent file whose enabled
     switch is false switches subzero off for its project.
 
-    The models map holds a *tiers map* that gives each *model tier* by name a
+    The models map holds a *tiers map* and a *parallel map*. The tiers map
+    gives each *model tier* by name a
     child host, which the agent file writes under the key host, a *model* and a
     *thinking level*. The child host, the model and the thinking level live
     only in a model tier or a tier override, and never directly in an
@@ -63,17 +67,22 @@ component AgentConfig {
     after the entry, and named <entry>:<tier> when the request names a
     model tier.
 
-    The endpoints map holds an *endpoints entry* for a *model endpoint*. A
-    model endpoint is the part of a model before its first slash, and each
-    agent definition belongs to the model endpoint of its model. The entry
-    holds the *parallel limit* of that model endpoint, a positive whole number
-    that is the most child runs that one process runs at the same time on it. A
-    model endpoint with no entry has no parallel limit, and every
-    agent definition on the same model endpoint shares its parallel limit.
+    The parallel map gives the *parallel limit* of a model, keyed by the whole
+    model, a positive whole number that is the most child runs that one
+    process runs at the same time on that model. Every agent definition whose
+    model is that model shares its parallel limit, whichever model tier names
+    it, and a model with no entry in the parallel map has no parallel limit.
+
+    A *model endpoint* is the part of a model before its first slash. The
+    *endpoints map* is the key endpoints that earlier versions used to give a
+    parallel limit to each model endpoint, one *endpoints entry* for each, and
+    it is no longer part of the agent file or the global file.
 
     The timeout is a required number of seconds. It limits the wall-clock time
-    of a child run from its spawn to its settlement, including
-    skill verification, and it does not run while the child run is Pending.
+    of the child run of each turn from its spawn to its settlement, including
+    skill verification, starts again each time a steering message is
+    delivered into that child run, and does not run while the child run is
+    Pending.
 
     The merged configuration must hold an entry named general, the
     *general agent*, which takes work that names no agent or names general, and
@@ -114,8 +123,8 @@ component AgentConfig {
 
     A *change set* is what a guided setup asks to change in one file: set
     a model tier to a model and a thinking level, remove a model tier, set the
-    parallel limit of a model endpoint, or remove it. It changes each
-    model tier and each model endpoint at most once, and each model tier that
+    parallel limit of a model, or remove it. It changes each
+    model tier and each model at most once, and each model tier that
     it sets runs on the child host that its caller gives. A *setup scope* says
     which file a change set is for: the global file or the agent file, which
     is the default. The
@@ -125,11 +134,11 @@ component AgentConfig {
 
     A *setup preview* of a change set holds the change set in a canonical
     order, each *refused change* with its reason and the agent entries that cause
-    it, each parallel limit that the write drops because no model belongs to
-    its model endpoint after it, each model tier and endpoints entry that the
-    change set sets or removes and that the agent file of this project
-    overrides, when the setup scope is the global file, and a diff and a
-    summary of the write. It also holds a
+    it, each parallel limit that the write drops because no model tier or
+    tier override uses its model after it, each model tier and parallel limit
+    that the change set sets or removes and that the agent file of this project
+    overrides, when the setup scope is the global file, the endpoints map that
+    the write removes, and a diff and a summary of the write. It also holds a
     *preview fingerprint* over the text of the file of its setup scope or its
     absence, the change set, the setup scope and the child host of the write.
 
@@ -149,7 +158,7 @@ component AgentConfig {
     On load, read the agent file first. When it holds an enabled switch that is
     false, stop with the *off error* before the global file is read. Otherwise
     read the global file when it exists, validate the global file as a layer
-    that holds only a models map with its tiers map, an endpoints map, the
+    that holds only a models map with its tiers map and its parallel map, the
     routing block and the child host options, validate the agent file as a layer
     against the *agent-file schema*, which consists only of the validation rules in
     this
@@ -158,9 +167,10 @@ component AgentConfig {
     entry,
     the general agent, the fallback agent and the medium tier included, and every
     tier override. Resolve each skill folder relative to the directory of the
-    agent file into an absolute path. Take out of the merged configuration an
-    endpoints entry that only the global file holds and no model belongs to,
-    without an error. A shared file is read once, as the global layer, and the
+    agent file into an absolute path. Take out of the merged configuration a
+    parallel limit that only the global file holds and whose model no
+    model tier or tier override uses, without an error. A shared file is read once,
+    as the global layer, and the
     agent file layer is then empty, as if the agent file were missing, so
     that its enabled switch is not read and a key meant only for the agent
     file is a global file error. The flow returns each agent entry, each
@@ -170,8 +180,8 @@ component AgentConfig {
     or with a *load error* that names the file it comes from, the global file
     or the agent file, and the offending entry or model tier, or names the
     missing general agent, fallback agent or medium tier, or says that a
-    file is unreadable or malformed. One invalid model tier or agent entry
-    fails the whole load.
+    file is unreadable or malformed or holds an endpoints map. One invalid
+    model tier or agent entry fails the whole load.
 
     On a request for an agent, resolve the agent entry for the agent name, or
     the general agent when the request names no agent or an agent alias. A name
@@ -193,23 +203,27 @@ component AgentConfig {
     On a read of the *setup state*, read the global file and the agent file,
     reading a shared file once as the global file, and return each model tier of
     the merged configuration with its tier
-    dependents, its model endpoint and the file it comes from, and, when the
-    agent file overrides it, the global file's model tier, and each endpoints
-    entry with the model tiers whose model belongs to it, the file it comes
-    from, whether only a tier override uses it and whether no model uses it,
-    which ends the flow. A missing agent file gives a setup state with no file.
-    A file that fails to load only for a missing medium tier or a parallel
-    limit that no model uses gives the setup state and that load error as what
-    the write repairs, and any other load error gives a refused setup state
-    that holds the load error unchanged.
+    dependents, its model and the file it comes from, and, when the
+    agent file overrides it, the global file's model tier, each parallel limit
+    with the model tiers that use its model, the file it comes from, whether
+    only a tier override uses it and whether no model tier uses it, and each
+    endpoints entry of either file with its parallel limit, the file it comes
+    from and each model that belongs to its model endpoint and that its old
+    limit covered, as the load error lists them, which ends the flow. A missing
+    agent file gives a
+    setup state with no file. A file that fails to load only for a missing
+    medium tier, a parallel limit that no model tier uses or an endpoints map
+    gives the setup state and that load error as what the write repairs, and
+    any other load error gives a refused setup state that holds the load error
+    unchanged.
 
     On a change set, refuse it with a *change set error* when it is malformed
-    or changes a model tier or a model endpoint twice, and with the load error
+    or changes a model tier or a model twice, and with the load error
     when the setup state is refused, which ends the flow. Otherwise build the
     setup preview. Refuse the removal of the medium tier, of a model tier that
     is not configured, and of a model tier that has tier dependents, naming
-    every one of them. Refuse a parallel limit for a model endpoint that no
-    model of a model tier or of a tier override belongs to, and refuse the
+    every one of them. Refuse a parallel limit for a model that no
+    model tier or tier override uses, and refuse the
     whole change set when no medium tier would remain in the merged
     configuration. When the setup scope is the agent file and the agent file is
     a shared file, refuse the whole change set with a refused change that names
@@ -223,10 +237,17 @@ component AgentConfig {
     an agent entry of this project names as its own tier or holds a tier
     override for, and keep a load error of this project that the change would
     cause.
-    Drop the parallel limit of each model endpoint that no model belongs to
-    after the change, keep one that only a tier override uses, and load the
-    result as the merged configuration, keeping its load error when it would
-    not load. A change set adds no starter entry. Return the setup preview and
+    Drop the parallel limit of each model that no model tier or tier override
+    uses after the change, keep one that only a tier override uses, remove the
+    endpoints map from the file of the setup scope, and load the result as the
+    merged configuration, keeping its load error when it would not load. A
+    setup preview of a repair step, the change set that guided setup makes for the
+    file that the chosen setup scope does not write, may keep as what the next step
+    repairs a load error that comes only from an endpoints map of the file of the
+    chosen setup scope, a missing medium tier or a parallel limit that no
+    model tier uses, and any other load error of that setup preview refuses the
+    change set. A
+    change set adds no starter entry. Return the setup preview and
     write nothing, which ends the flow.
 
     On an apply of a change set with a preview fingerprint, build its
@@ -234,7 +255,8 @@ component AgentConfig {
     with a
     *stale preview error* when the preview fingerprint differs, and refuse
     when the setup preview holds a refused change or would not load, writing
-    nothing. Write nothing when nothing changes, and otherwise write the result
+    nothing. A load error that a repair step keeps does not count as would not load
+    there. Write nothing when nothing changes, and otherwise write the result
     and return the setup preview with whether it wrote, which ends the flow.
     When the file system refuses that write, leave that file as it was
     and refuse with a *write error* that names the file and the cause the
@@ -261,7 +283,7 @@ component AgentConfig {
 
     The global file must be rejected with a load error that names the global
     file and the key when it holds anything other than a models map with a
-    tiers map, an endpoints map, the routing block or the child host options,
+    tiers map and a parallel map, the routing block or the child host options,
     the enabled switch, a skills map and an agents map included. The key
     hosts must be a map whose every value is a map, and anything else gives a
     load error that names the global file, the key hosts and, for a value that
@@ -299,11 +321,27 @@ component AgentConfig {
     load error that starts with its name when it holds a description, because
     neither is chosen by its description.
 
-    An endpoints entry must be rejected with a load error that names its
-    model endpoint when its parallel limit is not a positive whole number, or
-    when no model of a model tier or of a tier override belongs to its
-    model endpoint, except an endpoints entry that only the global file holds,
-    which is ignored in a project whose models do not use it.
+    A parallel limit must be rejected with a load error that names its model
+    when it is not a positive whole number, or when no model tier or tier
+    override of the merged configuration uses its model, except a
+    parallel limit that only the global file holds, which is ignored in a
+    project whose model tiers do not use its model.
+
+    An agent file or a global file that holds an endpoints map must be
+    rejected with a load error that names that file, says that the
+    endpoints map was replaced by the parallel map, lists for each
+    endpoints entry the models that belong to its model endpoint and that its
+    old limit covered, which for the agent file are those of the model tiers
+    and tier overrides of the merged configuration and for the global file
+    are those of its own model tiers, and says that
+    guided setup repairs the file. AgentConfig raises this error after it has
+    merged the two layers, and not while it reads one layer, so that the models it
+    lists are those of the merged model tiers and tier overrides. An
+    endpoints entry is never turned into a
+    parallel limit without a write that the person confirms. A file whose
+    endpoints map holds no entry is rejected in the same way, with the error
+    saying that the map is empty and that the key goes, and guided setup removes
+    the key.
 
     An agent entry must be rejected, naming it, when it has no timeout or its
     timeout is not a positive number of seconds.
@@ -346,15 +384,17 @@ component AgentConfig {
     requires rewriting that map. Adding the starter entries adds only the
     medium tier, the general agent or the fallback agent when the agent file
     does not hold it yet. A change set may replace a model tier, remove a
-    model tier or an endpoints entry together with the comment lines directly
-    above it, remove several entries of one map in the same write, and set a
-    parallel limit, creating the endpoints map when it is missing, and for the
-    agent file write a removal entry for a model tier or an endpoints entry
+    model tier or a parallel limit together with the comment lines directly
+    above it, remove several entries of one map in the same write, set a
+    parallel limit, creating the parallel map when it is missing, remove the
+    endpoints map together with the comment lines directly above it, and for
+    the agent file write a removal entry for a model tier or a parallel limit
     that only the global file holds. AgentConfig must
     write nothing when the file exists and does not
     load for a reason other than missing starter entries or, for a change set,
-    a missing medium tier or a parallel limit that no model uses, and must write
-    only entries that load. A write for the global file creates its folder
+    a missing medium tier, a parallel limit that no model tier uses or an
+    endpoints map, and must write only entries that load. A write for the
+    global file creates its folder
     when it is missing.
 
     An apply must write a change set only with the preview fingerprint of its
@@ -424,10 +464,11 @@ component AgentConfig {
     medium tier.
 
     A global file with the model tiers small, medium and large and a parallel
-    limit for the model endpoint local, and an agent file with only a medium
-    tier and a parallel limit for local, give a merged configuration with the
-    agent file's medium tier whole, the global small and large, and the agent
-    file's parallel limit for local. With a global file that holds a medium
+    limit for the model local/qwen3-coder-30b of its medium tier, and an agent
+    file with only a medium tier on local/qwen3-coder-30b and a parallel limit
+    for it, give a merged configuration with the agent file's medium tier
+    whole, the global small and large, and the agent file's parallel limit for
+    local/qwen3-coder-30b. With a global file that holds a medium
     tier and no agent file, the project is on, and the general agent resolves
     to a built-in agent on the medium tier with the tool list for a general
     agent from the starter tools that the caller gives and a timeout of 1200
@@ -443,7 +484,7 @@ component AgentConfig {
     entry for large in the agent file takes large out of the merged
     configuration, and an agent entry whose own tier is large then gives a load
     error that names the agent file. A global parallel limit for a model
-    endpoint that no model tier of the project uses is ignored in that project.
+    that no model tier of the project uses is ignored in that project.
 
     A global file whose hosts key holds, for the child host pi, a map with a
     list of extensions gives that map as written to its caller, in every
@@ -478,11 +519,26 @@ component AgentConfig {
     With no SUBZERO_PROJECT_DIR and no root reported by the parent adapter, the
     project root is not resolved and the caller gets the unresolved root error.
 
-    Two agent definitions on the model endpoint r9700, whose entry has a
-    parallel limit of 1, are both given that parallel limit of 1, and an
-    agent definition on a model endpoint with no entry is given none. An entry
-    for r9770 that no model of a model tier or tier override belongs to gives a
-    load error that names r9770.
+    Two agent definitions on the model tiers medium and low, which both name
+    the model r9700/Qwen3.8 whose parallel limit is 1, are both given that
+    parallel limit of 1, and an agent definition on a model with no
+    parallel limit is given none. A parallel limit for r9700/Qwen3.9 that no
+    model tier or tier override uses gives a load error that names
+    r9700/Qwen3.9.
+
+    An agent file whose endpoints map gives r9700 a parallel limit of 1, with
+    model tiers on r9700/Qwen3.8 and r9700/Qwen3-4B, gives a load error that
+    names the agent file and lists both models, and its setup state holds that
+    endpoints entry with both models and that load error as what the write
+    repairs. A change set for that agent file that sets the parallel limit of
+    r9700/Qwen3.8 to 1 writes it, removes the endpoints map in the same write,
+    and the agent file loads, with no parallel limit for r9700/Qwen3-4B.
+
+    A change set that repairs the global file by setting the parallel limit
+    of its models and removing its endpoints map, in a project whose agent
+    file still holds an endpoints map, gives a setup preview that keeps the
+    load error of the agent file, and its apply writes the global file, so
+    that the next step can repair the agent file.
 
     An agent file with one invalid agent entry gives a load error that names it
     and returns no agent definition, not even a valid one.
@@ -503,8 +559,9 @@ component AgentConfig {
     change set that gives the medium tier another model changes only the model
     of that tier, and every comment and every other line of the agent file
     stays as it was. A change set that moves the only model tier on the
-    model endpoint r9700 to another model endpoint drops the endpoints entry of
-    r9700 in the same write. An apply after the agent file changed since its
+    model r9700/Qwen3.8 to another model drops the parallel limit of
+    r9700/Qwen3.8 in the same write. An apply after the agent file changed since
+    its
     setup preview is refused with the stale preview error and writes nothing.
 
     With a tiers map that is a flow-style map and holds medium, small and
@@ -530,8 +587,8 @@ component AgentConfig {
     model tier,
     at its own tier or at the medium tier, and provide the agent definition
     with its child host, its model, its thinking level, its tool list, its
-    timeout, its model endpoint with the parallel limit of that model endpoint
-    or none, and every skill folder resolved to an absolute folder. Fill each
+    timeout, its model with the parallel limit of that model or none, and
+    every skill folder resolved to an absolute folder. Fill each
     built-in agent from the starter tools that the caller gives, so that the
     general agent and the fallback agent resolve in a project that holds neither.
 
@@ -550,8 +607,11 @@ component AgentConfig {
     file.
 
     Read the setup state of the merged configuration under a project root that
-    its caller hands over, marking each model tier and each endpoints entry
-    with the file it comes from, each model tier that runs on a child host other
+    its caller hands over, marking each model tier and each parallel limit
+    with the file it comes from, giving each endpoints entry with its
+    parallel limit and the models that belong to its model endpoint, so that a
+    guided setup can offer that value as the parallel limit of each of those
+    models, marking each model tier that runs on a child host other
     than the one the caller gives and, when the caller gives a list of models,
     each model tier whose model the list does not hold. Return the
     setup preview of a change set for the child host and the setup scope that
@@ -668,7 +728,14 @@ component AgentConfig {
     the file of every project. The built-in agents mean a
     guided setup writes only the model tiers and limits that a person chose.
 
-    A parallel limit keeps a fan-out on one model endpoint from flooding it.
+    A parallel limit keeps a fan-out on one model from flooding it. It is set
+    for each model and not for each model endpoint, because a cloud provider
+    limits each model and a local server can run each model in its own
+    process, and one limit shared by several models on one server can no
+    longer be written. The endpoints map is refused and not converted, because
+    a limit shared by several models would silently become one limit for each
+    of them, and guided setup offers the old value so that the person sees
+    that change in its diff before anything is written.
 
     A change set edits the text of the file of its setup scope in place and
     does not render

@@ -34,6 +34,11 @@ const TIERS = `models:
     medium: { host: pi, model: local/m, thinking: high }
 `;
 
+/** Tier text with a `models.parallel` map of the given entries, such as `r9700/Qwen3.8: 1`. */
+function withLimits(tiers: string, ...entries: string[]): string {
+  return tiers.replace('models:\n', `models:\n  parallel:\n${entries.map((e) => `    ${e}\n`).join('')}`);
+}
+
 function project(agents: string, extra = '', tiers = TIERS): string {
   const required = `${agents.includes('  general:') ? '' : GENERAL}${agents.includes('  fallback:') ? '' : FALLBACK}`;
   return makeProject(`skills:\n  alpha: ./skills/alpha\n${extra}${tiers}agents:\n${agents}${required}`);
@@ -72,12 +77,14 @@ describe('AgentConfig load', () => {
     const init = '; run /subzero:init in Claude Code or /subzero init in pi';
     expect(() => loadAgentFile(makeProject(complete.replace('    medium: { host: pi, model: r9700/Qwen3.8, thinking: low }\n', '')))).toThrow(`the medium tier is required in models.tiers${init}`);
     expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`))).toThrow(`the general agent is required${init}`);
+    const named = makeProject(`${MEDIUM_TIERS}agents:\n${FALLBACK}`);
+    expect(() => loadAgentFile(named)).toThrow(path.join(named, '.agents', 'subzero.yaml'));
     expect(() => loadAgentFile(makeProject(`${MEDIUM_TIERS}agents:\n${GENERAL}`))).toThrow(`the fallback agent is required${init}`);
   });
   it('loads a valid agent on the default tier with absolute skill folders', () => {
     const root = project(VALID);
     const agent = getAgent(root, 'a');
-    expect(agent).toMatchObject({ name: 'a', host: 'pi', model: 'local/m', thinking: 'high', endpoint: 'local', parallel: null });
+    expect(agent).toMatchObject({ name: 'a', host: 'pi', model: 'local/m', thinking: 'high', parallel: null });
     expect(agent.tools).toEqual(['read']);
     expect(agent.timeout).toBe(10);
     expect(agent.skills[0]!.folder).toBe(path.join(root, '.agents', 'skills', 'alpha'));
@@ -149,51 +156,102 @@ describe('AgentConfig load', () => {
     expect(configuredTierNames(root)).toEqual(['default', 'small', 'medium', 'large']);
   });
 
-  it('gives definitions on one endpoint its parallel limit, and none without an entry', () => {
+  it('gives every tier that names a model its limit, and no limit to a model with no entry (R17)', () => {
     const tiers = `models:
   tiers:
     default: { host: pi, model: r9700/Qwen3.8, thinking: high }
     medium: { host: pi, model: r9700/Qwen3.8, thinking: high }
-    small: { host: pi, model: r9700/Qwen3.8-small, thinking: high }
+    small: { host: pi, model: r9700/Qwen3.8, thinking: low }
+    other: { host: pi, model: r9700/Other, thinking: high }
     cloud: { host: pi, model: anthropic/claude, thinking: high }
 `;
-    const agents = VALID + VALID.replace('  a:', '  b:') .replace('skills', 'tier: small\n    skills') + VALID.replace('  a:', '  c:').replace('skills', 'tier: cloud\n    skills');
-    const root = project(agents, 'endpoints:\n  r9700:\n    parallel: 1\n', tiers);
-    expect(getAgent(root, 'a')).toMatchObject({ endpoint: 'r9700', parallel: 1 });
-    expect(getAgent(root, 'b')).toMatchObject({ endpoint: 'r9700', parallel: 1 });
-    expect(getAgent(root, 'c')).toMatchObject({ endpoint: 'anthropic', parallel: null });
+    const agents =
+      VALID +
+      VALID.replace('  a:', '  b:').replace('skills', 'tier: small\n    skills') +
+      VALID.replace('  a:', '  c:').replace('skills', 'tier: cloud\n    skills') +
+      VALID.replace('  a:', '  d:').replace('skills', 'tier: other\n    skills');
+    const root = project(agents, '', withLimits(tiers, 'r9700/Qwen3.8: 1'));
+    expect(getAgent(root, 'a')).toMatchObject({ model: 'r9700/Qwen3.8', parallel: 1 });
+    expect(getAgent(root, 'b')).toMatchObject({ model: 'r9700/Qwen3.8', parallel: 1 });
+    // A limit belongs to one whole model: another model on the same endpoint is not covered.
+    expect(getAgent(root, 'd')).toMatchObject({ model: 'r9700/Other', parallel: null });
+    expect(getAgent(root, 'c')).toMatchObject({ model: 'anthropic/claude', parallel: null });
   });
 
-  it('rejects an endpoint entry that no model of a tier or override belongs to, naming it', () => {
-    const root = project(VALID, 'endpoints:\n  r9770:\n    parallel: 1\n');
-    expect(() => loadAgentFile(root)).toThrow(/endpoint "r9770"/);
+  it('rejects a limit for a model that no tier or override uses, naming the model (R18)', () => {
+    const root = project(VALID, '', withLimits(TIERS, 'local/gone: 1'));
+    expect(() => loadAgentFile(root)).toThrow(/model "local\/gone": no tier or tier override uses it/);
   });
 
-  it('accepts an endpoint entry that only a tier model, or only an override model, belongs to', () => {
-    const onlyTier = project(VALID, 'endpoints:\n  local:\n    parallel: 2\n');
+  it('accepts a limit for a model that only a tier, or only an override, uses', () => {
+    const onlyTier = project(VALID, '', withLimits(TIERS, 'local/m: 2'));
     expect(getAgent(onlyTier, 'a').parallel).toBe(2);
     const override = VALID.replace('skills', 'tiers:\n      medium: { model: gpu/x }\n    skills');
-    const viaOverride = project(override, 'endpoints:\n  gpu:\n    parallel: 3\n');
-    expect(getAgent(viaOverride, 'a')).toMatchObject({ endpoint: 'gpu', parallel: 3 });
+    const viaOverride = project(override, '', withLimits(TIERS, 'gpu/x: 3'));
+    expect(getAgent(viaOverride, 'a')).toMatchObject({ model: 'gpu/x', parallel: 3 });
   });
 
   it('rejects a parallel limit that is not a positive whole number', () => {
     for (const bad of ['0', '1.5', '"two"']) {
-      const root = project(VALID, `endpoints:\n  local:\n    parallel: ${bad}\n`);
-      expect(() => loadAgentFile(root)).toThrow(/endpoint "local": parallel/);
+      const root = project(VALID, '', withLimits(TIERS, `local/m: ${bad}`));
+      expect(() => loadAgentFile(root)).toThrow(/model "local\/m": parallel must be a positive whole number/);
     }
+  });
+
+  it('fails an agent file that holds endpoints, naming the file and listing the models each limit covered (R19)', () => {
+    const tiers = `models:
+  tiers:
+    default: { host: pi, model: local/a, thinking: high }
+    medium: { host: pi, model: local/a, thinking: high }
+    small: { host: pi, model: local/b, thinking: low }
+    cloud: { host: pi, model: anthropic/claude, thinking: high }
+`;
+    const root = project(VALID, 'endpoints:\n  local:\n    parallel: 2\n', tiers);
+    const err = (() => {
+      try {
+        loadAgentFile(root);
+      } catch (e) {
+        return e as Error;
+      }
+      throw new Error('expected a throw');
+    })();
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toContain(path.join(root, '.agents', 'subzero.yaml'));
+    expect(err.message).toMatch(/"endpoints:", which "models.parallel" replaced/);
+    expect(err.message).toMatch(/endpoint local \(limit 2\) covered local\/a, local\/b: give each model its own limit/);
+    expect(err.message).toContain('run /subzero:init in Claude Code or /subzero init in pi');
+  });
+
+  it.each([['endpoints: {}\n'], ['endpoints:\n']])('fails an agent file whose endpoints key holds no entry (%j), because the key itself is what was removed', (text) => {
+    const root = project(VALID, text);
+    const file = path.join(root, '.agents', 'subzero.yaml');
+    expect(() => loadAgentFile(root)).toThrow(LoadError);
+    expect(() => loadAgentFile(root)).toThrow(new RegExp(`"endpoints:", which "models.parallel" replaced, in ${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    expect(() => loadAgentFile(root)).toThrow(/the map is empty, so there is no limit to keep: remove the key/);
+    expect(loadAgentFile(root, { allowLegacyEndpoints: true }).legacyEndpoints).toEqual([{ file, endpoint: '', parallel: null, models: [], empty: true }]);
+  });
+
+  it('reports an endpoints limit that no model uses as one to drop', () => {
+    const root = project(VALID, 'endpoints:\n  gone:\n    parallel: 2\n');
+    expect(() => loadAgentFile(root)).toThrow(/endpoint gone \(limit 2\): no model of this configuration uses it, so drop it/);
+  });
+
+  it('keeps the endpoints limits in the catalog when the load allows them, for guided init to repair', () => {
+    const root = project(VALID, 'endpoints:\n  local:\n    parallel: 2\n');
+    const catalog = loadAgentFile(root, { allowLegacyEndpoints: true });
+    expect(catalog.legacyEndpoints).toEqual([{ file: path.join(root, '.agents', 'subzero.yaml'), endpoint: 'local', parallel: 2, models: ['local/m'] }]);
+    expect(catalog.limits.size).toBe(0);
   });
 });
 
 describe('AgentConfig model tiers', () => {
-  it('resolves general at a named tier to that tier host, model, thinking, endpoint and limit', () => {
-    const root = project(GENERAL, 'endpoints:\n  r9700:\n    parallel: 1\n', MEDIUM_TIERS);
+  it('resolves general at a named tier to that tier host, model, thinking and limit', () => {
+    const root = project(GENERAL, '', withLimits(MEDIUM_TIERS, 'r9700/Qwen3.8: 1'));
     expect(getAgent(root, 'general', { tier: 'medium' })).toMatchObject({
       name: 'general:medium',
       host: 'pi',
       model: 'r9700/Qwen3.8',
       thinking: 'low',
-      endpoint: 'r9700',
       parallel: 1,
       tools: ['read', 'write', 'bash'],
       timeout: 20,
@@ -479,13 +537,12 @@ describe('AgentConfig global file', () => {
   afterEach(() => vi.unstubAllEnvs());
 
   const GLOBAL_TIERS = `models:
+  parallel:
+    local/s: 2
   tiers:
     small: { host: pi, model: local/s, thinking: off }
     medium: { host: pi, model: r9700/Qwen3.8, thinking: low }
     large: { host: claude, model: anthropic/opus, thinking: max }
-endpoints:
-  local:
-    parallel: 2
 `;
   const STARTER = (host: string) => (host === 'pi' ? { general: ['read', 'write', 'bash'], fallback: ['read', 'grep'] } : undefined);
 
@@ -513,13 +570,13 @@ endpoints:
   it('merges by name: the project medium replaces the global one whole, the rest is inherited (AE1)', () => {
     withGlobal(GLOBAL_TIERS);
     const root = projectWith(
-      `models:\n  tiers:\n    medium: { host: pi, model: local/p, thinking: high }\nendpoints:\n  local:\n    parallel: 5\nagents:\n${GENERAL}${FALLBACK}`,
+      `models:\n  parallel:\n    local/s: 5\n  tiers:\n    medium: { host: pi, model: local/p, thinking: high }\nagents:\n${GENERAL}${FALLBACK}`,
     );
     const catalog = load(root);
     expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'local/p', thinking: 'high' });
     expect(catalog.tiers.get('small')).toEqual({ host: 'pi', model: 'local/s', thinking: 'off' });
     expect(catalog.tiers.get('large')).toEqual({ host: 'claude', model: 'anthropic/opus', thinking: 'max' });
-    expect(catalog.limits.get('local')).toBe(5);
+    expect(catalog.limits.get('local/s')).toBe(5);
   });
 
   it('is on with only a global medium tier, filling general and fallback from the provider (AE2)', () => {
@@ -575,15 +632,27 @@ endpoints:
     expect(err.message).toContain('"models.extra"');
   });
 
-  it('refuses an endpoint key other than parallel in the global file, naming the file and the key, but ignores it in a project file', () => {
-    const file = withGlobal(GLOBAL_TIERS.replace('    parallel: 2', '    parallel: 2\n    colour: red'));
+  it('refuses a models key other than tiers and parallel in the global file, and a non-number limit', () => {
+    const file = withGlobal(GLOBAL_TIERS.replace('    local/s: 2', '    local/s: { max: 2 }'));
     const err = errorOf(() => load(projectWith(null)));
     expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toMatch(/model "local\/s": parallel must be a positive whole number/);
     expect(err.message).toContain(file);
-    expect(err.message).toContain('endpoints.local.colour');
     withGlobal(GLOBAL_TIERS);
-    const root = projectWith(`endpoints:\n  local:\n    parallel: 3\n    colour: red\nagents:\n${GENERAL}${FALLBACK}`);
-    expect(load(root).limits.get('local')).toBe(3);
+    const root = projectWith(`models:\n  parallel:\n    local/s: 3\nagents:\n${GENERAL}${FALLBACK}`);
+    expect(load(root).limits.get('local/s')).toBe(3);
+  });
+
+  it('fails a global file that holds endpoints, listing only the models of its own tiers (R19)', () => {
+    const file = withGlobal(`${GLOBAL_TIERS}endpoints:\n  local:\n    parallel: 2\n  r9700:\n    parallel: 1\n`);
+    const root = projectWith(`models:\n  tiers:\n    mine: { host: pi, model: local/project-only, thinking: low }\nagents:\n${GENERAL}${FALLBACK}`);
+    const err = errorOf(() => load(root));
+    expect(err).toBeInstanceOf(LoadError);
+    expect(err.message).toContain(file);
+    expect(err.message).toContain('the global file holds "endpoints:"');
+    expect(err.message).toMatch(/endpoint local \(limit 2\) covered local\/s:/);
+    expect(err.message).not.toContain('local/project-only');
+    expect(err.message).toMatch(/endpoint r9700 \(limit 1\) covered r9700\/Qwen3.8:/);
   });
 
   it('loads a file that is both the project file and the global file once, as the global layer only', () => {
@@ -594,7 +663,7 @@ endpoints:
     vi.stubEnv('SUBZERO_GLOBAL_CONFIG', shared);
     const catalog = load(root);
     expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low' });
-    expect(catalog.limits.get('local')).toBe(2);
+    expect(catalog.limits.get('local/s')).toBe(2);
     expect(catalog.entries.get('general')).toMatchObject({ timeout: 1200, skills: [] });
     // Reached through a link, it is still the same file.
     const link = path.join(tempDir('subzero-link-'), 'global.yaml');
@@ -602,11 +671,11 @@ endpoints:
     vi.stubEnv('SUBZERO_GLOBAL_CONFIG', link);
     expect(load(root).tiers.size).toBe(3);
     // A limit no model uses is dropped as an inherited one, where a project file's own would be an error.
-    writeFileSync(shared, `${GLOBAL_TIERS}  unused:\n    parallel: 1\n`);
-    expect(load(root).limits.has('unused')).toBe(false);
+    writeFileSync(shared, GLOBAL_TIERS.replace('    local/s: 2', '    local/s: 2\n    unused/model: 1'));
+    expect(load(root).limits.has('unused/model')).toBe(false);
     // Agents in that one file are refused as the global layer refuses them, not read as a project layer.
     writeFileSync(shared, `${GLOBAL_TIERS}agents:\n${GENERAL}${FALLBACK}`);
-    expect(errorOf(() => load(root)).message).toMatch(/the global file holds only models.tiers, endpoints, routing and hosts, not "agents"/);
+    expect(errorOf(() => load(root)).message).toMatch(/the global file holds only models.tiers, models.parallel, routing and hosts, not "agents"/);
   });
 
   it('refuses to add starter entries to a project file that is the global file, writing nothing', () => {
@@ -618,7 +687,8 @@ endpoints:
     const spec: StarterSpec = { host: 'pi', model: 'local/new', thinking: 'low', timeout: 30, generalTools: ['read'], fallbackTools: ['read'] };
     const err = errorOf(() => addStarterEntries(root, spec));
     expect(err).toBeInstanceOf(LoadError);
-    expect(err.message).toMatch(/this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder/);
+    expect(err.message).toContain(shared);
+    expect(err.message).toMatch(/this project's file is the global file \(.*\); run guided init with the every-project choice, or open the tool in a project folder/);
     expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_TIERS);
     // The same refusal when the file does not exist yet.
     const bare = tempDir('subzero-home-');
@@ -643,8 +713,8 @@ endpoints:
     const err = errorOf(() => load(projectWith(null)));
     expect(err.message).toContain(file);
     expect(err.message).toContain('"small"');
-    withGlobal(GLOBAL_TIERS.replace('  local:\n    parallel: 2', '  local:'));
-    expect(errorOf(() => load(projectWith(null))).message).toContain('"local"');
+    withGlobal(GLOBAL_TIERS.replace('    local/s: 2', '    local/s:'));
+    expect(errorOf(() => load(projectWith(null))).message).toContain('"local/s"');
   });
 
   it('removes an inherited tier with an empty entry, so an agent that names it fails', () => {
@@ -659,7 +729,7 @@ endpoints:
 
   it('removes an inherited limit with an empty entry', () => {
     withGlobal(GLOBAL_TIERS);
-    expect(load(projectWith(`endpoints:\n  local:\nagents:\n${GENERAL}${FALLBACK}`)).limits.has('local')).toBe(false);
+    expect(load(projectWith(`models:\n  parallel:\n    local/s:\nagents:\n${GENERAL}${FALLBACK}`)).limits.has('local/s')).toBe(false);
   });
 
   it('lets a project general agent replace the built-in one and keeps the other built-in', () => {
@@ -680,10 +750,10 @@ endpoints:
   it('drops an inherited limit no merged model uses, but a project-written one still errors', () => {
     withGlobal(GLOBAL_TIERS);
     const moved = 'models:\n  tiers:\n    small: { host: pi, model: far/s, thinking: off }\n    medium: { host: pi, model: far/m, thinking: low }\n';
-    expect(load(projectWith(`${moved}agents:\n${GENERAL}${FALLBACK}`)).limits.has('local')).toBe(false);
-    const own = projectWith(`${moved}endpoints:\n  local:\n    parallel: 1\nagents:\n${GENERAL}${FALLBACK}`);
+    expect(load(projectWith(`${moved}agents:\n${GENERAL}${FALLBACK}`)).limits.has('local/s')).toBe(false);
+    const own = projectWith(`${moved.replace('models:\n', 'models:\n  parallel:\n    local/s: 1\n')}agents:\n${GENERAL}${FALLBACK}`);
     const err = errorOf(() => load(own));
-    expect(err.message).toMatch(/endpoint "local": no model/);
+    expect(err.message).toMatch(/model "local\/s": no tier or tier override uses it/);
     expect(err.message).toContain(projectFile(own));
   });
 
@@ -800,7 +870,7 @@ endpoints:
 
     it('names hosts among the keys the global file holds', () => {
       withDefaultGlobal(`${GLOBAL_TIERS}agents: {}\n`);
-      expect(errorOf(() => load(projectWith(null))).message).toMatch(/models.tiers, endpoints, routing and hosts, not "agents"/);
+      expect(errorOf(() => load(projectWith(null))).message).toMatch(/models.tiers, models.parallel, routing and hosts, not "agents"/);
       withDefaultGlobal(`${GLOBAL_TIERS}pi:\n  extensions: []\n`);
       expect(errorOf(() => load(projectWith(null))).message).toMatch(/not "pi"/);
     });

@@ -68,7 +68,7 @@ const AGENTS = `agents:
     timeout: 60
 `;
 
-/** A hand-written file: comments, skills, routing, endpoints and a named agent. */
+/** A hand-written file: comments, skills, routing, a model limit and a named agent. */
 const HAND_WRITTEN = `# Project agents. Edit with care.
 skills:
   facts: ./skills/alpha   # the facts skill
@@ -77,12 +77,10 @@ routing:
   hook: true
   generic_agents: [Explore]
 
-endpoints:
-  # the GPU box
-  local:
-    parallel: 1
-
 models:
+  parallel:
+    # the GPU box
+    local/qwen3-4b: 1
   tiers:
     # everyday work
     medium: { host: pi, model: local/qwen3-coder-30b, thinking: high }   # keep me
@@ -107,22 +105,22 @@ agents:
 describe('AgentSetup change sets', () => {
   it('rejects a limit of 0, -1, 1.5 or two', () => {
     for (const parallel of [0, -1, 1.5, 'two', Number.NaN]) {
-      expect(() => normalizeChangeSet([{ op: 'setLimit', endpoint: 'local', parallel: parallel as number }])).toThrow(ChangeSetError);
-      expect(() => previewChanges(tempDir(), [{ op: 'setLimit', endpoint: 'local', parallel: parallel as number }], STARTER)).toThrow(
+      expect(() => normalizeChangeSet([{ op: 'setLimit', model: 'local/qwen', parallel: parallel as number }])).toThrow(ChangeSetError);
+      expect(() => previewChanges(tempDir(), [{ op: 'setLimit', model: 'local/qwen', parallel: parallel as number }], STARTER)).toThrow(
         /parallel|positive whole number/,
       );
     }
-    expect(normalizeChangeSet([{ op: 'setLimit', endpoint: 'local', parallel: 3 }])).toEqual([{ op: 'setLimit', endpoint: 'local', parallel: 3 }]);
+    expect(normalizeChangeSet([{ op: 'setLimit', model: 'local/qwen', parallel: 3 }])).toEqual([{ op: 'setLimit', model: 'local/qwen', parallel: 3 }]);
   });
 
-  it('rejects an unknown thinking level, an empty model or name, an unknown op and two changes to one tier or endpoint', () => {
+  it('rejects an unknown thinking level, an empty model or name, an unknown op and two changes to one tier or model', () => {
     const bad: unknown[] = [
       [{ op: 'setTier', tier: 'medium', model: 'local/m', thinking: 'extreme' }],
       [{ op: 'setTier', tier: 'medium', model: '', thinking: 'low' }],
       [{ op: 'setTier', tier: '', model: 'local/m', thinking: 'low' }],
       [{ op: 'rename', tier: 'medium' }],
       [{ op: 'setTier', tier: 'small', model: 'local/m', thinking: 'low' }, { op: 'unsetTier', tier: 'small' }],
-      [{ op: 'setLimit', endpoint: 'local', parallel: 1 }, { op: 'clearLimit', endpoint: 'local' }],
+      [{ op: 'setLimit', model: 'local/qwen', parallel: 1 }, { op: 'clearLimit', model: 'local/qwen' }],
     ];
     for (const changes of bad) expect(() => normalizeChangeSet(changes as Change[])).toThrow(ChangeSetError);
   });
@@ -130,7 +128,7 @@ describe('AgentSetup change sets', () => {
   it('normalizes the order of a change set, so the same changes give the same fingerprint', () => {
     const root = makeProject(HAND_WRITTEN);
     const a: Change[] = [
-      { op: 'setLimit', endpoint: 'local', parallel: 2 },
+      { op: 'setLimit', model: 'local/qwen', parallel: 2 },
       { op: 'setTier', tier: 'medium', model: 'local/x', thinking: 'low' },
     ];
     expect(previewChanges(root, a, STARTER).fingerprint).toBe(previewChanges(root, [...a].reverse(), STARTER).fingerprint);
@@ -158,21 +156,20 @@ describe('AgentSetup state', () => {
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.fileFingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(state.tiers).toEqual([
-      { tier: 'medium', host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high', endpoint: 'local', dependents: [], otherHost: false, listed: null, source: 'project' },
-      { tier: 'small', host: 'pi', model: 'local/qwen3-4b', thinking: 'low', endpoint: 'local', dependents: ['general', 'file-facts'], otherHost: false, listed: null, source: 'project' },
+      { tier: 'medium', host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high', dependents: [], otherHost: false, listed: null, source: 'project' },
+      { tier: 'small', host: 'pi', model: 'local/qwen3-4b', thinking: 'low', dependents: ['general', 'file-facts'], otherHost: false, listed: null, source: 'project' },
     ]);
-    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 1, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'project' }]);
-    expect(state.overrideOnlyEndpoints).toEqual([]);
+    expect(state.limits).toEqual([{ model: 'local/qwen3-4b', parallel: 1, tiers: ['small'], overrideOnly: false, unused: false, source: 'project' }]);
+    expect(state.overrideOnlyModels).toEqual([]);
+    expect(state.endpoints).toEqual([]);
     expect(state.overridden).toEqual({ tiers: [], limits: [] });
   });
 
-  it('marks an endpoint that only an override model uses, and keeps its limit through a change', () => {
-    const text = `endpoints:
-  local:
-    parallel: 2
-  cloud:
-    parallel: 4
-models:
+  it('marks a model that only an override names, and keeps its limit through a change', () => {
+    const text = `models:
+  parallel:
+    local/m: 2
+    cloud/reviewer: 4
   tiers:
     medium: { host: pi, model: local/m, thinking: high }
 ${AGENTS}  reviewer:
@@ -185,12 +182,12 @@ ${AGENTS}  reviewer:
     const root = makeProject(text);
     const state = readSetupState(root, { host: 'pi' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
-    expect(state.overrideOnlyEndpoints).toEqual(['cloud']);
-    expect(state.limits).toContainEqual({ endpoint: 'cloud', parallel: 4, tiers: [], overrideOnly: true, unused: false, source: 'project' });
+    expect(state.overrideOnlyModels).toEqual(['cloud/reviewer']);
+    expect(state.limits).toContainEqual({ model: 'cloud/reviewer', parallel: 4, tiers: [], overrideOnly: true, unused: false, source: 'project' });
 
     const preview = previewChanges(root, [{ op: 'setTier', tier: 'medium', model: 'google/g', thinking: 'low' }], STARTER);
-    expect(preview.droppedLimits).toEqual(['local']);
-    expect(loadAgentFile(makeProject(preview.text)).limits).toEqual(new Map([['cloud', 4]]));
+    expect(preview.droppedLimits).toEqual(['local/m']);
+    expect(loadAgentFile(makeProject(preview.text)).limits).toEqual(new Map([['cloud/reviewer', 4]]));
   });
 
   it('reports medium on another host and a model the caller marks as not listed, and keeps them when untouched', () => {
@@ -227,12 +224,13 @@ ${AGENTS}`;
 
   it('classifies an own limit that no model uses as repairable', () => {
     const unused = readSetupState(
-      makeProject(`endpoints:\n  old:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`),
+      makeProject(`models:\n  parallel:\n    old/m: 1\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`),
       {},
     );
     expect(unused).toMatchObject({ status: 'repairable' });
     if (unused.status !== 'repairable') throw new Error('unexpected');
-    expect(unused.limits).toEqual([{ endpoint: 'old', parallel: 1, tiers: [], overrideOnly: false, unused: true, source: 'project' }]);
+    expect(unused.limits).toEqual([{ model: 'old/m', parallel: 1, tiers: [], overrideOnly: false, unused: true, source: 'project' }]);
+    expect(unused.problem).toMatch(/model "old\/m": no tier or tier override uses it/);
   });
 
   it('refuses a YAML syntax error, an unknown key and an agent naming a missing tier with the parser message, writing nothing', () => {
@@ -268,7 +266,7 @@ describe('AgentSetup preview and apply', () => {
     const changes: Change[] = [
       { op: 'setTier', tier: 'medium', model: 'local/qwen3-coder-30b', thinking: 'medium' },
       { op: 'setTier', tier: 'small', model: 'local/qwen3-4b', thinking: 'off' },
-      { op: 'setLimit', endpoint: 'local', parallel: 2 },
+      { op: 'setLimit', model: 'local/qwen3-coder-30b', parallel: 2 },
     ];
     const preview = previewChanges(root, changes, STARTER);
     expect(preview).toMatchObject({ fileExists: false, refusals: [], droppedLimits: [], nothingToChange: false });
@@ -288,7 +286,9 @@ describe('AgentSetup preview and apply', () => {
         ['small', { host: 'pi', model: 'local/qwen3-4b', thinking: 'off' }],
       ]),
     );
-    expect(catalog.limits).toEqual(new Map([['local', 2]]));
+    expect(catalog.limits).toEqual(new Map([['local/qwen3-coder-30b', 2]]));
+    expect(preview.text).toContain('  parallel:\n    local/qwen3-coder-30b: 2\n');
+    expect(preview.text).not.toContain('endpoints');
     expect(otherFiles(root)).toEqual([]);
   });
 
@@ -339,7 +339,7 @@ ${AGENTS}`;
     const changes: Change[] = [
       { op: 'unsetTier', tier: 'small' },
       { op: 'setTier', tier: 'medium', model: 'local/other', thinking: 'low' },
-      { op: 'setLimit', endpoint: 'local', parallel: 3 },
+      { op: 'setLimit', model: 'local/qwen3-4b', parallel: 3 },
     ];
     const preview = previewChanges(root, changes, STARTER);
     expect(preview.refusals).toHaveLength(1);
@@ -347,7 +347,7 @@ ${AGENTS}`;
     expect(preview.refusals[0]!.message).toMatch(/file-facts/);
     expect(preview.text).toContain('small: { host: pi, model: local/qwen3-4b, thinking: low }');
     expect(preview.text).toContain('medium: { host: pi, model: local/other, thinking: low }');
-    expect(preview.text).toContain('    parallel: 3\n');
+    expect(preview.text).toContain('    local/qwen3-4b: 3\n');
     expect(() => applyChanges(root, changes, preview.fingerprint, STARTER)).toThrow(SetupRefusedError);
     expect(() => applyChanges(root, changes, preview.fingerprint, STARTER)).toThrow(/file-facts/);
     expect(read(root)).toBe(HAND_WRITTEN);
@@ -357,7 +357,7 @@ ${AGENTS}`;
     const again = previewChanges(root, rest, STARTER);
     expect(again.refusals).toEqual([]);
     expect(applyChanges(root, rest, again.fingerprint, STARTER).written).toBe(true);
-    expect(loadAgentFile(root).limits.get('local')).toBe(3);
+    expect(loadAgentFile(root).limits.get('local/qwen3-4b')).toBe(3);
   });
 
   it('names every agent on a tier, through tier: and through a tiers.<t> override', () => {
@@ -366,20 +366,20 @@ ${AGENTS}`;
     expect(preview.refusals).toEqual([{ change: { op: 'unsetTier', tier: 'small' }, agents: ['file-facts', 'reviewer'], message: expect.stringMatching(/file-facts.*reviewer/) }]);
   });
 
-  it('refuses unsetting medium, unsetting an unknown tier, and a limit on an endpoint no model uses', () => {
+  it('refuses unsetting medium, unsetting an unknown tier, and a limit on a model no tier uses', () => {
     const preview = previewChanges(
       makeProject(HAND_WRITTEN),
       [
         { op: 'unsetTier', tier: 'medium' },
         { op: 'unsetTier', tier: 'huge' },
-        { op: 'setLimit', endpoint: 'nowhere', parallel: 1 },
+        { op: 'setLimit', model: 'nowhere', parallel: 1 },
       ],
       STARTER,
     );
     expect(preview.refusals.map((r) => r.change)).toEqual([
       { op: 'unsetTier', tier: 'medium' },
       { op: 'unsetTier', tier: 'huge' },
-      { op: 'setLimit', endpoint: 'nowhere', parallel: 1 },
+      { op: 'setLimit', model: 'nowhere', parallel: 1 },
     ]);
     expect(preview.refusals[0]!.message).toMatch(/medium tier cannot be removed/);
     expect(preview.refusals[1]!.message).toMatch(/"huge" is not configured/);
@@ -450,20 +450,20 @@ ${AGENTS}`;
     });
 
     it.each([
-      ['a cleared limit and the orphaned limit after it', [{ op: 'clearLimit', endpoint: 'google' }], '{ local: { parallel: 1 }, cloud: { parallel: 4 } }', ['local', 'cloud']],
-      ['the orphaned limit and a cleared last limit', [{ op: 'clearLimit', endpoint: 'cloud' }], '{ local: { parallel: 1 }, google: { parallel: 2 } }', ['local', 'google']],
-      ['three limits after the first', [{ op: 'clearLimit', endpoint: 'google' }, { op: 'clearLimit', endpoint: 'cloud' }], '{ local: { parallel: 1 } }', ['local']],
-    ] as [string, Change[], string, string[]][])('removes %s from a flow-style endpoints map', (_name, changes, kept, endpoints) => {
-      const tiers = `models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    small: { host: pi, model: google/g, thinking: low }\n    large: { host: pi, model: cloud/c, thinking: high }\n`;
-      const text = `endpoints: { local: { parallel: 1 }, google: { parallel: 2 }, old: { parallel: 3 }, cloud: { parallel: 4 } }\n${tiers}${AGENTS}`;
+      ['a cleared limit and the orphaned limit after it', [{ op: 'clearLimit', model: 'google/g' }], '{ local/m: 1, cloud/c: 4 }', ['local/m', 'cloud/c']],
+      ['the orphaned limit and a cleared last limit', [{ op: 'clearLimit', model: 'cloud/c' }], '{ local/m: 1, google/g: 2 }', ['local/m', 'google/g']],
+      ['three limits after the first', [{ op: 'clearLimit', model: 'google/g' }, { op: 'clearLimit', model: 'cloud/c' }], '{ local/m: 1 }', ['local/m']],
+    ] as [string, Change[], string, string[]][])('removes %s from a flow-style models.parallel map', (_name, changes, kept, models) => {
+      const tiers = `    medium: { host: pi, model: local/m, thinking: low }\n    small: { host: pi, model: google/g, thinking: low }\n    large: { host: pi, model: cloud/c, thinking: high }\n`;
+      const text = `models:\n  parallel: { local/m: 1, google/g: 2, old/x: 3, cloud/c: 4 }\n  tiers:\n${tiers}${AGENTS}`;
       const root = makeProject(text);
       const preview = previewChanges(root, changes, STARTER);
       expect(preview.refusals).toEqual([]);
-      expect(preview.droppedLimits).toEqual(['old']);
+      expect(preview.droppedLimits).toEqual(['old/x']);
       expect(preview.invalid).toBeUndefined();
-      expect(preview.text).toBe(`endpoints: ${kept}\n${tiers}${AGENTS}`);
+      expect(preview.text).toBe(`models:\n  parallel: ${kept}\n  tiers:\n${tiers}${AGENTS}`);
       expect(applyChanges(root, changes, preview.fingerprint, STARTER).written).toBe(true);
-      expect([...loadAgentFile(root).limits.keys()]).toEqual(endpoints);
+      expect([...loadAgentFile(root).limits.keys()]).toEqual(models);
     });
 
     it('still removes adjacent entries of a block-style map line by line', () => {
@@ -477,13 +477,11 @@ ${AGENTS}`;
     });
   });
 
-  it('covers AE3:moving medium off the only tier on local drops endpoints.local, listed by preview and apply', () => {
-    const text = `endpoints:
-  local:
-    parallel: 1
-  google:
-    parallel: 2
-models:
+  it('covers AE3: moving medium off the only tier on a model drops its limit, listed by preview and apply', () => {
+    const text = `models:
+  parallel:
+    local/qwen: 1
+    google/gemini-3.1-pro-preview: 2
   tiers:
     medium: { host: pi, model: local/qwen, thinking: high }
     large: { host: pi, model: google/gemini-3.1-pro-preview, thinking: high }
@@ -491,64 +489,96 @@ ${AGENTS}`;
     const root = makeProject(text);
     const changes: Change[] = [{ op: 'setTier', tier: 'medium', model: 'google/gemini-3-flash', thinking: 'low' }];
     const preview = previewChanges(root, changes, STARTER);
-    expect(preview.droppedLimits).toEqual(['local']);
-    expect(preview.summary.join('\n')).toMatch(/local/);
-    expect(preview.text).not.toContain('local:');
+    expect(preview.droppedLimits).toEqual(['local/qwen']);
+    expect(preview.summary.join('\n')).toMatch(/local\/qwen/);
+    expect(preview.text).not.toContain('local/qwen:');
     const result = applyChanges(root, changes, preview.fingerprint, STARTER);
-    expect(result.droppedLimits).toEqual(['local']);
-    expect(loadAgentFile(root).limits).toEqual(new Map([['google', 2]]));
+    expect(result.droppedLimits).toEqual(['local/qwen']);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['google/gemini-3.1-pro-preview', 2]]));
+  });
+
+  it('keeps the limit of a model that another tier still names when one tier moves away', () => {
+    const text = `models:\n  parallel:\n    local/qwen: 1\n  tiers:\n    medium: { host: pi, model: local/qwen, thinking: high }\n    small: { host: pi, model: local/qwen, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const preview = previewChanges(root, [{ op: 'setTier', tier: 'small', model: 'google/g', thinking: 'low' }], STARTER);
+    expect(preview.droppedLimits).toEqual([]);
+    expect(preview.invalid).toBeUndefined();
   });
 
   it('drops an unused limit in a repairable file', () => {
-    const root = makeProject(`endpoints:\n  old:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`);
+    const root = makeProject(`models:\n  parallel:\n    old/m: 1\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`);
     const preview = previewChanges(root, [], STARTER);
-    expect(preview).toMatchObject({ droppedLimits: ['old'], nothingToChange: false, refusals: [] });
+    expect(preview).toMatchObject({ droppedLimits: ['old/m'], nothingToChange: false, refusals: [] });
     applyChanges(root, [], preview.fingerprint, STARTER);
     expect(read(root)).toBe(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`);
   });
 
-  it('removes the endpoints map, with its attached comment, when the only limit is cleared', () => {
+  it('removes the parallel map, with its attached comment, when the only limit is cleared', () => {
     const root = makeProject(HAND_WRITTEN);
-    const changes: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const changes: Change[] = [{ op: 'clearLimit', model: 'local/qwen3-4b' }];
     const preview = previewChanges(root, changes, STARTER);
     applyChanges(root, changes, preview.fingerprint, STARTER);
-    // The blank line after the map goes with it, so no double blank line is left.
-    expect(read(root)).toBe(HAND_WRITTEN.replace('endpoints:\n  # the GPU box\n  local:\n    parallel: 1\n\n', ''));
+    expect(read(root)).toBe(HAND_WRITTEN.replace('  parallel:\n    # the GPU box\n    local/qwen3-4b: 1\n', ''));
     expect(loadAgentFile(root).limits.size).toBe(0);
   });
 
   it('clears one limit of several, keeping the others, and treats clearing an absent limit as no change', () => {
-    const text = `endpoints:\n  local:\n    parallel: 1\n  google: { parallel: 2 }\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
+    const text = `models:\n  parallel:\n    local/m: 1\n    google/g: 2\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
     const root = makeProject(text);
-    const preview = previewChanges(root, [{ op: 'clearLimit', endpoint: 'google' }, { op: 'clearLimit', endpoint: 'other' }], STARTER);
+    const preview = previewChanges(root, [{ op: 'clearLimit', model: 'google/g' }, { op: 'clearLimit', model: 'other' }], STARTER);
     expect(preview.refusals).toEqual([]);
-    expect(preview.text).toBe(text.replace('  google: { parallel: 2 }\n', ''));
+    expect(preview.text).toBe(text.replace('    google/g: 2\n', ''));
   });
 
-  it('adds a limit to an existing endpoints map and creates the map when there is none', () => {
-    const text = `endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
+  it('adds a limit to an existing models.parallel map and creates the map when there is none, next to the tiers or alone', () => {
+    const text = `models:\n  parallel:\n    local/m: 1\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
     const root = makeProject(text);
-    const changes: Change[] = [{ op: 'setLimit', endpoint: 'google', parallel: 5 }];
-    applyChanges(root, changes, previewChanges(root, changes, STARTER).fingerprint, STARTER);
-    expect(loadAgentFile(root).limits).toEqual(new Map([['local', 1], ['google', 5]]));
+    const changes: Change[] = [{ op: 'setLimit', model: 'google/g', parallel: 5 }];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.text).toBe(text.replace('    local/m: 1\n', '    local/m: 1\n    google/g: 5\n'));
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/m', 1], ['google/g', 5]]));
 
     const bare = makeProject(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`);
-    const set: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 2 }];
-    applyChanges(bare, set, previewChanges(bare, set, STARTER).fingerprint, STARTER);
-    expect(loadAgentFile(bare).limits).toEqual(new Map([['local', 2]]));
+    const set: Change[] = [{ op: 'setLimit', model: 'local/m', parallel: 2 }];
+    const created = previewChanges(bare, set, STARTER);
+    expect(created.text).toBe(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n  parallel:\n    local/m: 2\n${AGENTS}`);
+    applyChanges(bare, set, created.fingerprint, STARTER);
+    expect(loadAgentFile(bare).limits).toEqual(new Map([['local/m', 2]]));
+
+    // A file with no models section gets one holding the tiers and the limit together, never two models keys.
+    const none = makeProject(AGENTS);
+    const both: Change[] = [
+      { op: 'setTier', tier: 'medium', model: 'local/m', thinking: 'low' },
+      { op: 'setLimit', model: 'local/m', parallel: 2 },
+    ];
+    const whole = previewChanges(none, both, STARTER);
+    expect(whole.text).toBe(`${AGENTS}\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n  parallel:\n    local/m: 2\n`);
+    applyChanges(none, both, whole.fingerprint, STARTER);
+    expect(loadAgentFile(none).limits).toEqual(new Map([['local/m', 2]]));
   });
 
-  it('replaces the only limit with a limit on another endpoint', () => {
-    const text = `endpoints:   # limits\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
+  it('writes a model id with a colon and a slash as a limit key and reads it back', () => {
+    const root = makeProject(`models:\n  tiers:\n    medium: { host: pi, model: local/qwen-coder:30b, thinking: low }\n${AGENTS}`);
+    const changes: Change[] = [{ op: 'setLimit', model: 'local/qwen-coder:30b', parallel: 2 }];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.invalid).toBeUndefined();
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/qwen-coder:30b', 2]]));
+  });
+
+  it('replaces the only limit with a limit on another model', () => {
+    const text = `models:\n  parallel:   # limits\n    local/m: 1\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n    large: { host: pi, model: google/g, thinking: low }\n${AGENTS}`;
     const root = makeProject(text);
     const changes: Change[] = [
-      { op: 'clearLimit', endpoint: 'local' },
-      { op: 'setLimit', endpoint: 'google', parallel: 2 },
+      { op: 'clearLimit', model: 'local/m' },
+      { op: 'setLimit', model: 'google/g', parallel: 2 },
     ];
     const preview = previewChanges(root, changes, STARTER);
     expect(preview.invalid).toBeUndefined();
     applyChanges(root, changes, preview.fingerprint, STARTER);
-    expect(loadAgentFile(root).limits).toEqual(new Map([['google', 2]]));
+    expect(loadAgentFile(root).limits).toEqual(new Map([['google/g', 2]]));
+    expect(read(root)).not.toContain('# limits');
   });
 
   it('adds a medium tier to a file without one and adds no agent; without one the change set is refused', () => {
@@ -686,10 +716,9 @@ function globalAt(file: string): string {
   return file;
 }
 
-const GLOBAL_FULL = `endpoints:
-  local:
-    parallel: 2
-models:
+const GLOBAL_FULL = `models:
+  parallel:
+    local/global-small: 2
   tiers:
     medium: { host: pi, model: local/global-medium, thinking: low }
     small: { host: pi, model: local/global-small, thinking: off }
@@ -705,7 +734,7 @@ describe('AgentSetup scopes', () => {
     mkdirSync(path.dirname(shared));
     writeFileSync(shared, GLOBAL_FULL);
     const project = previewChanges(root, [setMedium], STARTER, 'project');
-    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the global file; run guided init with the every-project choice/) }]);
+    expect(project.refusals).toEqual([{ change: null, message: expect.stringMatching(/this project's file is the global file \(.*\); run guided init with the every-project choice/) }]);
     expect(project.nothingToChange).toBe(true);
     expect(() => applyChanges(root, [setMedium], project.fingerprint, STARTER, 'project')).toThrow(SetupRefusedError);
     expect(readFileSync(shared, 'utf8')).toBe(GLOBAL_FULL);
@@ -741,8 +770,9 @@ describe('AgentSetup scopes', () => {
 
   it('reports a limit this project overrides, and none for a project that names nothing', () => {
     useGlobalConfig(GLOBAL_FULL);
-    const change: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 5 }];
-    expect(previewChanges(makeProject(HAND_WRITTEN), change, STARTER, 'global').overridden).toEqual({ tiers: [], limits: ['local'] });
+    const change: Change[] = [{ op: 'setLimit', model: 'local/global-small', parallel: 5 }];
+    const overriding = makeProject(HAND_WRITTEN.replace('local/qwen3-4b: 1', 'local/global-small: 1'));
+    expect(previewChanges(overriding, change, STARTER, 'global').overridden).toEqual({ tiers: [], limits: ['local/global-small'] });
     const bare = makeProject(`${AGENTS}`);
     expect(previewChanges(bare, [setMedium, ...change], STARTER, 'global').overridden).toEqual({ tiers: [], limits: [] });
   });
@@ -750,7 +780,7 @@ describe('AgentSetup scopes', () => {
   it('creates the global file and its folder from nothing, and a second preview shows nothing to change', () => {
     const file = globalAt(path.join(tempDir(), 'home', '.agents', 'subzero.yaml'));
     const root = tempDir();
-    const changes: Change[] = [setMedium, { op: 'setLimit', endpoint: 'local', parallel: 1 }];
+    const changes: Change[] = [setMedium, { op: 'setLimit', model: 'local/new-medium', parallel: 1 }];
     const preview = previewChanges(root, changes, STARTER, 'global');
     expect(preview).toMatchObject({ agentFile: file, fileExists: false, refusals: [], nothingToChange: false });
     expect(preview.diff).toContain('--- /dev/null');
@@ -806,13 +836,13 @@ describe('AgentSetup scopes', () => {
     const text = `models:\n  tiers:\n    large:\nagents:\n  helper:\n    description: h\n    tier: small\n    tools: [read]\n    timeout: 5\n`;
     const root = makeProject(text);
     expect(readSetupState(root, { host: 'pi' })).toMatchObject({ status: 'ok' });
-    const changes: Change[] = [{ op: 'setLimit', endpoint: 'local', parallel: 4 }];
+    const changes: Change[] = [{ op: 'setLimit', model: 'local/global-small', parallel: 4 }];
     const preview = previewChanges(root, changes, STARTER);
     expect(preview.refusals).toEqual([]);
     expect(preview.invalid).toBeUndefined();
-    expect(preview.text).toBe(`${text}\nendpoints:\n  local:\n    parallel: 4\n`);
+    expect(preview.text).toBe(text.replace('    large:\n', '    large:\n  parallel:\n    local/global-small: 4\n'));
     applyChanges(root, changes, preview.fingerprint, STARTER);
-    expect(loadAgentFile(root).limits).toEqual(new Map([['local', 4]]));
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/global-small', 4]]));
   });
 
   it('removes an inherited tier by writing a null entry, and deletes a project-only tier', () => {
@@ -846,32 +876,34 @@ describe('AgentSetup scopes', () => {
   it('removes an inherited limit by writing a null entry, and a project-only limit by deleting it', () => {
     useGlobalConfig(GLOBAL_FULL);
     const root = tempDir();
-    const preview = previewChanges(root, [{ op: 'clearLimit', endpoint: 'local' }], STARTER);
-    expect(preview.text).toBe('endpoints:\n  local:\n');
-    applyChanges(root, [{ op: 'clearLimit', endpoint: 'local' }], preview.fingerprint, STARTER);
+    const preview = previewChanges(root, [{ op: 'clearLimit', model: 'local/global-small' }], STARTER);
+    expect(preview.text).toBe('models:\n  parallel:\n    local/global-small:\n');
+    applyChanges(root, [{ op: 'clearLimit', model: 'local/global-small' }], preview.fingerprint, STARTER);
     expect(loadAgentFile(root).limits.size).toBe(0);
 
-    const own = makeProject(`endpoints:\n  cloud:\n    parallel: 3\nmodels:\n  tiers:\n    big: { host: pi, model: cloud/b, thinking: low }\n`);
-    expect(previewChanges(own, [{ op: 'clearLimit', endpoint: 'cloud' }], STARTER).text).toBe(
+    const own = makeProject(`models:\n  parallel:\n    cloud/b: 3\n  tiers:\n    big: { host: pi, model: cloud/b, thinking: low }\n`);
+    expect(previewChanges(own, [{ op: 'clearLimit', model: 'cloud/b' }], STARTER).text).toBe(
       'models:\n  tiers:\n    big: { host: pi, model: cloud/b, thinking: low }\n',
     );
   });
 
-  it('keeps an inherited limit working when a project tier moves onto its endpoint, and drops it silently when no model uses it', () => {
-    useGlobalConfig(`${GLOBAL_FULL}  # more\n`.replace('local/global-small', 'cloud/global-small'));
+  it('keeps an inherited limit working when a project tier moves onto its model, and drops it silently when no tier uses it', () => {
+    useGlobalConfig(
+      `models:\n  parallel:\n    local/global-medium: 2\n  tiers:\n    medium: { host: pi, model: local/global-medium, thinking: low }\n    small: { host: pi, model: cloud/global-small, thinking: off }\n`,
+    );
     const root = tempDir();
-    // local limit is inherited but only medium uses it; the project moves medium away.
+    // The limit is inherited but only medium uses it; the project moves medium away.
     const away = previewChanges(root, [{ op: 'setTier', tier: 'medium', model: 'cloud/m', thinking: 'low' }], STARTER);
     expect(away).toMatchObject({ refusals: [], droppedLimits: [] });
     expect(away.invalid).toBeUndefined();
-    // and back onto an endpoint the global limit covers.
+    // and back onto the model the global limit belongs to.
     const moved = makeProject(away.text);
     expect(loadAgentFile(moved).limits.size).toBe(0);
-    const comeBack: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/again', thinking: 'low' }];
+    const comeBack: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/global-medium', thinking: 'low' }];
     const back = previewChanges(moved, comeBack, STARTER);
     expect(back.invalid).toBeUndefined();
     applyChanges(moved, comeBack, back.fingerprint, STARTER);
-    expect(loadAgentFile(moved).limits).toEqual(new Map([['local', 2]]));
+    expect(loadAgentFile(moved).limits).toEqual(new Map([['local/global-medium', 2]]));
   });
 
   it('refuses a change set with no medium in either layer, and counts the inherited medium otherwise', () => {
@@ -975,21 +1007,22 @@ describe('AgentSetup scopes', () => {
 
   it('refuses a global-scope change that would leave this project own limit unused, and writes nothing', () => {
     const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
-    const root = makeProject('endpoints:\n  local:\n    parallel: 1\n');
-    expect(loadAgentFile(root).limits).toEqual(new Map([['local', 1]]));
+    const limitText = 'models:\n  parallel:\n    local/global-medium: 1\n';
+    const root = makeProject(limitText);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/global-medium', 1]]));
     const move: Change[] = [{ op: 'setTier', tier: 'medium', model: 'cloud/m', thinking: 'low' }];
     const preview = previewChanges(root, move, STARTER, 'global');
-    expect(preview.invalid).toMatch(/endpoint "local": no model of a tier or of a tier override belongs to it/);
+    expect(preview.invalid).toMatch(/model "local\/global-medium": no tier or tier override uses it/);
     expect(preview.invalid).toContain(fileOf(root));
     expect(() => applyChanges(root, move, preview.fingerprint, STARTER, 'global')).toThrow(LoadError);
     expect(readFileSync(global, 'utf8')).toBe(GLOBAL_MEDIUM_YAML);
-    expect(read(root)).toBe('endpoints:\n  local:\n    parallel: 1\n');
-    expect(loadAgentFile(root).limits).toEqual(new Map([['local', 1]]));
+    expect(read(root)).toBe(limitText);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/global-medium', 1]]));
   });
 
   it('does not newly refuse a global-scope change for a project that already had an unused own limit', () => {
     const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
-    const text = 'endpoints:\n  cloud:\n    parallel: 1\n';
+    const text = 'models:\n  parallel:\n    cloud/x: 1\n';
     const root = makeProject(text);
     expect(() => loadAgentFile(root)).toThrow(LoadError);
     const change: Change[] = [{ op: 'setTier', tier: 'medium', model: 'local/new-medium', thinking: 'high' }];
@@ -1030,10 +1063,10 @@ describe('AgentSetup scopes', () => {
     expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium', 'large']);
   });
 
-  it('removes the whole endpoints section when the last block-style limit goes, so the file loads', () => {
+  it('removes the whole parallel section, and an emptied models, when the last block-style limit goes, so the file loads', () => {
     useGlobalConfig(GLOBAL_MEDIUM_YAML);
-    const root = makeProject('endpoints:\n  local:\n    parallel: 1\nrouting:\n  hook: true\n');
-    const clear: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const root = makeProject('models:\n  parallel:\n    local/global-medium: 1\nrouting:\n  hook: true\n');
+    const clear: Change[] = [{ op: 'clearLimit', model: 'local/global-medium' }];
     const preview = previewChanges(root, clear, STARTER);
     expect(preview.invalid).toBeUndefined();
     expect(preview.text).toBe('routing:\n  hook: true\n');
@@ -1044,12 +1077,14 @@ describe('AgentSetup scopes', () => {
   it('still removes a last tier or limit from flow-style maps, and one of several', () => {
     useGlobalConfig(GLOBAL_MEDIUM_YAML);
     const unsetSmall: Change[] = [{ op: 'unsetTier', tier: 'small' }];
-    const clearLocal: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const clearLocal: Change[] = [{ op: 'clearLimit', model: 'local/global-medium' }];
     for (const [text, changes] of [
       ['models: { tiers: { small: { host: pi, model: local/s, thinking: low } } }\nrouting: { hook: true }\n', unsetSmall],
       ['models:\n  tiers: { small: { host: pi, model: local/s, thinking: low } }\nrouting: { hook: true }\n', unsetSmall],
       ['models:\n  tiers:\n    small: { host: pi, model: local/s, thinking: low }\nrouting: { hook: true }\n', unsetSmall],
-      ['endpoints: { local: { parallel: 1 } }\nrouting: { hook: true }\n', clearLocal],
+      ['models: { parallel: { local/global-medium: 1 } }\nrouting: { hook: true }\n', clearLocal],
+      ['models:\n  parallel: { local/global-medium: 1 }\nrouting: { hook: true }\n', clearLocal],
+      ['models:\n  parallel:\n    local/global-medium: 1\nrouting: { hook: true }\n', clearLocal],
     ] as const) {
       const root = makeProject(text);
       const preview = previewChanges(root, changes, STARTER);
@@ -1075,11 +1110,11 @@ describe('AgentSetup scopes', () => {
     applyChanges(tier, unset, tierPreview.fingerprint, STARTER);
     expect([...loadAgentFile(tier).tiers.keys()]).toEqual(['medium', 'large']);
 
-    const limit = makeProject('{ endpoints: { local: { parallel: 1 } } }\n');
-    const clear: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const limit = makeProject('{ models: { parallel: { local/global-small: 1 } } }\n');
+    const clear: Change[] = [{ op: 'clearLimit', model: 'local/global-small' }];
     const limitPreview = previewChanges(limit, clear, STARTER);
     expect(limitPreview.invalid).toBeUndefined();
-    expect(limitPreview.text).toMatch(/^\{.*local: null.*\}\s*$/s);
+    expect(limitPreview.text).toMatch(/^\{.*local\/global-small: null.*\}\s*$/s);
     applyChanges(limit, clear, limitPreview.fingerprint, STARTER);
     expect(loadAgentFile(limit).limits.size).toBe(0);
 
@@ -1095,15 +1130,16 @@ describe('AgentSetup scopes', () => {
 
   it('empties a retained flow map whatever its whitespace, newlines, comments and trailing commas hold', () => {
     const unsetSmall: Change[] = [{ op: 'unsetTier', tier: 'small' }];
-    const clearLocal: Change[] = [{ op: 'clearLimit', endpoint: 'local' }];
+    const clearLocal: Change[] = [{ op: 'clearLimit', model: 'local/global-medium' }];
+    const clearSmall: Change[] = [{ op: 'clearLimit', model: 'local/global-small' }];
     const tinySmall = '{ host: pi, model: a/b, thinking: low }';
     const cases: { text: string; changes: Change[]; global: string; tiers: string[]; limits: number }[] = [
       // the file of the review: a trailing comma on its own line, inheriting nothing to remove
-      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
+      { text: '{ models: { parallel: { local/global-medium: 1 }\n    , } }\n', changes: clearLocal, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
       { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
       // the same with an inherited entry, so a removal entry is written back inside the retained map
-      { text: '{ endpoints: { local: { parallel: 1 }\n    , } }\n', changes: clearLocal, global: GLOBAL_FULL, tiers: ['medium', 'small', 'large'], limits: 0 },
-      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, global: GLOBAL_FULL, tiers: ['medium', 'large'], limits: 1 },
+      { text: '{ models: { parallel: { local/global-small: 1 }\n    , } }\n', changes: clearSmall, global: GLOBAL_FULL, tiers: ['medium', 'small', 'large'], limits: 0 },
+      { text: `{ models: { tiers: { small: ${tinySmall}\n    , } } }\n`, changes: unsetSmall, global: GLOBAL_FULL, tiers: ['medium', 'large'], limits: 0 },
       // a comment between entries and after the last one
       { text: `{ models: { tiers: { # note\n  small: ${tinySmall}, # more\n  } } }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
       { text: `models:\n  tiers: { # note\n    small: ${tinySmall}\n    , }\nrouting: { hook: true }\n`, changes: unsetSmall, global: GLOBAL_MEDIUM_YAML, tiers: ['medium'], limits: 0 },
@@ -1143,7 +1179,7 @@ describe('AgentSetup scopes', () => {
 
   it('marks each tier and limit as global or project, and names what this project overrides', () => {
     useGlobalConfig(GLOBAL_FULL);
-    const root = makeProject(`endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n    mine: { host: pi, model: local/mine, thinking: low }\n    large:\n`);
+    const root = makeProject(`models:\n  parallel:\n    local/global-small: 1\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n    mine: { host: pi, model: local/mine, thinking: low }\n    large:\n`);
     const state = readSetupState(root, { host: 'pi' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.tiers.map((t) => [t.tier, t.source, t.model])).toEqual([
@@ -1152,9 +1188,9 @@ describe('AgentSetup scopes', () => {
       ['mine', 'project', 'local/mine'],
     ]);
     expect(state.limits).toEqual([
-      { endpoint: 'local', parallel: 1, tiers: ['medium', 'small', 'mine'], overrideOnly: false, unused: false, source: 'project', global: { parallel: 2 } },
+      { model: 'local/global-small', parallel: 1, tiers: ['small'], overrideOnly: false, unused: false, source: 'project', global: { parallel: 2 } },
     ]);
-    expect(state.overridden).toEqual({ tiers: ['medium', 'large'], limits: ['local'] });
+    expect(state.overridden).toEqual({ tiers: ['medium', 'large'], limits: ['local/global-small'] });
     // The global file's own value rides on an overridden entry only: not on a global tier, nor on a project-only one.
     expect(state.tiers.map((t) => [t.tier, t.global])).toEqual([
       ['medium', { host: 'pi', model: 'local/global-medium', thinking: 'low' }],
@@ -1183,12 +1219,12 @@ describe('AgentSetup scopes', () => {
       ['small', 'global', []],
       ['large', 'global', ['helper']],
     ]);
-    expect(state.limits).toEqual([{ endpoint: 'local', parallel: 2, tiers: ['medium', 'small'], overrideOnly: false, unused: false, source: 'global' }]);
+    expect(state.limits).toEqual([{ model: 'local/global-small', parallel: 2, tiers: ['small'], overrideOnly: false, unused: false, source: 'global' }]);
   });
 
   it('carries no global value in the global scope, where the listed values are the global file\'s own', () => {
     useGlobalConfig(GLOBAL_FULL);
-    const root = makeProject(`endpoints:\n  local:\n    parallel: 1\nmodels:\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n`);
+    const root = makeProject(`models:\n  parallel:\n    local/global-small: 1\n  tiers:\n    medium: { host: pi, model: local/own, thinking: high }\n`);
     const state = readSetupState(root, { scope: 'global' });
     if (state.status !== 'ok') throw new Error(`unexpected ${state.status}`);
     expect(state.tiers.find((t) => t.tier === 'medium')).toMatchObject({ model: 'local/global-medium', source: 'global' });
@@ -1216,5 +1252,292 @@ describe('addStarterEntries on top of layered files', () => {
     expect(result.added).toEqual(['medium', 'general', 'fallback']);
     expect(read(root).startsWith(text.slice(0, text.indexOf('agents:')))).toBe(true);
     expect(loadCatalog(root).entries.has('fallback')).toBe(true);
+  });
+});
+
+describe('AgentSetup repairs endpoints:', () => {
+  const R9700_FILE = `# Project agents.
+skills:
+  facts: ./skills/alpha
+
+endpoints:
+  # the one GPU
+  r9700:
+    parallel: 1
+
+models:
+  tiers:
+    medium: { host: pi, model: r9700/Qwen3.8, thinking: medium }
+    small: { host: pi, model: r9700/Qwen-small, thinking: low }
+    large: { host: pi, model: cloud/large, thinking: high }
+
+${AGENTS}`;
+
+  const GLOBAL_ENDPOINTS = `endpoints:
+  # the box
+  local:
+    parallel: 3
+models:
+  tiers:
+    medium: { host: pi, model: local/global-medium, thinking: low }
+    small: { host: pi, model: local/global-small, thinking: off }
+`;
+
+  it('lists each endpoints entry with its limit, its file and its covered models, and marks the file repairable', () => {
+    const root = makeProject(R9700_FILE);
+    const state = readSetupState(root, { host: 'pi' });
+    expect(state.status).toBe('repairable');
+    if (state.status !== 'repairable') throw new Error('unexpected');
+    expect(state.endpoints).toEqual([{ endpoint: 'r9700', parallel: 1, file: fileOf(root), scope: 'project', models: ['r9700/Qwen3.8', 'r9700/Qwen-small'] }]);
+    expect(state.problem).toMatch(/endpoints:.*models\.parallel.*r9700 \(limit 1\) covers r9700\/Qwen3\.8, r9700\/Qwen-small/);
+    expect(state.tiers.map((t) => t.model)).toEqual(['r9700/Qwen3.8', 'r9700/Qwen-small', 'cloud/large']);
+  });
+
+  it('covers R20: previews limits for both covered models pre-filled with the old value, and apply writes them and removes endpoints', () => {
+    const root = makeProject(R9700_FILE);
+    const preview = previewChanges(root, [], STARTER);
+    expect(preview.refusals).toEqual([]);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.prefilled).toEqual([
+      { model: 'r9700/Qwen3.8', parallel: 1, endpoint: 'r9700' },
+      { model: 'r9700/Qwen-small', parallel: 1, endpoint: 'r9700' },
+    ]);
+    expect(preview.repairs).toEqual([{ endpoint: 'r9700', parallel: 1, file: fileOf(root), scope: 'project', models: ['r9700/Qwen3.8', 'r9700/Qwen-small'] }]);
+    expect(preview.summary).toEqual([
+      'model r9700/Qwen3.8: parallel limit 1 (the old limit of endpoint r9700)',
+      'model r9700/Qwen-small: parallel limit 1 (the old limit of endpoint r9700)',
+      'remove endpoints.r9700 (limit 1), which models.parallel replaced',
+    ]);
+    // The diff shows the removal, the comment line with it, and the new limits.
+    expect(preview.diff).toContain('-endpoints:\n-  # the one GPU\n-  r9700:\n-    parallel: 1\n');
+    expect(preview.diff).toContain('+  parallel:\n+    r9700/Qwen3.8: 1\n+    r9700/Qwen-small: 1\n');
+    expect(read(root)).toBe(R9700_FILE);
+
+    expect(applyChanges(root, [], preview.fingerprint, STARTER).written).toBe(true);
+    expect(read(root)).not.toContain('endpoints');
+    expect(read(root)).not.toContain('the one GPU');
+    expect(read(root)).toContain('# Project agents.\nskills:\n  facts: ./skills/alpha\n');
+    const catalog = loadAgentFile(root);
+    expect(catalog.limits).toEqual(new Map([['r9700/Qwen3.8', 1], ['r9700/Qwen-small', 1]]));
+    expect(readSetupState(root, { host: 'pi' }).status).toBe('ok');
+  });
+
+  it('lets the change set override a pre-filled limit, or clear it, and writes the rest', () => {
+    const root = makeProject(R9700_FILE);
+    const changes: Change[] = [
+      { op: 'setLimit', model: 'r9700/Qwen3.8', parallel: 4 },
+      { op: 'clearLimit', model: 'r9700/Qwen-small' },
+    ];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.prefilled).toEqual([]);
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['r9700/Qwen3.8', 4]]));
+    expect(read(root)).not.toContain('endpoints');
+  });
+
+  it.each([['endpoints: {}\n'], ['# kept comment\nendpoints:\n']])('marks a file whose endpoints key is empty (%j) repairable, previews the removal of the key and writes a file that loads', (head) => {
+    const text = `${head}models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const state = readSetupState(root, { host: 'pi' });
+    expect(state.status).toBe('repairable');
+    if (state.status !== 'repairable') throw new Error('unexpected');
+    expect(state.endpoints).toEqual([{ endpoint: '', parallel: null, file: fileOf(root), scope: 'project', models: [], empty: true }]);
+    expect(state.problem).toMatch(/holds "endpoints:".*an empty map/);
+    const preview = previewChanges(root, [], STARTER);
+    expect(preview.refusals).toEqual([]);
+    expect(preview.summary).toEqual(['remove the empty endpoints map, which models.parallel replaced']);
+    expect(preview.prefilled).toEqual([]);
+    expect(applyChanges(root, [], preview.fingerprint, STARTER).written).toBe(true);
+    expect(read(root)).not.toContain('endpoints');
+    expect(read(root)).toContain('models:\n  tiers:');
+    expect(() => loadAgentFile(root)).not.toThrow();
+    expect(readSetupState(root, { host: 'pi' }).status).toBe('ok');
+  });
+
+  it('drops an endpoints entry that covers no model, and one with no limit', () => {
+    const text = `endpoints:\n  gone:\n    parallel: 2\n  none:\nmodels:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const state = readSetupState(root, {});
+    if (state.status !== 'repairable') throw new Error('unexpected');
+    expect(state.endpoints.map((e) => [e.endpoint, e.parallel, e.models])).toEqual([['gone', 2, []], ['none', null, []]]);
+    const preview = previewChanges(root, [], STARTER);
+    expect(preview.prefilled).toEqual([]);
+    applyChanges(root, [], preview.fingerprint, STARTER);
+    expect(read(root)).toBe(`models:\n  tiers:\n    medium: { host: pi, model: local/m, thinking: low }\n${AGENTS}`);
+    expect(loadAgentFile(root).limits.size).toBe(0);
+  });
+
+  it('puts the pre-filled limits into an existing models.parallel map, and keeps an own limit the endpoint also covers', () => {
+    const text = `endpoints:\n  r9700:\n    parallel: 1\nmodels:\n  parallel:\n    r9700/a: 3\n  tiers:\n    medium: { host: pi, model: r9700/a, thinking: low }\n    small: { host: pi, model: r9700/b, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const preview = previewChanges(root, [], STARTER);
+    // The model that already has its own limit keeps it: the old endpoint value is pre-filled only where the change set and the file are silent.
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.prefilled).toEqual([{ model: 'r9700/b', parallel: 1, endpoint: 'r9700' }]);
+    applyChanges(root, [], preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['r9700/a', 3], ['r9700/b', 1]]));
+    expect(read(root)).toContain('  parallel:\n    r9700/a: 3\n    r9700/b: 1\n');
+  });
+
+  it('a global file with endpoints and the scope "only this project" offers the global repair first, and after its apply the project preview applies', () => {
+    const global = useGlobalConfig(GLOBAL_ENDPOINTS);
+    const root = makeProject(`models:\n  tiers:\n    large: { host: pi, model: cloud/l, thinking: high }\n${AGENTS}`);
+    const state = readSetupState(root, { host: 'pi' });
+    expect(state.status).toBe('repair-other-first');
+    if (state.status !== 'repair-other-first') throw new Error('unexpected');
+    expect(state.repairFirst).toEqual({ scope: 'global', file: global });
+    expect(state.problem).toContain(global);
+    expect(state.endpoints).toEqual([{ endpoint: 'local', parallel: 3, file: global, scope: 'global', models: ['local/global-medium', 'local/global-small'] }]);
+
+    // Until the global file is repaired, a project preview is invalid: the other file would still fail to load.
+    const change: Change[] = [{ op: 'setTier', tier: 'small', model: 'cloud/s', thinking: 'low' }];
+    const blocked = previewChanges(root, change, STARTER);
+    expect(blocked.invalid).toMatch(/global file holds "endpoints:"/);
+    expect(() => applyChanges(root, change, blocked.fingerprint, STARTER)).toThrow(LoadError);
+
+    const repair = previewChanges(root, [], STARTER, 'global');
+    expect(repair.invalid).toBeUndefined();
+    expect(repair.refusals).toEqual([]);
+    expect(repair.agentFile).toBe(global);
+    expect(repair.prefilled.map((p) => [p.model, p.parallel])).toEqual([['local/global-medium', 3], ['local/global-small', 3]]);
+    expect(repair.diff).toContain('-endpoints:\n-  # the box\n-  local:\n-    parallel: 3\n');
+    expect(readFileSync(global, 'utf8')).toBe(GLOBAL_ENDPOINTS);
+    expect(applyChanges(root, [], repair.fingerprint, STARTER, 'global').written).toBe(true);
+    expect(readFileSync(global, 'utf8')).toBe(
+      'models:\n  tiers:\n    medium: { host: pi, model: local/global-medium, thinking: low }\n    small: { host: pi, model: local/global-small, thinking: off }\n  parallel:\n    local/global-medium: 3\n    local/global-small: 3\n',
+    );
+
+    expect(readSetupState(root, { host: 'pi' }).status).toBe('ok');
+    const next = previewChanges(root, change, STARTER);
+    expect(next.invalid).toBeUndefined();
+    expect(applyChanges(root, change, next.fingerprint, STARTER).written).toBe(true);
+    expect(loadAgentFile(root).tiers.get('small')?.model).toBe('cloud/s');
+    expect(loadAgentFile(root).limits).toEqual(new Map([['local/global-medium', 3]]));
+  });
+
+  it('an agent file with endpoints and the scope "every project" offers the agent repair first', () => {
+    const global = useGlobalConfig(GLOBAL_MEDIUM_YAML);
+    const root = makeProject(R9700_FILE);
+    const state = readSetupState(root, { host: 'pi', scope: 'global' });
+    expect(state.status).toBe('repair-other-first');
+    if (state.status !== 'repair-other-first') throw new Error('unexpected');
+    expect(state.repairFirst).toEqual({ scope: 'project', file: fileOf(root) });
+    expect(state.agentFile).toBe(global);
+    expect(state.endpoints.map((e) => e.scope)).toEqual(['project']);
+
+    const repair = previewChanges(root, [], STARTER);
+    expect(applyChanges(root, [], repair.fingerprint, STARTER).written).toBe(true);
+    expect(readSetupState(root, { host: 'pi', scope: 'global' }).status).toBe('ok');
+  });
+
+  it('both files hold endpoints: the first repair step applies although the chosen file still holds endpoints', () => {
+    const global = useGlobalConfig(GLOBAL_ENDPOINTS);
+    const root = makeProject(R9700_FILE);
+    const state = readSetupState(root, { host: 'pi' });
+    if (state.status !== 'repair-other-first') throw new Error(`unexpected ${state.status}`);
+    expect(state.endpoints.map((e) => [e.scope, e.endpoint])).toEqual([['global', 'local'], ['project', 'r9700']]);
+
+    // Step 1: the global file, while the agent file still holds endpoints.
+    const first = previewChanges(root, [], STARTER, 'global');
+    expect(first.invalid).toBeUndefined();
+    expect(first.refusals).toEqual([]);
+    expect(applyChanges(root, [], first.fingerprint, STARTER, 'global').written).toBe(true);
+    expect(readFileSync(global, 'utf8')).not.toContain('endpoints');
+    expect(read(root)).toBe(R9700_FILE);
+
+    // Step 2: the agent file, now that the global one loads.
+    const state2 = readSetupState(root, { host: 'pi' });
+    expect(state2.status).toBe('repairable');
+    const second = previewChanges(root, [], STARTER);
+    expect(second.invalid).toBeUndefined();
+    expect(applyChanges(root, [], second.fingerprint, STARTER).written).toBe(true);
+    expect(readSetupState(root, { host: 'pi' }).status).toBe('ok');
+    expect(loadAgentFile(root).limits.get('r9700/Qwen3.8')).toBe(1);
+  });
+
+  it('a global repair tolerates a missing medium tier and an unused limit of the project, which the next step repairs', () => {
+    const global = useGlobalConfig('endpoints:\n  local:\n    parallel: 2\n');
+    const root = makeProject(`models:\n  parallel:\n    unused/m: 1\nendpoints:\n  other:\n    parallel: 1\n${AGENTS}`);
+    const preview = previewChanges(root, [], STARTER, 'global');
+    expect(preview.refusals).toEqual([]);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.text).toBe('');
+    expect(applyChanges(root, [], preview.fingerprint, STARTER, 'global').written).toBe(true);
+    expect(readFileSync(global, 'utf8')).toBe('');
+  });
+
+  it('a repair that also sets tiers keeps the medium tier rule', () => {
+    const root = makeProject(`endpoints:\n  local:\n    parallel: 1\n${AGENTS}`);
+    const preview = previewChanges(root, [{ op: 'setTier', tier: 'small', model: 'local/s', thinking: 'low' }], STARTER);
+    expect(preview.refusals).toEqual([{ change: null, message: expect.stringMatching(/medium tier is required/) }]);
+  });
+
+  it('preview and apply of a repair write nothing until applied, and a changed file makes the preview stale', () => {
+    const root = makeProject(R9700_FILE);
+    const preview = previewChanges(root, [], STARTER);
+    expect(read(root)).toBe(R9700_FILE);
+    writeFileSync(fileOf(root), `${R9700_FILE}# edited\n`);
+    expect(() => applyChanges(root, [], preview.fingerprint, STARTER)).toThrow(SetupConflictError);
+  });
+
+  it('removes a flow-style endpoints map and a whole-file flow map entry', () => {
+    const text = `endpoints: { r9700: { parallel: 2 } }\nmodels:\n  tiers:\n    medium: { host: pi, model: r9700/m, thinking: low }\n${AGENTS}`;
+    const root = makeProject(text);
+    const preview = previewChanges(root, [], STARTER);
+    expect(preview.invalid).toBeUndefined();
+    applyChanges(root, [], preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['r9700/m', 2]]));
+    expect(read(root)).not.toContain('endpoints');
+  });
+
+  it('init <model> on a file holding endpoints refuses with the load error and repairs nothing', () => {
+    const root = makeProject(R9700_FILE);
+    const spec = { host: 'pi', model: 'r9700/new', thinking: 'low' as const, timeout: 100, generalTools: ['read'], fallbackTools: ['read'] };
+    expect(() => addStarterEntries(root, spec)).toThrow(LoadError);
+    expect(() => addStarterEntries(root, spec)).toThrow(/"endpoints:".*models\.parallel/);
+    expect(read(root)).toBe(R9700_FILE);
+    expect(otherFiles(root)).toEqual([]);
+  });
+});
+
+describe('AgentSetup new limits next to new tiers', () => {
+  const tierLine = (name: string, model: string) => `    ${name}: { host: pi, model: ${model}, thinking: low }\n`;
+
+  it('writes a new tier and a new limit into a models map whose last key is tiers, each under its own map', () => {
+    const text = `models:\n  tiers:\n${tierLine('medium', 'local/m')}${AGENTS}`;
+    const root = makeProject(text);
+    const changes: Change[] = [
+      { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'low' },
+      { op: 'setLimit', model: 'cloud/l', parallel: 2 },
+    ];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.text).toBe(`models:\n  tiers:\n${tierLine('medium', 'local/m')}${tierLine('large', 'cloud/l')}  parallel:\n    cloud/l: 2\n${AGENTS}`);
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['cloud/l', 2]]));
+  });
+
+  it('writes a new tier and a new limit when tiers comes after parallel in models, each under its own map', () => {
+    const withTiers = makeProject(`models:\n  parallel:\n    local/m: 1\n  tiers:\n${tierLine('medium', 'local/m')}${AGENTS}`);
+    const changes: Change[] = [
+      { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'low' },
+      { op: 'setLimit', model: 'cloud/l', parallel: 2 },
+    ];
+    const preview = previewChanges(withTiers, changes, STARTER);
+    expect(preview.invalid).toBeUndefined();
+    expect(preview.text).toBe(`models:\n  parallel:\n    local/m: 1\n    cloud/l: 2\n  tiers:\n${tierLine('medium', 'local/m')}${tierLine('large', 'cloud/l')}${AGENTS}`);
+  });
+
+  it('writes a new tier and a new limit into a flow-style models map', () => {
+    const root = makeProject(`models: { tiers: { medium: { host: pi, model: local/m, thinking: low } } }\n${AGENTS}`);
+    const changes: Change[] = [
+      { op: 'setTier', tier: 'large', model: 'cloud/l', thinking: 'low' },
+      { op: 'setLimit', model: 'cloud/l', parallel: 2 },
+    ];
+    const preview = previewChanges(root, changes, STARTER);
+    expect(preview.invalid).toBeUndefined();
+    applyChanges(root, changes, preview.fingerprint, STARTER);
+    expect(loadAgentFile(root).limits).toEqual(new Map([['cloud/l', 2]]));
+    expect([...loadAgentFile(root).tiers.keys()]).toEqual(['medium', 'large']);
   });
 });

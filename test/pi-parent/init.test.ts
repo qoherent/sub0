@@ -182,7 +182,7 @@ describe('pi /subzero init', () => {
     const { fake, tool, text, initActive, subagentText } = await session(root);
     expect(subagentText()).not.toMatch(/pass model: "medium"/);
     await fake.command('subzero', 'init');
-    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }, { op: 'setLimit', endpoint: 'local', parallel: 1 }];
+    const changes = [{ op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' }, { op: 'setLimit', model: 'local/q', parallel: 1 }];
     const { fingerprint, diff } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
     fake.answers.confirm.push(true);
     const reply = await tool('subzero_init_apply', { changes, fingerprint });
@@ -240,11 +240,87 @@ describe('pi /subzero init', () => {
     await expectEnded(fake, tool, text, initActive, root, before);
   });
 
+  describe('repairing endpoints:', () => {
+    const GLOBAL_ENDPOINTS = `endpoints:\n  local:\n    parallel: 3\n${GLOBAL_MEDIUM_YAML}`;
+    const PROJECT_TIERS = 'models:\n  tiers:\n    large: { host: pi, model: cloud/l, thinking: high }\n';
+
+    it('show lists the endpoints entry of the global file and says to repair it first', async () => {
+      const global = useGlobalConfig(GLOBAL_ENDPOINTS);
+      const root = makeProject(PROJECT_TIERS);
+      const { fake, tool, text } = await session(root);
+      await fake.command('subzero', 'init');
+      const shown = JSON.parse(text(await tool('subzero_init_show')));
+      expect(shown.state).toMatchObject({
+        status: 'repair-other-first',
+        repairFirst: { scope: 'global', file: global },
+        endpoints: [{ endpoint: 'local', parallel: 3, scope: 'global', file: global, models: ['local/global-medium'] }],
+      });
+      const kickoff = String(fake.userMessages[0]);
+      expect(kickoff).toMatch(/Repair `endpoints:` first/);
+      expect(kickoff).toMatch(/repair step of step 2a too: declining it ends the init with nothing written/);
+    });
+
+    it('the repair step has its own confirm, pre-filled limits in its diff, and keeps the tools on for the chosen scope', async () => {
+      const global = useGlobalConfig(GLOBAL_ENDPOINTS);
+      const root = makeProject(PROJECT_TIERS);
+      const { fake, tool, text, initActive } = await session(root);
+      await fake.command('subzero', 'init');
+      const changes = [{ op: 'setLimit', model: 'local/global-medium', parallel: 3 }];
+      const repair = JSON.parse(text(await tool('subzero_init_preview', { changes, scope: 'global' })));
+      expect(repair).toMatchObject({ ok: true, scope: 'global', refusals: [], repairs: [{ endpoint: 'local', parallel: 3 }] });
+      expect(repair.diff).toContain('-endpoints:');
+      expect(repair.diff).toContain('+    local/global-medium: 3');
+      fake.answers.confirm.push(true);
+      const reply = JSON.parse(text(await tool('subzero_init_apply', { changes, fingerprint: repair.fingerprint, scope: 'global' })));
+      expect(reply).toMatchObject({ ok: true, written: true, note: expect.stringMatching(/init tools stay on for the next step/) });
+      expect(readFileSync(global, 'utf8')).not.toContain('endpoints');
+      expect(initActive().sort()).toEqual([...SIX].sort());
+      expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toHaveLength(1);
+
+      // The chosen scope goes on with its own preview and confirm, and ends the init.
+      const next = [{ op: 'setTier', tier: 'small', model: 'cloud/s', thinking: 'low' }];
+      const preview = JSON.parse(text(await tool('subzero_init_preview', { changes: next })));
+      expect(preview.invalid).toBeUndefined();
+      fake.answers.confirm.push(true);
+      expect(JSON.parse(text(await tool('subzero_init_apply', { changes: next, fingerprint: preview.fingerprint }))).written).toBe(true);
+      expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toHaveLength(2);
+      expect(initActive()).toEqual([]);
+    });
+
+    it('declining the repair step writes nothing and ends the init', async () => {
+      const global = useGlobalConfig(GLOBAL_ENDPOINTS);
+      const root = makeProject(PROJECT_TIERS);
+      const before = readFileSync(agentFile(root), 'utf8');
+      const { fake, tool, text, initActive } = await session(root);
+      await fake.command('subzero', 'init');
+      const repair = JSON.parse(text(await tool('subzero_init_preview', { changes: [], scope: 'global' })));
+      fake.answers.confirm.push(false);
+      const reply = await tool('subzero_init_apply', { changes: [], fingerprint: repair.fingerprint, scope: 'global' });
+      expect(text(reply)).toMatch(/the user declined; nothing was written/);
+      expect(readFileSync(global, 'utf8')).toBe(GLOBAL_ENDPOINTS);
+      expect(readFileSync(agentFile(root), 'utf8')).toBe(before);
+      expect(fake.dialogs.filter((d) => d.kind === 'confirm')).toHaveLength(1);
+      expect(initActive()).toEqual([]);
+      const later = await tool('subzero_init_show');
+      expect(later.isError).toBe(true);
+      expect(text(later)).toMatch(/not running/);
+    });
+
+    it('init <model> on a file holding endpoints refuses with the load error and repairs nothing', async () => {
+      const text = `endpoints:\n  local:\n    parallel: 1\n${PROJECT_TIERS}`;
+      const root = makeProject(text);
+      const { fake } = await session(root);
+      await fake.command('subzero', 'init local/qwen');
+      expect(fake.notifications.at(-1)).toMatch(/"endpoints:".*models\.parallel/);
+      expect(readFileSync(agentFile(root), 'utf8')).toBe(text);
+    });
+  });
+
   it('apply when the agent file no longer loads returns the load error and ends the init', async () => {
     const root = makeProject();
     const { fake, tool, text, initActive } = await session(root);
     await fake.command('subzero', 'init');
-    const changes = [{ op: 'setLimit', endpoint: 'local', parallel: 2 }];
+    const changes = [{ op: 'setLimit', model: 'local/qwen', parallel: 2 }];
     const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
     writeFileSync(agentFile(root), 'models: [unclosed\n');
     const reply = await tool('subzero_init_apply', { changes, fingerprint });
@@ -258,7 +334,7 @@ describe('pi /subzero init', () => {
     const { fake, tool, text, initActive } = await session(root);
     await fake.command('subzero', 'init');
     const before = readFileSync(agentFile(root), 'utf8');
-    const changes = [{ op: 'setLimit', endpoint: 'local', parallel: 2 }];
+    const changes = [{ op: 'setLimit', model: 'local/qwen', parallel: 2 }];
     const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
     fake.answers.confirm.push(true);
     const dir = path.join(root, '.agents');
@@ -279,7 +355,7 @@ describe('pi /subzero init', () => {
     const root = makeProject();
     const { fake, tool, text, initActive } = await session(root);
     await fake.command('subzero', 'init');
-    const changes = [{ op: 'setLimit', endpoint: 'local', parallel: 2 }];
+    const changes = [{ op: 'setLimit', model: 'local/qwen', parallel: 2 }];
     const { fingerprint } = JSON.parse(text(await tool('subzero_init_preview', { changes })));
     const edited = `${readFileSync(agentFile(root), 'utf8')}# edited while the dialog was open\n`;
     (fake.context as any).ui.confirm = async () => {
@@ -498,12 +574,12 @@ describe('pi /subzero init', () => {
     cpSync(original, viaCli, { recursive: true });
     cpSync(original, viaPi, { recursive: true });
 
-    const flags = ['--tier', 'small=local/qwen-tiny:low', '--tier', 'large=cloud/big:high', '--tier', 'medium=local/qwen2:medium', '--limit', 'local=2'];
+    const flags = ['--tier', 'small=local/qwen-tiny:low', '--tier', 'large=cloud/big:high', '--tier', 'medium=local/qwen2:medium', '--limit', 'local/qwen2=2'];
     const changes = [
       { op: 'setTier', tier: 'small', model: 'local/qwen-tiny', thinking: 'low' },
       { op: 'setTier', tier: 'large', model: 'cloud/big', thinking: 'high' },
       { op: 'setTier', tier: 'medium', model: 'local/qwen2', thinking: 'medium' },
-      { op: 'setLimit', endpoint: 'local', parallel: 2 },
+      { op: 'setLimit', model: 'local/qwen2', parallel: 2 },
     ];
 
     const out: string[] = [];
@@ -514,7 +590,8 @@ describe('pi /subzero init', () => {
     };
     expect(await cli('config', 'preview', ...flags)).toBe(0);
     const { fingerprint: cliFingerprint } = JSON.parse(out[0]!);
-    expect(await cli('config', 'apply', '--expect', cliFingerprint, ...flags)).toBe(0);
+    const applied = await cli('config', 'apply', '--expect', cliFingerprint, ...flags);
+    expect(applied, out.join('')).toBe(0);
 
     const { fake, tool, text } = await session(viaPi);
     await fake.command('subzero', 'init');

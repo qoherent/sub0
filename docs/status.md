@@ -1,8 +1,10 @@
 # subzero: implementation status
 
-Status as of 2026-11-12 on branch `feat/pi-parent-extension`. The pi parent,
-Claude cancellation paths and background completion fallback are implemented.
-The real two-parent acceptance checks in the plan remain to be run by a person.
+Status as of 2026-11-23 on branch `docs/v0.2-continue-steering`. The pi parent,
+Claude cancellation paths, background completion fallback, guided init, the
+global config file and v0.2 (`continue` with steering on both parents, parallel
+limits per model) are implemented. The live acceptance checks of the v0.2 plan
+and the real two-parent acceptance checks remain to be run by a person.
 
 This page compares what is built with what the design asks for. It has two
 sources that do different jobs:
@@ -16,10 +18,13 @@ sources that do different jobs:
 
 **Versions.** v0.1 is the preview release (`0.1.0-preview.N`): the spike, tiered
 routing and the plugin distribution, which is what this repository builds
-today. v0.2 starts the task model with `continue` and `ask`, and the later
-milestones follow the phasing in decisions.md.
+today. Some later work is built already: the pi parent (planned for v0.3), and
+guided init and the global config file (part of the old v0.2). v0.2 was narrowed
+on 2026-11-23 to `continue` with steering on both parents and parallel limits
+per model (decisions 35–60 in decisions.md), and is built on this branch; the
+later milestones follow the phasing there.
 
-The three plans in [plans/](plans/) record what each piece of work set out to
+The plans in [plans/](plans/) record what each piece of work set out to
 do, what it deferred, and how it was checked.
 
 ## At a glance
@@ -28,10 +33,13 @@ do, what it deferred, and how it was checked.
 |---|---|
 | Sigil contract (13 components) | Both parent adapters and the Claude plugin commands have implementing code. `sigil check .` reports no diagnostics. |
 | Claude Code parent, pi child | Built and checked live with Claude Code 2.1.318 and pi 0.87. |
+| pi parent, pi child | Built (planned for v0.3, done early). The two-parent acceptance checks are still to be run by a person. |
+| Guided init and the global config file | Built: `init` with no model in both parents, `~/.agents/subzero.yaml` under the project file, `enabled: false`, pi extensions for every pi run. Init now asks a limit per model and repairs an `endpoints:` file. |
 | Tiered subagent routing for compound-engineering | Built and accepted in the R17 live run and its probes. |
 | Plugin distribution (`subzero@qoherent`) | Built and tested locally. A previous `plugin` branch is published; these changes and the pi package branch have not been published. The release workflow, first tag and model-backed walkthroughs are still to do. |
-| Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing and no go/no-go decision has been written. |
-| v0.2 and later (task model, config layering, other hosts) | Not started. |
+| Spike experiment (A/B on sigil-evaluate) | Partly run. Planned passes are missing; the go decision for v0.2 is written (2026-11-23). |
+| v0.2 (`continue` with steering, parallel limits per model) | Built on both parents: `continue` and `subzero_continue`, steering, turns, waits that end when the user types, `models.parallel`. Documented in the README and the configuration reference. Not yet done: the live acceptance checks of [the plan](plans/2026-11-23-2054-feat-continue-steering-model-limits-plan.md) (a person runs them on both parents) and the `sigil-align` run on the eight components (the orchestrator runs it). |
+| v0.3 and later (the rest of the task model, other hosts) | Not started. |
 
 The test suite, typecheck and release build are run locally for this branch.
 
@@ -42,23 +50,26 @@ The test suite, typecheck and release build are run locally for this branch.
 | Component | Design | Code | What it covers |
 |---|---|---|---|
 | Kernel | [kernel.sigil](../design/kernel.sigil) | `src/kernel/` | Child drivers registered by host, parent adapter names; the child port, attach command, session export, starter tools and prerequisites check of a host. |
-| TaskCore | [task-core.sigil](../design/task-core.sigil) | `src/core/` | Task, run and result shapes, the launch spec, task ids, result shaping (whole, never cut). |
-| AgentConfig | [agent-config.sigil](../design/agent-config.sigil) | `src/config/` | `.agents/subzero.yaml`: `models.tiers`, `general` and `fallback` agents, `endpoints` with `parallel`, `routing`, load and unknown-agent errors, `init`'s starter entries. |
-| DelegationService | [delegation-service.sigil](../design/delegation-service.sigil) | `src/service/` | Project root, start-up sweep, agent lookup per delegation, live task registry, per-endpoint parallel limit (queued vs started), status and result wording. |
-| TaskStore | [task-store.sigil](../design/task-store.sigil) | `src/store/` | `.agents/subzero/` (owner-only, self-ignoring), `index.jsonl`, task records, `abandoned` status. |
-| PiDriver | [pi-driver.sigil](../design/pi-driver.sigil) | `src/pi/` | `pi --mode rpc` with skill isolation (`--no-skills --skill`, `-ne`, `-nc`), skill verification, timeouts, typed failures, cancel, attach, HTML export, `pi --version` prerequisite check. |
-| ClaudeMcpServer | [claude-mcp-server.sigil](../design/claude-mcp-server.sigil) | `src/mcp/` | Four MCP tools (`delegate`, `tasks`, `await`, `cancel`), progress notifications, the 48,000-character reply budget, parent session id per session. It reports the `package.json` version, which the build stamps into the bundle. |
-| PiExtension | [pi-extension.sigil](../design/pi-extension.sigil) | `src/pi-parent/` | pi as a second parent host: `subagent`, `subzero_await`, `subzero_tasks`, `subzero_cancel`, `/subzero`, `/subzero init` with its run-scoped init tools, and a session core for each pi session. |
+| TaskCore | [task-core.sigil](../design/task-core.sigil) | `src/core/` | Task, turn and result shapes, the launch spec, task ids, result shaping (whole, never cut). A task is a list of turns; each turn has its message, its run and its result. |
+| AgentConfig | [agent-config.sigil](../design/agent-config.sigil) | `src/config/` | `.agents/subzero.yaml`: `models.tiers`, `models.parallel` (limits keyed by full model id, a null value removing an inherited one), `general` and `fallback` agents, `routing`, load and unknown-agent errors, the `endpoints:` load error with its repair data, `init`'s starter entries. |
+| DelegationService | [delegation-service.sigil](../design/delegation-service.sigil) | `src/service/` | Project root, start-up sweep, agent lookup per delegation, live task registry, per-model parallel limit counted per turn (queued vs started), `continue` (held, steered or new turn), takeover of another process's task, status and result wording. |
+| TaskStore | [task-store.sigil](../design/task-store.sigil) | `src/store/` | `.agents/subzero/` (owner-only, self-ignoring), `index.jsonl`, task records, one store file per turn, `abandoned` status. |
+| PiDriver | [pi-driver.sigil](../design/pi-driver.sigil) | `src/pi/` | `pi --mode rpc` with skill isolation (`--no-skills --skill`, `-ne`, `-nc`), skill verification, timeouts (restarted by each delivered steering message), typed failures, cancel, `steer`, session resume for a new turn, attach, HTML export, `pi --version` prerequisite check. |
+| ClaudeMcpServer | [claude-mcp-server.sigil](../design/claude-mcp-server.sigil) | `src/mcp/` | Five MCP tools (`delegate`, `tasks`, `await`, `continue`, `cancel`), waits that end when a prompt marker or call marker shows the user typed, progress notifications, the 48,000-character reply budget, parent session id per session. It reports the `package.json` version, which the build stamps into the bundle. |
+| PiExtension | [pi-extension.sigil](../design/pi-extension.sigil) | `src/pi-parent/` | pi as a second parent host: `subagent`, `subzero_await`, `subzero_continue`, `subzero_tasks`, `subzero_cancel`, a message typed during a wait ends it, the notice after a reload or resume, `/subzero`, `/subzero init` with its run-scoped init tools, and a session core for each pi session. |
 | ClaudePluginCommands | [claude-plugin-commands.sigil](../design/claude-plugin-commands.sigil) | `skills/cancel/` | The user-only `/subzero:cancel` plugin skill. |
-| ClaudeRoutingHooks | [claude-routing-hooks.sigil](../design/claude-routing-hooks.sigil) | `src/routing/` | SessionStart routing text; PreToolUse redirect on `Agent\|Task` with readiness marker, deny memory, pass-back, fork and `isolation` exemptions. |
-| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `config`, `run`, `tasks`, `attach`, `show`. |
+| ClaudeRoutingHooks | [claude-routing-hooks.sigil](../design/claude-routing-hooks.sigil) | `src/routing/` | SessionStart routing text; PreToolUse redirect on `Agent\|Task` with readiness marker, deny memory, pass-back, fork and `isolation` exemptions; the UserPromptSubmit prompt hook and the PreToolUse call markers keyed by tool-use id that end a waited call early. |
+| Cli | [cli.sigil](../design/cli.sigil) | `src/cli/` | `subzero init`, `config` (with `--limit <model>=<n>` and `--no-limit <model>`), `run`, `tasks`, `attach`, `show`. |
 | SigilWiring | [sigil-wiring.sigil](../design/sigil-wiring.sigil) | `examples/sigil/` | The agent file and README of the sigil experiment. |
 | SpikeHarness | [spike-harness.sigil](../design/spike-harness.sigil) | `bench/`, [spike-results.md](spike-results.md) | The measurement harness, scorer and results table. |
 
 Each source file names the component it implements in an `@sigil implements`
 line. A conformance review (the `sigil-align` skill) was last run on Kernel,
 PiDriver, TaskCore and Cli for the prerequisites check (2026-11-10). The other
-components were last reviewed during the tiered routing work.
+components were last reviewed during the tiered routing work. The v0.2 changes
+have not been reviewed yet: `sigil-align` on TaskCore, TaskStore, PiDriver,
+DelegationService, ClaudeMcpServer, ClaudeRoutingHooks, PiExtension and
+AgentConfig is still to run (the orchestrator runs it).
 
 ### By plan
 
@@ -67,6 +78,7 @@ components were last reviewed during the tiered routing work.
 | [Spike](plans/2026-11-02-1109-feat-subzero-spike-plan.md) | U1–U8 | U1–U7 done. U8 (the comparison and the decision) is partly done; see below. |
 | [Tiered subagent routing](plans/2026-11-06-0953-feat-tiered-subagent-routing-plan.md) | U0–U6 | Done. The R17 acceptance run and its probes are in [spike-results.md](spike-results.md). Decision 24 (results are never cut) replaced the plan's `await` share. |
 | [Plugin distribution](plans/2026-11-10-1355-feat-claude-plugin-distribution-plan.md) | U1–U7 | U1–U6 done. U7 (the acceptance walkthroughs) is not run. |
+| [v0.2: continue, steering, limits per model](plans/2026-11-23-2054-feat-continue-steering-model-limits-plan.md) | U1–U13 | Built, with docs (U13 steps 1 and 2). Pending: `sigil-align` (U13 step 3) and the live acceptance checks of its Verification Contract, which a person runs on both parents. |
 
 The distribution work added:
 - the Apache-2.0 license and version `0.1.0-preview.1`;
@@ -83,10 +95,6 @@ The distribution work added:
 ## What is left
 
 ### 1. To finish the current work
-
-- Deny-memory cleanup uses per-session operating-system locks so it cannot
-  remove a denial while another hook uses that session. A missing `lockf`
-  (macOS) or `flock` (Linux) makes the hook allow the Agent call through.
 
 **Release (distribution plan U7 and the transfer)**
 - Stage 1 walkthrough: install from `dist-release/local-marketplace` on a clean
@@ -118,7 +126,7 @@ The distribution work added:
 **Guided init (2026-11-16)**
 - `/subzero:init` with no model in Claude Code and `/subzero init` in pi run the
   same guided setup: they list the child host's models, suggest a model for
-  `small`, `medium` and `large`, ask each endpoint's `parallel` limit, offer a
+  `small`, `medium` and `large`, ask each model's `parallel` limit, offer a
   one-turn reachability check, and write `.agents/subzero.yaml` only after the
   user confirms subzero's diff. `init <model>` stays as the quick path.
 - One setup service serves both parents. Claude Code reaches it through the
@@ -155,7 +163,7 @@ The distribution work added:
 - The manual review-quality table is empty.
 - In the plumbing checks, several live checks are still "pending": R3, the
   orphan check of R4, R5, the attach check of R7, and R9 and R10.
-- The go/no-go paragraph for v0.2 is empty. The user writes it.
+- The go/no-go decision for v0.2 is written: go, in the narrowed scope (2026-11-23).
 
 **Small loose end**
 - The demo files name the `r9700` endpoint on purpose. The R17 run used a
@@ -169,13 +177,25 @@ These are listed on the install page and are not fixed:
   the `general` agent, which can write files and run commands inside pi.
 - The general agent works outside Claude Code's permission prompts; git is the
   only record of what it changed.
-- The parallel limit and the queue are per Claude Code session.
+- The parallel limit and the queue are per process, and a limit belongs to one
+  model id.
+- A message submitted before a waited call started does not end it. After
+  `/clear` the Claude Code server can follow the old session id for up to 5
+  seconds, so a message typed then may not end a wait. A waited call made inside
+  a Claude Code subagent never ends early.
+- A model with no `models.parallel` entry has no limit, including the model of
+  a continued task.
+- A held message whose steer answer arrives more than a second after its run
+  ended is counted as not delivered, even if pi took it.
 - If the MCP server fails to start, the session-start text still says routing is
   on, and every subagent runs on Claude.
+- The routing hook needs `lockf` (macOS) or `flock` (Linux) for its per-session
+  locks. Without it every Agent call goes through to Claude; the session-start
+  text then says routing is off and names the missing utility.
 - Worktree-isolated and fork spawns always stay on Claude.
 - The agent file is not gated by a trust step (design.md §4.2 asks for one).
-- pi is the only child host, Claude Code the only parent, and Windows is not
-  supported.
+- pi is the only child host, Claude Code and pi are the only parents, and
+  Windows is not supported.
 
 ### 3. Deferred by the plans
 
@@ -183,12 +203,12 @@ From the tiered routing plan:
 - a worktree mode for `delegate`, so worktree-isolated spawns can route;
 - a plain model id on `delegate` beside tiers;
 - cancelling several tasks in one call;
-- an endpoint queue shared across Claude sessions;
+- a model queue shared across processes;
 - per-host tool lists, to decide when a second host exists;
 - a use for parent adapter names beyond refusing a duplicate;
 - a server-verified pass-back permit;
 - a hook-side host check;
-- tiers in a user-level config file.
+- tiers in a user-level config file (built since: the global file).
 
 From the distribution plan:
 - automatic installation of pi (the guided `/subzero:setup` it also deferred is
@@ -201,20 +221,40 @@ From the distribution plan:
 
 ### 4. The rest of the design (v0.2 and later)
 
-The spike plan left these out on purpose. They come from design.md and the
-phasing in decisions.md, and none of them is built.
+None of this is built. The phasing is in decisions.md ("Suggested phasing"),
+narrowed on 2026-11-23.
 
-**v0.2**
-- The rest of the task model: `continue` (with respawn), `ask` (read-only probe
-  fork), `fork`, `rerun` and the report (design.md §3.5, §6.3). The MCP server
-  has four of the six tools in §5.1 (`continue` and `ask` are missing), and
-  `delegate` has no `from` input.
+**v0.2** (built; acceptance pending)
+- `continue` with steering on both parents: one tool (`continue` on Claude
+  Code, `subzero_continue` on pi) that holds a message for a task that has not
+  started, steers a running task and starts a new turn on a settled one, for
+  the tasks of the current parent session. One result per turn. A message
+  the user types during a subzero wait ends the wait early, on both parents.
+  Decisions 35–47, 49–51, 54, 55, 57 and 58–60.
+- Parallel limits per model: `models.parallel` keyed by model id replaces
+  `endpoints:`, which is a load error that guided init repairs. Decisions 48,
+  52, 53 and 56.
+- Checked on pi 1.5.2 (2026-11-23): the session relaunch, late `steer`
+  delivery and `/reload` session ids behave as the contracts need (see the end
+  of the v0.2 decisions). Probed on Claude Code 2.1.322 (2026-11-23): a
+  `UserPromptSubmit` hook fires when the user types during a blocking MCP call
+  (see spike-results.md), so a waited call on Claude Code ends early when the
+  user types, as on pi (decision 57).
+- Still to do: the live acceptance checks of the plan's Verification Contract,
+  which a person runs on each parent with a reachable model (steer a running
+  task, continue a finished one, type during a waited `await` from the main
+  conversation and from inside a subagent, a limit of 1 across two tiers on one
+  model), and `sigil-align` on the eight components, which the orchestrator runs.
+
+**v0.3** (to be split when v0.2 ships)
+- The rest of the task model: `ask` (read-only probe fork), `fork`, `rerun`
+  and the report (design.md §3.5, §6.3); `delegate` has no `from` input.
 - The other CLI commands of §6.3: `report`, `ask`, `continue`, `fork`, `rerun`,
-  `logs` and `prune`, plus `subzero validate` and `subzero config`.
-- Config layering (§4.1): `subzero.local.yaml`, `~/.agents/subzero.yaml`, skill
-  manifests (`agents/subzero.yaml` in a skill, D17), `enabled: false`.
+  `logs` and `prune`, plus `subzero validate`.
+- The rest of config layering (§4.1): `subzero.local.yaml` and skill manifests
+  (`agents/subzero.yaml` in a skill, D17).
 - Skill sources and pinning: git sources and `subzero.lock` (D13).
-- Endpoint fields `base_url`, `api` and `api_key`; today pi's own `models.json`
+- Model server fields `base_url`, `api` and `api_key`; today pi's own `models.json`
   holds the server.
 - The repo trust step for `.agents/subzero.yaml` (§4.2).
 - Permissions mapped to the host (`read-only`, `workspace-write`, `full`, D8)
@@ -226,11 +266,7 @@ phasing in decisions.md, and none of them is built.
   `host: inline` agents.
 - Nested delegation with `delegates:` and `maxDepth` (D14).
 - sigil-write as the second workload.
-- A Codex child driver.
-
-**v0.3**
-- A Claude child driver.
-- The pi parent extension and the Codex parent plugin.
+- A Codex child driver, a Claude child driver and the Codex parent plugin.
 
 **v0.4**
 - A generic ACP child driver.
@@ -238,7 +274,8 @@ phasing in decisions.md, and none of them is built.
 - Structured outputs on every host.
 - Compiling to native features where it pays (D12).
 
-**Product goals not yet met** ([problem.md](problem.md)): a parent in Codex and
-in pi (G3 and the first success criterion); a definition shipped with a skill
-(G1); follow-up, rerun, resume and fork of a task (G4). G2 and G5 hold for the
-Claude Code to pi pair.
+**Product goals not yet met** ([problem.md](problem.md)): a parent in Codex
+(G3 and the first success criterion; the pi parent is built); a definition
+shipped with a skill (G1); follow-up, rerun, resume and fork of a task (G4;
+follow-up is built in v0.2). G2 and G5 hold for the Claude Code to pi pair; the pi to
+pi pair awaits its acceptance checks.

@@ -1,9 +1,11 @@
 @design/task-core.sigil from TaskCore import {
   child driver, child port, attach command, session export, starter tools,
+  turn steering, session resume,
   prerequisites check, model listing, model check,
 }
 @design/delegation-service.sigil from DelegationService import {
   delegation, session cancel, completion notice, stop notice, guided setup,
+  continuation,
 }
 
 component Kernel {
@@ -62,9 +64,9 @@ component Kernel {
     it must not replace the first child driver.
 
     A parent adapter must reach the core only through the delegation of
-    DelegationService and the task operations it offers, such as collect,
-    cancel, session cancel, the completion notice, the stop notice, listing
-    and the guided setup,
+    DelegationService and the task operations it offers, such as the
+    continuation, collect, cancel, session cancel, the completion notice, the
+    stop notice, listing and the guided setup,
     and
     through
     AgentConfig
@@ -84,7 +86,8 @@ component Kernel {
     No core service may name a particular child driver or parent adapter, or
     import
     from one. A core service reaches a child driver only through the child port
-    that Kernel provides for a child host, and the attach command, the
+    that Kernel provides for a child host, and the turn steering, the
+    session resume, the attach command, the
     session export,
     the starter tools, the prerequisites check, the model listing and the
     model check that it offers.
@@ -149,7 +152,7 @@ component Kernel {
     child driver for the same child host.
 
     Provide the child port of the child driver registered for a child host, and
-    its
+    its turn steering, its session resume, its
     attach command, its session export, its starter tools, its
     prerequisites check, its model listing and its model check when that
     child driver offers them, and return an error

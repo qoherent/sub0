@@ -56,20 +56,13 @@ describe('generic spawn test', () => {
 describe('routing text', () => {
   const textFor = (root: string) => buildRoutingText(wordTiers(routableTiers(root)));
 
-  it('omits the await choreography when task mode is on', () => {
-    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), true);
-    expect(text).toMatch(/completed tasks deliver their results/i);
-    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
-    expect(text).toMatch(/one message/);
-    expect(text).toMatch(/every completion notice/);
+  it('always dispatches in the background and collects with the await loop, whether or not a readiness marker is known', () => {
+    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))));
+    expect(text).toMatch(/\(tier, brief\) in one message; it runs in the background/);
+    expect(text).not.toMatch(/wait: false/);
+    expect(text).toMatch(/timeout_s: 600/);
     expect(text).toMatch(/await reply[^\n]*not show[^\n]*tasks/i);
-  });
-
-  it('uses mode-neutral instructions when no readiness marker is known', () => {
-    const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))), null);
-    expect(text).toMatch(/if it returns a task id, collect it/i);
-    expect(text).not.toMatch(/wait: false|timeout_s: 600/);
-    expect(text).toMatch(/one message/);
+    expect(text).not.toMatch(/completed tasks deliver their results|if it returns a task id/i);
   });
 
   it('AE1: with only medium configured, sends mid-tier to delegate and keeps the other tier words on Claude', () => {
@@ -82,11 +75,11 @@ describe('routing text', () => {
     expect(text).not.toContain('tier: "large"');
   });
 
-  it('names the full tool id, the wait false then await batch pattern and the launch-equals-start rule', () => {
+  it('names the full tool id, the background then await batch pattern and the launch-equals-start rule', () => {
     const text = textFor(project(config('medium')));
     expect(DELEGATE_TOOL).toBe('mcp__plugin_subzero_subzero__delegate');
     expect(text).toContain('mcp__plugin_subzero_subzero__delegate');
-    expect(text).toMatch(/wait: false/);
+    expect(text).toMatch(/runs in the background/);
     expect(text).toMatch(/one message/);
     expect(text).toMatch(/await[^\n]*tasks[^\n]*timeout_s: 600/);
     expect(text).toMatch(/until (every|all)/);
@@ -132,8 +125,15 @@ describe('routingContext', () => {
     expect(routingContext(project())).toBeUndefined();
   });
 
+  it('keeps the repair command in the SessionStart warning for a file that still holds endpoints:', () => {
+    const warning = routingContext(project(`endpoints:\n  local:\n    parallel: 1\n${config('medium')}`));
+    expect(warning).toMatch(/routing is off/);
+    expect(warning).toContain('endpoints');
+    expect(warning).toContain('init');
+  });
+
   it('warns when the medium tier is missing from a file that exists', () => {
-    expect(routingContext(project('endpoints: {}\n'))).toMatch(/routing is off/);
+    expect(routingContext(project('skills: {}\n'))).toMatch(/routing is off/);
     expect(routingContext(project(config()))).toMatch(/medium/);
     expect(routingContext(project(`models:\n  tiers:\n${tier('default', 'local/d')}`))).toMatch(/medium/);
   });
@@ -149,6 +149,18 @@ describe('routingContext', () => {
     expect(text).toContain('tier: "medium"');
     expect(text).toContain('model local/gm');
     expect(text).toContain('model local/gl');
+  });
+
+  it('warns that routing is off, naming the utility, when the deny lock utility is missing', () => {
+    const routed = project(`models:\n  tiers:\n${tier('medium', 'local/m')}`);
+    const text = routingContext(routed, () => false);
+    expect(text).toMatch(/^subzero routing is off: the (lockf|flock) utility is not installed/);
+    expect(text).not.toContain(DELEGATE_TOOL);
+    expect(routingContext(routed, () => true)).toContain('tier: "medium"');
+  });
+
+  it('adds nothing for a project that is off, even when the deny lock utility is missing', () => {
+    expect(routingContext(project(), () => false)).toBeUndefined();
   });
 
   it('returns nothing with no project file and no global medium', () => {

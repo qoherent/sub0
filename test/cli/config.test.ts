@@ -86,19 +86,19 @@ describe('subzero config', () => {
         ['small', 'project'],
         ['cloud', 'project'],
       ]);
-      expect(doc.state.limits).toEqual([expect.objectContaining({ endpoint: 'local', source: 'project' })]);
+      expect(doc.state.limits).toEqual([expect.objectContaining({ model: 'local/qwen', source: 'project' })]);
       expect(doc.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
     });
 
     it('show prints the global file\'s own value of an overridden tier and limit as `global`', async () => {
-      useGlobalConfig(`endpoints:\n  local:\n    parallel: 3\n${GLOBAL_MEDIUM_YAML}`);
+      useGlobalConfig(GLOBAL_MEDIUM_YAML.replace('models:\n', 'models:\n  parallel:\n    local/qwen: 3\n'));
       const { run, json } = global(makeProject());
       expect(await run('config', 'show')).toBe(0);
       const doc = json();
       const byTier = (name: string) => doc.state.tiers.find((t: { tier: string }) => t.tier === name);
       expect(byTier('medium')).toMatchObject({ source: 'project', global: { host: 'pi', model: 'local/global-medium', thinking: 'low' } });
       expect(byTier('small')).not.toHaveProperty('global');
-      expect(doc.state.limits).toEqual([expect.objectContaining({ endpoint: 'local', source: 'project', global: { parallel: 3 } })]);
+      expect(doc.state.limits).toEqual([expect.objectContaining({ model: 'local/qwen', source: 'project', global: { parallel: 3 } })]);
     });
 
     it('preview --scope global prints the overridden list for a project that overrides the tier', async () => {
@@ -165,7 +165,7 @@ describe('subzero config', () => {
   it('preview prints the diff, summary and fingerprint without touching the file', async () => {
     const root = tempDir();
     const { run, json } = cli(root);
-    expect(await run('config', 'preview', '--tier', 'medium=local/q:medium', '--limit', 'local=1')).toBe(0);
+    expect(await run('config', 'preview', '--tier', 'medium=local/q:medium', '--limit', 'local/q=1')).toBe(0);
     const doc = json();
     expect(doc).toMatchObject({ ok: true, fileExists: false, nothingToChange: false, refusals: [] });
     expect(doc.fingerprint).toEqual(expect.any(String));
@@ -173,7 +173,7 @@ describe('subzero config', () => {
     expect(doc.summary.length).toBeGreaterThan(0);
     expect(doc.changes).toEqual([
       { op: 'setTier', tier: 'medium', model: 'local/q', thinking: 'medium' },
-      { op: 'setLimit', endpoint: 'local', parallel: 1 },
+      { op: 'setLimit', model: 'local/q', parallel: 1 },
     ]);
     expect(doc.text).toBeUndefined();
     expect(existsSync(agentFile(root))).toBe(false);
@@ -187,17 +187,37 @@ describe('subzero config', () => {
 
   it('carries --unset and --no-limit into the change set', async () => {
     const { run, json } = cli(makeProject());
-    expect(await run('config', 'preview', '--unset', 'cloud', '--no-limit', 'local')).toBe(0);
+    expect(await run('config', 'preview', '--unset', 'cloud', '--no-limit', 'local/qwen')).toBe(0);
     expect(json().changes).toEqual([
       { op: 'unsetTier', tier: 'cloud' },
-      { op: 'clearLimit', endpoint: 'local' },
+      { op: 'clearLimit', model: 'local/qwen' },
     ]);
+  });
+
+  it('parses a limit model id containing a colon, splitting the limit at the last equals sign', async () => {
+    const { run, json } = cli(tempDir());
+    expect(await run('config', 'preview', '--tier', 'medium=local/qwen-coder:30b:medium', '--limit', 'local/qwen-coder:30b=2', '--no-limit', 'local/other:7b')).toBe(0);
+    const doc = json();
+    expect(doc.changes).toEqual([
+      { op: 'setTier', tier: 'medium', model: 'local/qwen-coder:30b', thinking: 'medium' },
+      { op: 'clearLimit', model: 'local/other:7b' },
+      { op: 'setLimit', model: 'local/qwen-coder:30b', parallel: 2 },
+    ]);
+    expect(doc.refusals).toEqual([]);
+    expect(doc.diff).toMatch(/\+    local\/qwen-coder:30b: 2/);
+  });
+
+  it('refuses a --limit with no model or no number as a usage error', async () => {
+    for (const bad of ['=2', 'local/q', 'local/q=', 'local/q=two', 'local/q=0']) {
+      const { run } = cli(tempDir());
+      expect(await run('config', 'preview', '--limit', bad)).toBe(2);
+    }
   });
 
   it('apply with the previewed flags and fingerprint writes the file', async () => {
     const root = tempDir();
     const { run, json } = cli(root);
-    const flags = ['--tier', 'medium=local/q:medium', '--limit', 'local=1'];
+    const flags = ['--tier', 'medium=local/q:medium', '--limit', 'local/q=1'];
     expect(await run('config', 'preview', ...flags)).toBe(0);
     const { fingerprint, diff } = json();
     expect(await run('config', 'apply', '--expect', fingerprint, ...flags)).toBe(0);
@@ -205,7 +225,7 @@ describe('subzero config', () => {
     expect(doc).toMatchObject({ ok: true, written: true, diff });
     expect(doc.text).toBeUndefined();
     expect(resolveAgent(loadCatalog(root, { starterAgents: PLACEHOLDER_STARTER_AGENTS }), 'general')).toMatchObject({ host: 'pi', model: 'local/q', thinking: 'medium' });
-    expect(readFileSync(agentFile(root), 'utf8')).toMatch(/parallel: 1/);
+    expect(readFileSync(agentFile(root), 'utf8')).toMatch(/local\/q: 1/);
   });
 
   it('apply with a stale fingerprint exits 1, prints the reason and leaves the file unchanged', async () => {

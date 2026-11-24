@@ -173,7 +173,7 @@ describe('SetupService.show', () => {
     expect(shown.listingError).toBeUndefined();
     if (shown.state.status === 'refused') throw new Error('unexpected refused state');
     const listed = Object.fromEntries(shown.state.tiers.map((t) => [t.tier, t.listed]));
-    expect(listed).toMatchObject({ default: true, medium: true, small: false, large: false });
+    expect(listed).toMatchObject({ default: true, medium: true, small: true, large: false });
     expect(shown.state.tiers.find((t) => t.tier === 'far')).toMatchObject({ otherHost: true });
     expect(JSON.parse(JSON.stringify(shown))).toEqual(shown);
   });
@@ -213,7 +213,7 @@ describe('SetupService.show', () => {
       ['small', 'project'],
       ['cloud', 'project'],
     ]);
-    expect(shown.state.limits.map((l) => [l.endpoint, l.source])).toEqual([['local', 'project']]);
+    expect(shown.state.limits.map((l) => [l.model, l.source])).toEqual([['local/qwen', 'project']]);
     expect(shown.state.overridden).toEqual({ tiers: ['medium'], limits: [] });
     // The global file's own medium rides on the overridden tier; a tier only one layer holds carries none.
     expect(shown.state.tiers.map((t) => [t.tier, t.global])).toEqual([
@@ -223,6 +223,34 @@ describe('SetupService.show', () => {
       ['cloud', undefined],
     ]);
     expect(shown.state.limits.map((l) => l.global)).toEqual([undefined]);
+  });
+
+  it('shows an endpoints: file as repairable with each entry, its limit, its file and its covered models', async () => {
+    const root = makeProject(`endpoints:\n  local:\n    parallel: 2\nmodels:\n  tiers:\n    medium: { host: pi, model: local/a, thinking: low }\n    small: { host: pi, model: local/b, thinking: low }\n`);
+    const { service } = fakePiService(root);
+    const shown = await service.show();
+    expect(shown.state).toMatchObject({
+      status: 'repairable',
+      endpoints: [{ endpoint: 'local', parallel: 2, scope: 'project', models: ['local/a', 'local/b'] }],
+    });
+    expect(JSON.parse(JSON.stringify(shown))).toEqual(shown);
+  });
+
+  it('shows the repair of the global file first when it holds endpoints:', async () => {
+    const global = useGlobalConfig(`endpoints:\n  local:\n    parallel: 3\n${GLOBAL_MEDIUM_YAML}`);
+    const { service } = fakePiService(makeProject(DEFAULT_YAML));
+    const shown = await service.show();
+    expect(shown.state).toMatchObject({ status: 'repair-other-first', repairFirst: { scope: 'global', file: global } });
+  });
+
+  it('previews and applies the repair of the global file through the service, then the project step', async () => {
+    const global = useGlobalConfig(`endpoints:\n  local:\n    parallel: 3\n${GLOBAL_MEDIUM_YAML}`);
+    const root = makeProject(DEFAULT_YAML);
+    const { service } = fakePiService(root);
+    const repair = service.preview([], 'global');
+    expect(repair).toMatchObject({ scope: 'global', agentFile: global, refusals: [], prefilled: [{ model: 'local/global-medium', parallel: 3 }] });
+    expect(service.apply([], repair.fingerprint, 'global').written).toBe(true);
+    expect((await service.show()).state.status).toBe('ok');
   });
 
   it('reports no file for a project without an agent file', async () => {

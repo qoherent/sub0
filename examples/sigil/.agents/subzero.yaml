@@ -7,14 +7,12 @@ skills:
   sigil-understand: ../skills/sigil-understand
   sigil-egglog: ../skills/sigil-egglog
 
-endpoints:
-  # One local GPU serves one request at a time. The limit holds only among the
-  # child runs of one process.
-  r9700:
-    parallel: 1
-
 # What runs a child lives here and never in an agent: host, model and thinking.
 models:
+  # One local GPU serves one request at a time, whatever tier names the model.
+  # The limit holds only among the child runs of one process.
+  parallel:
+    r9700/Qwen3.8: 1
   tiers:
     medium:
       host: pi

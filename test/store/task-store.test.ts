@@ -23,7 +23,7 @@ function setup(options: { owner?: { pid: number; startTime: string }; alive?: Re
   });
   const agent = getAgent(root, 'helper');
   const create = (taskId: string, parentSessionId?: string) =>
-    store.createTaskRecord({ taskId, agent, brief: 'b', endpoint: agent.endpoint, createdAt: new Date().toISOString(), ...(parentSessionId ? { parentSessionId } : {}) });
+    store.createTaskRecord({ taskId, agent, brief: 'b', model: agent.model, createdAt: new Date().toISOString(), ...(parentSessionId ? { parentSessionId } : {}) });
   return { root, store, warnings, create };
 }
 
@@ -141,32 +141,32 @@ describe('TaskStore', () => {
     expect(existsSync(path.join(store.taskDir('sz-eeeeee'), 'events.jsonl'))).toBe(true);
   });
 
-  it('keeps the endpoint and enqueue time from the first write and the start time once it is written, with the status still running', () => {
+  it('keeps the model and enqueue time from the first write and the start time once it is written, with the status still running', () => {
     const { store, create } = setup();
     create('sz-qqqqqa');
     const queued = store.readTask('sz-qqqqqa')!;
-    expect(queued).toMatchObject({ status: 'running', endpoint: 'local' });
+    expect(queued).toMatchObject({ status: 'running', model: 'local/qwen' });
     expect(queued.createdAt).toBe(queued.task!.createdAt);
     expect(queued.startedAt).toBeUndefined();
-    expect(queued.task!.endpoint).toBe('local');
+    expect(queued.task!.model).toBe('local/qwen');
 
-    store.writeStartTime('sz-qqqqqa', '2026-01-01T00:00:05.000Z');
+    store.writeStartTime('sz-qqqqqa', '2026-01-01T00:00:05.000Z', 1);
     const started = store.readTask('sz-qqqqqa')!;
-    expect(started).toMatchObject({ status: 'running', endpoint: 'local', startedAt: '2026-01-01T00:00:05.000Z', createdAt: queued.createdAt });
+    expect(started).toMatchObject({ status: 'running', model: 'local/qwen', startedAt: '2026-01-01T00:00:05.000Z', createdAt: queued.createdAt });
     // The settled line that follows keeps what the first lines wrote.
     store.writeResult('sz-qqqqqa', result('sz-qqqqqa'));
-    expect(store.readTask('sz-qqqqqa')).toMatchObject({ status: 'completed', endpoint: 'local', startedAt: '2026-01-01T00:00:05.000Z' });
+    expect(store.readTask('sz-qqqqqa')).toMatchObject({ status: 'completed', model: 'local/qwen', startedAt: '2026-01-01T00:00:05.000Z' });
   });
 
   it('shows the start time in a listing of a second process, and a task without one stays running there', () => {
     const { root, store, create } = setup();
     create('sz-qqqqqb');
     create('sz-qqqqqc');
-    store.writeStartTime('sz-qqqqqb', '2026-01-01T00:00:05.000Z');
+    store.writeStartTime('sz-qqqqqb', '2026-01-01T00:00:05.000Z', 1);
     const second = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
     const views = new Map(second.list().map((v) => [v.taskId, v]));
-    expect(views.get('sz-qqqqqb')).toMatchObject({ status: 'running', startedAt: '2026-01-01T00:00:05.000Z', endpoint: 'local' });
-    expect(views.get('sz-qqqqqc')).toMatchObject({ status: 'running', endpoint: 'local' });
+    expect(views.get('sz-qqqqqb')).toMatchObject({ status: 'running', startedAt: '2026-01-01T00:00:05.000Z', model: 'local/qwen' });
+    expect(views.get('sz-qqqqqc')).toMatchObject({ status: 'running', model: 'local/qwen' });
     expect(views.get('sz-qqqqqc')!.startedAt).toBeUndefined();
   });
 
@@ -176,6 +176,296 @@ describe('TaskStore', () => {
     const later = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
     expect(later.readTask('sz-qqqqqd')!.status).toBe('running');
     expect(later.sweep()).toEqual(['sz-qqqqqd']);
-    expect(later.readTask('sz-qqqqqd')).toMatchObject({ status: 'abandoned', endpoint: 'local' });
+    expect(later.readTask('sz-qqqqqd')).toMatchObject({ status: 'abandoned', model: 'local/qwen' });
+  });
+
+  describe('turns', () => {
+    it('covers R21: a v0.1 record whose turns/1.json is a bare result lists as completed turn 1', () => {
+      const { root, store, create } = setup();
+      create('sz-vvvvvv');
+      store.writeResult('sz-vvvvvv', result('sz-vvvvvv'));
+      // Rewrite the turn file the way v0.1 wrote it: the bare result and nothing else.
+      writeFileSync(path.join(store.taskDir('sz-vvvvvv'), 'turns', '1.json'), JSON.stringify(result('sz-vvvvvv')));
+      const fresh = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
+      expect(fresh.readTurns('sz-vvvvvv')).toMatchObject([{ turn: 1, result: { taskId: 'sz-vvvvvv', status: 'completed' } }]);
+      expect(fresh.readTask('sz-vvvvvv')).toMatchObject({ status: 'completed', turn: 1, result: { summary: 's' } });
+      expect(fresh.list().find((t) => t.taskId === 'sz-vvvvvv')).toMatchObject({ status: 'completed', turn: 1 });
+    });
+
+    it('reads a task settled at turn 1 with turn 2 opened as running, and lists turn 2\'s enqueue time, not turn 1\'s start time', () => {
+      const { store, create } = setup();
+      create('sz-tttttt');
+      store.writeStartTime('sz-tttttt', '2026-01-01T00:00:05.000Z', 1);
+      store.writeResult('sz-tttttt', result('sz-tttttt'));
+      expect(store.claimTurn('sz-tttttt', 2, { message: 'more', enqueuedAt: '2026-01-01T01:00:00.000Z' })).toBe(true);
+      const view = store.list().find((t) => t.taskId === 'sz-tttttt')!;
+      expect(view).toMatchObject({ status: 'running', turn: 2, enqueuedAt: '2026-01-01T01:00:00.000Z' });
+      expect(view.startedAt).toBeUndefined();
+      // Turn 1's file is untouched, and the record reads the latest turn.
+      expect(store.readTurns('sz-tttttt').map((t) => [t.turn, t.result?.status])).toEqual([[1, 'completed'], [2, undefined]]);
+      store.writeStartTime('sz-tttttt', '2026-01-01T01:00:03.000Z', 2);
+      expect(store.readTask('sz-tttttt')).toMatchObject({ status: 'running', turn: 2, startedAt: '2026-01-01T01:00:03.000Z', result: null });
+      store.writeResult('sz-tttttt', { ...result('sz-tttttt', 'failed'), turn: 2 });
+      expect(store.readTask('sz-tttttt')).toMatchObject({ status: 'failed', turn: 2, result: { turn: 2 } });
+      expect(store.readTurns('sz-tttttt')[0]!.result!.status).toBe('completed');
+    });
+
+    it('answers the second exclusive create of a turn as taken, and the loser writes no index line, so the winner stays the owner', () => {
+      const winner = setup({ owner: { pid: process.pid, startTime: 'now' } });
+      winner.create('sz-cccccc');
+      winner.store.writeResult('sz-cccccc', result('sz-cccccc'));
+      const loser = new TaskStore(winner.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: 4242, startTime: 'other' } });
+      expect(winner.store.claimTurn('sz-cccccc', 2, { message: 'a', enqueuedAt: 't1' })).toBe(true);
+      const lines = readFileSync(winner.store.indexPath, 'utf8').split('\n').filter(Boolean).length;
+      expect(loser.claimTurn('sz-cccccc', 2, { message: 'b', enqueuedAt: 't2' })).toBe(false);
+      expect(readFileSync(winner.store.indexPath, 'utf8').split('\n').filter(Boolean).length).toBe(lines);
+      expect(loser.readTurns('sz-cccccc')[1]).toMatchObject({ turn: 2, message: 'a', owner: { pid: process.pid } });
+      expect(loser.readTask('sz-cccccc')!.owner).toEqual({ pid: process.pid, startTime: 'now' });
+    });
+
+    it('lets a takeover claim make the new owner\'s sweep leave the running turn alone, and the dead old owner no longer mark it abandoned', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-oooooo');
+      dead.store.writeResult('sz-oooooo', result('sz-oooooo'));
+      const newcomer = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      expect(newcomer.claimTurn('sz-oooooo', 2, { message: 'again', enqueuedAt: 't' })).toBe(true);
+      expect(newcomer.readTask('sz-oooooo')!.owner).toEqual({ pid: process.pid, startTime: 'now' });
+      expect(newcomer.sweep()).toEqual([]);
+      expect(newcomer.readTask('sz-oooooo')!.status).toBe('running');
+    });
+
+    it('marks a task abandoned when the owner of its running turn 2 is dead, although turn 1 holds a result', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-aaaaab');
+      dead.store.writeResult('sz-aaaaab', result('sz-aaaaab'));
+      dead.store.claimTurn('sz-aaaaab', 2, { message: 'm', enqueuedAt: 't' });
+      const later = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      expect(later.sweep()).toEqual(['sz-aaaaab']);
+      expect(later.readTask('sz-aaaaab')).toMatchObject({ status: 'abandoned', turn: 2 });
+    });
+
+    it('marks abandoned, once, a turn 2 that a dead process claimed before writing its running line, so the listing and the task agree', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-uuuuuu', 'p1');
+      dead.store.writeResult('sz-uuuuuu', result('sz-uuuuuu'));
+      // The claim's exclusive create, without the running line that follows it.
+      (dead.store as unknown as { createTurnFile(id: string, turn: number, opened: object): boolean }).createTurnFile('sz-uuuuuu', 2, { message: 'm', enqueuedAt: 't' });
+      const later = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      expect(later.readLatest().get('sz-uuuuuu')).toMatchObject({ status: 'completed' });
+      expect(later.sweep()).toEqual(['sz-uuuuuu']);
+      expect(later.readTask('sz-uuuuuu')).toMatchObject({ status: 'abandoned', turn: 2 });
+      expect(later.readLatest().get('sz-uuuuuu')).toMatchObject({ status: 'abandoned', turn: 2 });
+      expect(later.sweep()).toEqual([]);
+    });
+
+    it('leaves alone a turn file newer than the index line while its claiming process lives', () => {
+      const live = setup();
+      live.create('sz-vvvvvv');
+      live.store.writeResult('sz-vvvvvv', result('sz-vvvvvv'));
+      (live.store as unknown as { createTurnFile(id: string, turn: number, opened: object): boolean }).createTurnFile('sz-vvvvvv', 2, { message: 'm', enqueuedAt: 't' });
+      expect(live.store.sweep()).toEqual([]);
+      expect(live.store.readTask('sz-vvvvvv')).toMatchObject({ status: 'running', turn: 2 });
+    });
+
+    it('appends no abandoned line for a turn another process claimed while the sweep was deciding', () => {
+      const dead = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      dead.create('sz-rrrrra');
+      const taker = new TaskStore(dead.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: process.pid, startTime: 'now' } });
+      let claimed = false;
+      const racing: ProcessProbe = {
+        startTime: (pid) => {
+          if (pid === process.pid) return 'now';
+          // The takeover lands after the sweep read the turn files and before it appends.
+          if (!claimed) { claimed = true; taker.claimTurn('sz-rrrrra', 2, { message: 'm', enqueuedAt: 't' }); }
+          return null;
+        },
+      };
+      const sweeper = new TaskStore(dead.root, { probe: racing, owner: { pid: process.pid, startTime: 'now' } });
+      expect(sweeper.sweep()).toEqual([]);
+      expect(sweeper.readTask('sz-rrrrra')).toMatchObject({ status: 'running', turn: 2 });
+      expect(sweeper.readLatest().get('sz-rrrrra')).toMatchObject({ status: 'running', turn: 2 });
+    });
+
+    it('creates no turn file for a stop reason of a turn that has none, so a settled task stays settled', () => {
+      const { store, create, warnings } = setup();
+      create('sz-sssssa');
+      store.writeResult('sz-sssssa', result('sz-sssssa'));
+      store.writeStopReason('sz-sssssa', 2, 'session_end');
+      expect(store.readTurn('sz-sssssa', 2)).toBeNull();
+      expect(store.readTask('sz-sssssa')).toMatchObject({ status: 'completed', turn: 1 });
+      expect(warnings.join('\n')).toMatch(/no turn 2 of sz-sssssa/);
+    });
+
+    it('marks the other tasks when one task cannot be checked, and warns about it', () => {
+      const first = setup({ owner: { pid: DEAD, startTime: 'then' } });
+      first.create('sz-ppppa1');
+      const second = new TaskStore(first.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: DEAD + 1, startTime: 'then' } });
+      second.createTaskRecord({ taskId: 'sz-ppppa2', agent: getAgent(first.root, 'helper'), brief: 'b', createdAt: new Date().toISOString() });
+      const warned: string[] = [];
+      const breaking: ProcessProbe = {
+        startTime: (pid) => {
+          if (pid === process.pid) return 'now';
+          if (pid === DEAD + 1) throw new Error('probe broke');
+          return null;
+        },
+      };
+      const sweeper = new TaskStore(first.root, { probe: breaking, owner: { pid: process.pid, startTime: 'now' }, warn: (m) => warned.push(m) });
+      expect(sweeper.sweep()).toEqual(['sz-ppppa1']);
+      expect(warned.join('\n')).toMatch(/could not check sz-ppppa2: probe broke/);
+    });
+
+    it('keeps the agent name when a claim finds no index line for the task', () => {
+      const { root, store, create } = setup();
+      create('sz-aaaaan');
+      writeFileSync(path.join(root, '.agents', 'subzero', 'index.jsonl'), '');
+      expect(store.claimTurn('sz-aaaaan', 2, { message: 'm', enqueuedAt: 't' })).toBe(true);
+      expect(store.readLatest().get('sz-aaaaan')!.agent).toBe('helper');
+    });
+
+    it('returns only events of the kinds asked for, even when another event holds that kind inside it', () => {
+      const { store, create } = setup();
+      create('sz-eeeeek');
+      store.appendEvent('sz-eeeeek', { kind: 'tool_activity', phase: 'start', tool: 'bash', nested: { kind: 'prompt_sent' } } as never, 1);
+      expect(store.readEvents('sz-eeeeek', ['prompt_sent'])).toEqual([]);
+      expect(store.promptWasSent('sz-eeeeek')).toBe(false);
+    });
+
+    it('keeps the latest owner line and the first line\'s creation time', () => {
+      const first = setup({ owner: { pid: 111, startTime: 'one' } });
+      first.create('sz-llllla', 'parent-1');
+      const created = first.store.readLatest().get('sz-llllla')!.createdAt;
+      first.store.writeResult('sz-llllla', result('sz-llllla'));
+      const second = new TaskStore(first.root, { probe: probe({ [process.pid]: 'now' }), owner: { pid: 222, startTime: 'two' } });
+      second.claimTurn('sz-llllla', 2, { message: 'm', enqueuedAt: 't' });
+      const line = second.readLatest().get('sz-llllla')!;
+      expect(line.owner).toEqual({ pid: 222, startTime: 'two' });
+      expect(line.createdAt).toBe(created);
+      expect(line.parentSessionId).toBe('parent-1');
+    });
+
+    it('writes and reads the collected marker of each turn, and a fresh reader counts only marked turns as collected', () => {
+      const { root, store, create } = setup();
+      create('sz-mmmmmm');
+      store.writeResult('sz-mmmmmm', result('sz-mmmmmm'));
+      store.claimTurn('sz-mmmmmm', 2, { message: 'm', enqueuedAt: 't' });
+      store.writeResult('sz-mmmmmm', { ...result('sz-mmmmmm'), turn: 2 });
+      expect(store.uncollectedTurns('sz-mmmmmm').map((t) => t.turn)).toEqual([1, 2]);
+      store.markCollected('sz-mmmmmm', 1);
+      store.markCollected('sz-mmmmmm', 1);
+      const fresh = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
+      expect(fresh.isCollected('sz-mmmmmm', 1)).toBe(true);
+      expect(fresh.isCollected('sz-mmmmmm', 2)).toBe(false);
+      expect(fresh.uncollectedTurns('sz-mmmmmm').map((t) => t.turn)).toEqual([2]);
+    });
+
+    it('keeps the tier in task.json and shows it on a task loaded from its record', () => {
+      const { store } = setup();
+      store.createTaskRecord({ taskId: 'sz-tiertt', agent: getAgent(setup().root, 'helper'), brief: 'b', tier: 'small', createdAt: new Date().toISOString() });
+      expect(store.readTask('sz-tiertt')!.task!.tier).toBe('small');
+    });
+
+    it('records the opening message, replayed messages, start time and stop reason in the turn file', () => {
+      const { store, create } = setup();
+      create('sz-ffffff');
+      store.writeResult('sz-ffffff', result('sz-ffffff'));
+      store.claimTurn('sz-ffffff', 2, { message: 'now', replayed: ['old one', 'old two'], enqueuedAt: 't' });
+      store.writeStartTime('sz-ffffff', 'start', 2);
+      store.writeStopReason('sz-ffffff', 2, 'session_end');
+      expect(store.readTurns('sz-ffffff')[1]).toMatchObject({ turn: 2, message: 'now', replayed: ['old one', 'old two'], enqueuedAt: 't', startedAt: 'start', stopReason: 'session_end' });
+    });
+    it('lists a record of an earlier version, whose index line has no turn number, as turn 1', () => {
+      const { root, store } = setup();
+      mkdirSync(path.join(store.taskDir('sz-oldold'), 'turns'), { recursive: true });
+      writeFileSync(path.join(store.taskDir('sz-oldold'), 'turns', '1.json'), JSON.stringify(result('sz-oldold')));
+      appendFileSync(store.indexPath, JSON.stringify({ taskId: 'sz-oldold', agent: 'helper', status: 'completed', childSession: 'sz-oldold', createdAt: 't', updatedAt: 't' }) + '\n');
+      const fresh = new TaskStore(root, { probe: probe({ [process.pid]: 'now' }) });
+      expect(fresh.list().find((t) => t.taskId === 'sz-oldold')).toMatchObject({ status: 'completed', turn: 1 });
+    });
+
+    it('lets a session file stand in for a prompt sent event only in a record of an earlier version', () => {
+      const { root, store, create } = setup();
+      create('sz-newnew');
+      mkdirSync(store.sessionsFolder, { recursive: true });
+      writeFileSync(path.join(store.sessionsFolder, '2026_sz-newnew.jsonl'), '');
+      writeFileSync(path.join(store.sessionsFolder, '2026_sz-oldold.jsonl'), '');
+      // This version's record: the driver made the session file before its prompt, which proves nothing.
+      expect(store.promptWasSent('sz-newnew')).toBe(false);
+      store.appendEvent('sz-newnew', { kind: 'prompt_sent' }, 1);
+      expect(store.promptWasSent('sz-newnew')).toBe(true);
+      // A record of an earlier version has a bare turn file and no prompt sent event.
+      mkdirSync(path.join(store.taskDir('sz-oldold'), 'turns'), { recursive: true });
+      writeFileSync(path.join(store.taskDir('sz-oldold'), 'turns', '1.json'), JSON.stringify(result('sz-oldold')));
+      expect(new TaskStore(root).promptWasSent('sz-oldold')).toBe(true);
+    });
+
+    it('marks a turn released with the brief as its prompt, and a stopped turn as reported, in files that are never removed', () => {
+      const { store, create } = setup();
+      create('sz-bbbbbb');
+      store.writeBriefPrompt('sz-bbbbbb', 1);
+      expect(store.readTurns('sz-bbbbbb')[0]).toMatchObject({ turn: 1, briefPrompt: true });
+      store.claimTurn('sz-bbbbbb', 2, { message: 'm', enqueuedAt: 't', briefPrompt: true });
+      expect(store.readTurns('sz-bbbbbb')[1]).toMatchObject({ turn: 2, message: 'm', briefPrompt: true });
+      store.markReported('sz-bbbbbb', 2);
+      store.markReported('sz-bbbbbb', 2);
+      expect(store.isReported('sz-bbbbbb', 2)).toBe(true);
+    });
+
+    it('gives the messages of a turn that never sent its prompt: replayed, opening, held, then those queued in the log', () => {
+      const { store, create } = setup();
+      create('sz-undeli');
+      store.writeResult('sz-undeli', result('sz-undeli'));
+      store.claimTurn('sz-undeli', 2, { message: 'now', replayed: ['old one'], heldMessages: ['held one'], enqueuedAt: 't' });
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'queued two', outcome: 'queued' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'steered', outcome: 'steered' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'follow_up_message', text: 'other turn', outcome: 'queued' }, 1);
+      const turn = store.readTurn('sz-undeli', 2)!;
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['old one', 'now', 'held one', 'queued two']);
+      // A prompt sent by another turn does not count. One sent by this turn carried the first message;
+      // the others went to steering afterwards and count as delivered only once their answer is on record.
+      store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 1);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toHaveLength(4);
+      store.appendEvent('sz-undeli', { kind: 'prompt_sent' }, 2);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['now', 'held one', 'queued two']);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'now', answer: 'delivered' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'queued two', answer: 'settled' }, 2);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'held one', answer: 'delivered' }, 1);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual(['held one']);
+      store.appendEvent('sz-undeli', { kind: 'held_message_handled', text: 'held one', answer: 'delivered' }, 2);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-undeli'))).toEqual([]);
+    });
+
+    it('matches repeated held texts one answer for one message, and counts the heldMessages of a turn opened for held messages', () => {
+      const { store, create } = setup();
+      create('sz-rep');
+      store.writeResult('sz-rep', result('sz-rep'));
+      store.claimTurn('sz-rep', 2, { viaHeld: true, message: 'first', heldMessages: ['again', 'again'], enqueuedAt: 't' });
+      store.appendEvent('sz-rep', { kind: 'prompt_sent' }, 2);
+      const turn = store.readTurn('sz-rep', 2)!;
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-rep'))).toEqual(['again', 'again']);
+      store.appendEvent('sz-rep', { kind: 'held_message_handled', text: 'again', answer: 'delivered' }, 2);
+      expect(store.undeliveredMessages(turn, store.readEvents('sz-rep'))).toEqual(['again']);
+    });
+
+    it('parses only the log lines of the kinds asked for', () => {
+      const { store, create } = setup();
+      create('sz-kinds0');
+      store.appendEvent('sz-kinds0', { kind: 'prompt_sent' }, 1);
+      store.appendEvent('sz-kinds0', { kind: 'follow_up_message', text: 'hello', outcome: 'queued' }, 1);
+      appendFileSync(path.join(store.taskDir('sz-kinds0'), 'events.jsonl'), '{"kind":"prompt_sent", broken\n');
+      expect(store.readEvents('sz-kinds0').map((e) => e.kind)).toEqual(['prompt_sent', 'follow_up_message']);
+      expect(store.readEvents('sz-kinds0', ['prompt_sent']).map((e) => e.kind)).toEqual(['prompt_sent']);
+      expect(store.readEvents('sz-kinds0', ['follow_up_message', 'prompt_sent']).map((e) => e.kind)).toEqual(['prompt_sent', 'follow_up_message']);
+      expect(store.readEvents('sz-kinds0', ['run_started'])).toEqual([]);
+    });
+
+    it('reads the owner of the latest turn from that turn file alone', () => {
+      const { store, create } = setup({ owner: { pid: 111, startTime: 'one' } });
+      expect(store.latestTurnOwner('sz-noturn')).toBeUndefined();
+      create('sz-ownerr');
+      store.writeResult('sz-ownerr', result('sz-ownerr'));
+      expect(store.latestTurnOwner('sz-ownerr')).toEqual({ pid: 111, startTime: 'one' });
+      new TaskStore(path.dirname(path.dirname(store.storeFolder)), { owner: { pid: 222, startTime: 'two' }, probe: probe({ 222: 'two' }) }).claimTurn('sz-ownerr', 2, { message: 'm', enqueuedAt: 't' });
+      expect(store.latestTurnOwner('sz-ownerr')).toEqual({ pid: 222, startTime: 'two' });
+    });
   });
 });

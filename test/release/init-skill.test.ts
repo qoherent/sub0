@@ -116,13 +116,43 @@ describe('the shared guided-init guide', () => {
 
   it('says before the confirm that a global-scope change is checked against this project only', () => {
     const preview = flat(GUIDE.split('### 8. Preview and confirm')[1]?.split('### 9.')[0] ?? '');
-    expect(preview).toMatch(/checked against this project only; another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
+    expect(preview).toMatch(/checked against this project only; another project whose agents use a tier you remove, or whose own limit belongs to a model you move away from, may fail to load until it is fixed/);
     expect(preview.indexOf('checked against this project only')).toBeLessThan(preview.indexOf('Write this to'));
   });
 
   it('tells the user a switched-off project cannot run guided setup', () => {
     const show = flat(GUIDE.split('### 1.')[1]?.split('### 2.')[0] ?? '');
     expect(show).toMatch(/refused[^-]*When the refusal is `enabled: false`, this project is switched off, so guided setup cannot run here: the user can run init from another project, or edit the global file by hand/);
+  });
+
+  it('maps the limit flags to models, with a model id that holds a colon', () => {
+    expect(flat(SKILL)).toMatch(/`--limit <model>=<n>`, for example `--limit local\/qwen-coder:30b=2`; the limit is the digits after the last `=`/);
+    expect(flat(SKILL)).toMatch(/`--no-limit <model>`/);
+    expect(SKILL).not.toMatch(/--limit <endpoint>|--no-limit <endpoint>/);
+  });
+
+  it('asks the limit of every model, not every endpoint, pre-filled with the old endpoints value', () => {
+    const limits = flat(GUIDE.split('### 6.')[1]?.split('### 7.')[0] ?? '');
+    expect(limits).toMatch(/^ ?Ask a parallel limit for each model in use/);
+    expect(limits).toMatch(/Tiers that name the same model share one limit, so ask once per model/);
+    expect(limits).toMatch(/A model the old `endpoints:` map covered\*\* defaults to the old limit of that entry/);
+    expect(limits).not.toMatch(/Two pi providers that point at the same server still count as two endpoints/);
+    expect(flat(GUIDE)).not.toMatch(/ask a parallel limit for each endpoint|for each endpoint the chosen tiers use/i);
+  });
+
+  it('repairs endpoints: in the other file first, in a step of its own with its own confirmation, and ends when declined', () => {
+    const repair = flat(GUIDE.split('### 2a.')[1]?.split('### 3.')[0] ?? '');
+    expect(repair).toMatch(/When an entry's `scope` is not the chosen scope, repair that file first, in a step of its own with its own preview and its own confirmation/);
+    expect(repair).toMatch(/with the old limit as the default and "no limit" as the other answer/);
+    expect(repair).toMatch(/removes the `endpoints:` map from that file and shows the removal in its diff/);
+    expect(repair).toMatch(/When the user declines a repair step\*\*, nothing is written and the init ends/);
+    const show = flat(GUIDE.split('### 1.')[1]?.split('### 2.')[0] ?? '');
+    expect(show).toMatch(/`repair-other-first`: the file of the other scope holds `endpoints:`/);
+    expect(show).toMatch(/`repairable`: say what `problem` names[^-]*`endpoints`/);
+  });
+
+  it('groups the listed models by provider, not endpoint', () => {
+    expect(flat(GUIDE)).toMatch(/grouped by provider \(the part of the name before the first slash\)/);
   });
 
   it('no longer says a missing fallback agent is added on apply', () => {

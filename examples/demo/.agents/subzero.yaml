@@ -2,13 +2,11 @@
 skills:
   code-review: ../pi-skills/code-review
 
-endpoints:
-  # One local GPU serves one request at a time.
-  r9700:
-    parallel: 1
-
 # What runs a child lives here and never in an agent: host, model and thinking.
 models:
+  # One local GPU serves one request at a time, whatever tier names the model.
+  parallel:
+    r9700/Qwen3.8: 1
   tiers:
     default:
       host: pi

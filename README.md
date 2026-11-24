@@ -28,8 +28,9 @@ limits before you use it:
 - **pi is the only child host.** There is no Codex or Claude child yet.
 - **The general agent can write files and run shell commands inside pi, outside
   Claude Code's permission prompts.** Review what a routed subagent did with git.
-- **The queue is per session.** The `parallel` limit of an endpoint counts only the
-  children of one parent session, so two sessions do not wait for each other.
+- **The queue is per process.** The `parallel` limit of a model counts only the
+  children of one Claude Code or pi process, so two sessions do not wait for
+  each other.
 - **A cloned project's agent file (.agents/subzero.yaml) is executable-grade
   configuration (it chooses models, tools and can enable a general agent with
   shell access); use routing only in repositories you trust.**
@@ -57,7 +58,8 @@ Once your global file has a `medium` tier, subzero is on in every project; put
 - macOS or Linux. Windows is not supported in this preview.
 - The system `lockf` utility on macOS or `flock` on Linux. The Agent routing
   hook uses it to coordinate concurrent sessions; if it is unavailable, the
-  hook allows the Agent call through to Claude.
+  hook allows every Agent call through to Claude, and the text subzero adds at
+  session start says routing is off and names the missing utility.
 - `ps`, used to identify the parent session. Minimal Linux images may need the
   `procps` package.
 
@@ -114,7 +116,7 @@ This is guided setup. It first asks whether the models are for every project or
 only this one. Then it lists the models pi offers and suggests a model and a
 thinking level for each tier: `small`, `medium` and `large`. You choose each
 one; only `medium` is required. Then it asks how many children may run at once
-on each model server the chosen models use, and offers to check that each
+on each chosen model, and offers to check that each
 chosen model answers a one-turn prompt. Last it shows the change as a diff and
 writes it only after you confirm. Claude Code may ask you to allow its commands
 the first time. If pi is not installed, it says so and writes nothing.
@@ -228,7 +230,7 @@ The rules behind it:
   Claude writes, not your conversation, so say which files and what answer you
   want.
 - **Batches queue.** Several subagents at once go out together and wait for the
-  endpoint's `parallel` limit; `/subzero:tasks` shows each as queued or
+  model's `parallel` limit; `/subzero:tasks` shows each as queued or
   running.
 
 ### Named agents
@@ -275,7 +277,7 @@ Limits of named agents in this preview:
   shown to Claude, so only a request that names the agent runs it. A request
   that fits the description but does not name the agent goes to `general` (or
   stays on Claude), even when the description matches it word for word. Listing
-  agents for Claude is planned for v0.2.
+  agents for Claude is planned for a later version.
 - **A misspelled name runs `fallback`.** The reply starts with a notice that the
   agent is not configured and lists the configured agents. Without a `fallback`
   entry it is an error and no task is made.
@@ -284,17 +286,102 @@ Limits of named agents in this preview:
   the task as `skill_mismatch` before the child starts work.
 - **Skills are local folders only.** Git sources, a lock file, skills that ship
   their own agent definition, and a personal local override file are planned
-  for v0.2.
+  for a later version.
 - **The child copies the skill when it starts.** A task keeps the version of the
   skill it started with; an edit applies to the next task.
 - **`tools` is the only restriction on a child.** pi has no folder sandbox, so a
   child with `read` can read any file your user can, and one with `bash`,
   `edit` or `write` can change anything. There is no permission prompt.
-- **Each task is one turn.** You cannot continue a named agent's task or ask it
-  a follow-up question yet; a new request starts a new child. `continue` and
-  `ask` are planned for v0.2.
+- **You can continue a task but not ask it a read-only question.** `continue`
+  (below) sends a task more work. `ask`, a probe of a finished task that
+  changes nothing, is planned for a later version.
 - **The child sees only the brief.** It does not see your conversation, so the
   request must say which files and what answer you want.
+
+### Limit children per model
+
+A one-GPU model server usually runs one child at a time. Set that with
+`models.parallel`, keyed by the full model id, in the project file or the
+global file:
+
+```yaml
+models:
+  tiers:
+    small:  { host: pi, model: r9700/Qwen3.8, thinking: off }
+    medium: { host: pi, model: r9700/Qwen3.8, thinking: medium }
+  parallel:
+    r9700/Qwen3.8: 1
+```
+
+The limit belongs to the model id, so `small` and `medium` above share it and
+run one child at a time between them. It is counted per process. A model with
+no entry has no limit, which includes the model of a task you continue.
+Guided init asks the limit of each chosen model. A limit for a model that no
+tier uses is a load error in the project file and is ignored when it comes from
+the global file.
+
+**Behavior change:** the `endpoints:` key of earlier previews is gone. A file
+that holds it fails to load, with an error that lists each old limit and the
+models it covered. Run `/subzero:init` (or `/subzero init` in pi): it pre-fills
+each model's limit with the old value, shows the diff and writes only after you
+confirm. See [`models.parallel`](docs/configuration.md#modelsparallel-limits-per-model).
+
+### Continue a task and steer a running one
+
+`continue` (a Claude Code tool) and `subzero_continue` (a pi tool) take a task
+id and a message that makes sense on its own, because the child sees nothing
+else. What happens depends on the task:
+
+- **The child has not started** (queued or starting): the message is held and
+  delivered right after the task's prompt. A task that never started is
+  released with its brief.
+- **The child is running:** the message is steered into it. The task stays one
+  turn and gives one result, which reflects the message.
+- **The task has finished:** a new turn starts in the same child session, so
+  the child still has what it read and decided before. The new turn runs on
+  the task's own agent, model and thinking level, even if the config has
+  changed since.
+
+The reply says which of the three happened. Each turn returns one result, and
+from turn 2 the result names its turn. Collecting a task with `await` returns
+every turn you have not seen yet, oldest first, then the latest status line.
+
+Claude uses it on its own when you tell it something a running child needs, and
+you can ask for it: "tell the reviewer task also to check the tests". On Claude
+Code, a new turn runs in the background unless the call sets `wait: true`; on
+pi, `subzero_continue` does the same unless you pass `async: false`.
+
+Limits:
+- **Only tasks of the current conversation can be continued.** A task that
+  another process owns is taken over, unless its latest turn is still running
+  there.
+- **Time.** Each new turn gets the agent's full `timeout`, and each steering
+  message that reaches a running child restarts it. Nothing caps the total time
+  of a task.
+- **A new turn queues like any other.** It waits for the `parallel` limit of its
+  model as the agent file holds it then, and a model with no limit runs
+  unlimited.
+- **After a pi reload or resume,** the next turn of the model gets one notice
+  that lists the tasks the session end stopped and the messages that never
+  reached them.
+
+### A message you type ends a wait
+
+A parent can wait on a child: `delegate` or `continue` with `wait` true,
+`await`, or on pi a `subagent` call with `async: false`, `subzero_continue` or
+`subzero_await`. If you type a message during such a wait, the wait ends and
+Claude sees your message. The children keep running, and each one that is still
+running reports by a completion notice when it ends (on Claude Code, by a wake
+marker).
+
+- **pi:** any message typed during the wait ends it.
+- **Claude Code:** a hook records your message and the server follows it, for a
+  waited `delegate`, `continue` or `await` that the main conversation made. A
+  call made inside a Claude Code subagent never ends early, because your message
+  goes to the main conversation.
+- **A message submitted before the waited call started does not end it.**
+- **After `/clear`,** the server can keep following the old session id for up to
+  5 seconds, so a message typed in that window may not end a wait.
 
 ### What configuring a large tier changes
 
@@ -309,8 +396,9 @@ add it, know what moves:
   which compound-engineering chooses on purpose for its hardest lenses. With
   `large` configured they run on your model, so a weaker model can miss the
   findings these reviewers exist to catch.
-- **More children share one endpoint.** Every routed subagent waits for the
-  endpoint's `parallel` limit. With `parallel: 1`, a review that used to run its
+- **More children share one model.** Every routed subagent waits for the
+  model's `parallel` limit, and tiers that name the same model share it. With
+  a limit of 1, a review that used to run its
   session-model reviewers on Claude beside the routed ones now runs them all one
   after another on your model, and takes longer.
 - **The known limits reach more spawns.** Plan mode is still not respected, and

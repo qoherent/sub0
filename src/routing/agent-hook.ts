@@ -3,9 +3,13 @@
 // Thin entry of the PreToolUse hook on the Agent tool: reads the hook input, asks the
 // routing logic and prints a deny decision. Any error, missing input or malformed
 // stdin allows the spawn: exit 0 with no output.
+//
+// The same hook also sees subzero's own delegate, continue and await calls: for those
+// it records a call marker (the tool-use id, with the id of the subagent that made the
+// call, if any) and always allows the call.
 import { realpathSync } from 'node:fs';
-import { dataDir, setting } from '../mcp/parent-session.js';
-import { decideAgentSpawn, type SpawnInput } from './routing.js';
+import { dataDir, setting, writeCallMarker } from '../mcp/parent-session.js';
+import { AWAIT_TOOL, CONTINUE_TOOL, DELEGATE_TOOL, decideAgentSpawn, type SpawnInput } from './routing.js';
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -13,12 +17,20 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+const SUBZERO_TOOLS = new Set([DELEGATE_TOOL, CONTINUE_TOOL, AWAIT_TOOL]);
+
 let output = '';
 try {
-  const input = JSON.parse(await readStdin()) as { session_id?: unknown; tool_input?: unknown };
+  const input = JSON.parse(await readStdin()) as { session_id?: unknown; tool_input?: unknown; tool_name?: unknown; tool_use_id?: unknown; agent_id?: unknown };
   // Only CLAUDE_PROJECT_DIR names the project, the source of the server's SUBZERO_PROJECT_DIR.
   const project = setting(process.env.CLAUDE_PROJECT_DIR);
-  if (typeof input.session_id === 'string' && project && typeof input.tool_input === 'object' && input.tool_input !== null) {
+  if (typeof input.tool_name === 'string' && SUBZERO_TOOLS.has(input.tool_name)) {
+    if (project && typeof input.tool_use_id === 'string' && input.tool_use_id !== '') {
+      writeCallMarker(dataDir(process.env), realpathSync(project), input.tool_use_id, typeof input.agent_id === 'string' ? input.agent_id : undefined);
+    }
+  } else if (typeof input.tool_name === 'string' && input.tool_name !== 'Agent' && input.tool_name !== 'Task') {
+    // Any other tool is not the hook's concern: allow.
+  } else if (typeof input.session_id === 'string' && project && typeof input.tool_input === 'object' && input.tool_input !== null) {
     const decision = decideAgentSpawn(input.tool_input as SpawnInput, {
       projectRoot: realpathSync(project),
       dataDir: dataDir(process.env),

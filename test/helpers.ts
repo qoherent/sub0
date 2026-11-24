@@ -3,7 +3,16 @@ import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { onTestFinished, vi } from 'vitest';
-import { unavailableUsage, type ChildOutcome, type ChildPort, type StarterTools } from '../src/core/types.js';
+import {
+  unavailableUsage,
+  type ChildOutcome,
+  type ChildPort,
+  type ChildRun,
+  type ChildRunRequest,
+  type DomainEvent,
+  type SteerAnswer,
+  type StarterTools,
+} from '../src/core/types.js';
 import { Kernel } from '../src/kernel/kernel.js';
 import { PI_HOST, PiDriver, type PiDriverOptions } from '../src/pi/driver.js';
 
@@ -54,13 +63,12 @@ export const DEFAULT_YAML = `
 skills:
   alpha: ./skills/alpha
   beta: ./skills/beta
-endpoints:
-  local:
-    parallel: 1
 models:
+  parallel:
+    local/qwen: 1
   tiers:
     medium: { host: pi, model: local/qwen, thinking: high }
-    small: { host: pi, model: local/qwen-small, thinking: low }
+    small: { host: pi, model: local/qwen, thinking: low }
     cloud: { host: pi, model: cloud/model, thinking: low }
 agents:
   general:
@@ -75,13 +83,13 @@ agents:
     tools: [read, write]
     timeout: 30
   other:
-    description: Another helper on the same endpoint
+    description: Another helper, on a model with its own limit
     tier: small
     skills: [alpha]
     tools: [read]
     timeout: 30
   free:
-    description: An agent on an endpoint with no entry
+    description: An agent on a model with no limit
     tier: cloud
     skills: []
     tools: [read]
@@ -176,17 +184,84 @@ export function kernelWithPort(port: ChildPort, starterTools?: () => StarterTool
 }
 
 /** A child port that the test settles by hand, recording each start. */
-export function manualPort() {
-  const started: { taskId: string; settle: (o?: Partial<ChildOutcome>) => void }[] = [];
-  const port: ChildPort = {
-    start(request) {
-      let resolve!: (o: ChildOutcome) => void;
-      const outcome = new Promise<ChildOutcome>((r) => (resolve = r));
-      const settle = (o: Partial<ChildOutcome> = {}) =>
-        resolve({ lastAssistantText: 'ok', status: 'completed', usage: unavailableUsage('n/a'), ...o });
-      started.push({ taskId: request.taskId, settle });
-      return { outcome, cancel: () => settle({ status: 'cancelled' }) };
-    },
+/** One run a manual port started, which the test drives by hand. */
+export interface ManualRun {
+  taskId: string;
+  /** `start` for a first start or a release with the brief, `resume` for a resumed session. */
+  kind: 'start' | 'resume';
+  /** The brief of the request; for a resume, the message that is the prompt. */
+  brief: string;
+  prompt: string;
+  request: ChildRunRequest;
+  emit: (event: DomainEvent) => void;
+  settle: (o?: Partial<ChildOutcome>) => void;
+  cancelled: boolean;
+  /** The steering messages the run was given, in order. */
+  steers: string[];
+  /** What the run answers a steering message: a fixed answer, or a function of the message. */
+  steerAnswer: SteerAnswer | ((message: string) => SteerAnswer | Promise<SteerAnswer>);
+}
+
+export interface ManualPortOptions {
+  /** The port offers turn steering. */
+  steers?: boolean;
+  /** The port offers session resume; or a function that throws, such as SessionMissingError, to refuse. */
+  resume?: boolean | ((request: ChildRunRequest) => void);
+  /** A cancel only marks the run cancelled, so the test settles it, as a child whose turn ended first. */
+  lateCancel?: boolean;
+}
+
+/**
+ * A child port whose runs the test settles by hand. By default it offers neither steering nor
+ * resume, as a minimal driver; `started` and `runs` are the same list.
+ */
+export function manualPort(options: ManualPortOptions = {}) {
+  const started: ManualRun[] = [];
+  const begin = (kind: ManualRun['kind'], request: ChildRunRequest, prompt: string, onEvent: (e: DomainEvent) => void): ChildRun => {
+    let resolve!: (o: ChildOutcome) => void;
+    const outcome = new Promise<ChildOutcome>((r) => (resolve = r));
+    const run: ManualRun = {
+      taskId: request.taskId,
+      kind,
+      brief: request.brief,
+      prompt,
+      request,
+      emit: onEvent,
+      settle: (o: Partial<ChildOutcome> = {}) =>
+        resolve({ lastAssistantText: 'ok', status: 'completed', usage: unavailableUsage('n/a'), ...o }),
+      cancelled: false,
+      steers: [],
+      steerAnswer: 'delivered',
+    };
+    started.push(run);
+    return {
+      outcome,
+      cancel: () => {
+        run.cancelled = true;
+        if (options.lateCancel !== true) run.settle({ status: 'cancelled' });
+      },
+      ...(options.steers === true
+        ? {
+            async steer(message: string) {
+              const answer = typeof run.steerAnswer === 'function' ? await run.steerAnswer(message) : run.steerAnswer;
+              if (answer === 'delivered') run.steers.push(message);
+              return answer;
+            },
+          }
+        : {}),
+    };
   };
-  return { port, started };
+  const port: ChildPort = {
+    start: (request, onEvent) => begin('start', request, request.brief, onEvent),
+    ...(options.steers === true ? { steers: true } : {}),
+    ...(options.resume !== undefined && options.resume !== false
+      ? {
+          resume: (request: ChildRunRequest, message: string, onEvent: (e: DomainEvent) => void) => {
+            if (typeof options.resume === 'function') options.resume(request);
+            return begin('resume', request, message, onEvent);
+          },
+        }
+      : {}),
+  };
+  return { port, started, runs: started };
 }

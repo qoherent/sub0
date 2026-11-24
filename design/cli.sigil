@@ -243,8 +243,9 @@ component Cli {
     and apply, each with the option host, for the init command of the
     Claude Code parent host. Check takes one or more models, each written
     <model>:<thinking>. Preview and apply take a change set as repeated flags:
-    --tier <tier>=<model>:<thinking>, --unset <tier>, --limit <endpoint>=<n>
-    and --no-limit <endpoint>, with the option scope for the setup scope, and
+    --tier <tier>=<model>:<thinking>, --unset <tier>, --limit <model>=<n>
+    and --no-limit <model>, which set or remove the parallel limit of a whole
+    model, with the option scope for the setup scope, and
     apply also takes the preview fingerprint of that preview as --expect.
 
     Make the child session of a task, its transcript and its task record

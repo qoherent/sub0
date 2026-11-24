@@ -116,7 +116,34 @@ Plan: [docs/plans/2026-11-06-0953-feat-tiered-subagent-routing-plan.md](plans/20
 
 ## Decision
 
-_Written by the user, citing the table above: build subzero v0.2 or not, and why._
+**Go: build v0.2, in the narrowed scope of decisions 35–57 in [decisions.md](decisions.md)** (2026-11-23).
+The user made the decision; Claude drafted this text from the table above at the user's request.
+
+Why, from the table:
+
+- **Quality held where it could be scored.** B, with the interpreters on local Qwen3.8 through subzero, found
+  every planted problem in every pass where its anchor Facets were read (2/2, 2/2, 3/3, 3/3), the same as the one
+  A pass with Claude interpreters. A-cheap (Claude Haiku interpreters) missed one. B-low found the two problems it
+  read.
+- **The main conversation stayed clean.** Main-conversation tokens were about 64–66k in every arm, so delegating
+  the interpreters to pi added nothing to the main conversation (G2).
+- **The interpreter work left the paid model.** In B, 2.8–3.8M interpreter tokens ran on the local model instead
+  of Claude.
+- **The plumbing and routing work live.** The R17 acceptance run and its probes, the platform probes and the
+  2026-11-23 probes (pi 1.5.2 checks, the Claude Code prompt-hook probe) show the delegation, routing, queueing,
+  whole results and wake paths behave as designed.
+
+What argues for care, also from the table:
+
+- **B was slow and did not save evaluator tokens.** B passes took 2.2–3.4 hours against 4.5 minutes for A on one
+  local GPU (`parallel: 1`), and the Claude evaluator spent 2.3–3.6M tokens waiting and collecting against 1.2M in
+  A. The cost saving is in interpreter tokens only; wall time and evaluator overhead grew.
+- **The comparison is incomplete.** One A pass instead of three, no B-control pass, one B pass with unread
+  anchors, an empty manual review table, and plumbing checks R3–R5, R7, R9 and R10 still pending live.
+
+Long-running children like B's are where v0.2's `continue` with steering earns its place: a child that goes the
+wrong way can be corrected mid-run instead of cancelled and restarted. Parallel limits per model fit the
+one-GPU setup the spike used. The missing passes and live checks stay open, and v0.2 does not depend on them.
 
 ## Parent adapter platform probe (2026-11-12)
 
@@ -155,6 +182,23 @@ started another turn without a user prompt, and the second Stop hook ran. This
 confirms the hook wake mechanism for the fallback. The probe used only temporary
 files and did not install a hook in the project.
 
+On 2026-11-23, an interactive Claude Code 2.1.322 session in a scratch folder
+called a temporary local MCP tool that blocked for 60 seconds, and a person typed
+a message 10 seconds into the call without pressing Escape. A `UserPromptSubmit`
+hook fired at that moment (13:56:14 UTC), between the tool's start (13:56:04) and
+its end (13:57:04), and before `PostToolUse`. Its input carries the session id.
+So a hook does see a message typed during a blocking MCP call, at submit time.
+The probe did not check whether the hook can change what Claude sees mid-call; the
+message itself reached Claude after the tool returned.
+
+On 2026-11-23, a headless Claude Code 2.1.330 session in a scratch folder (a stub MCP server with one `ping` tool and
+a PreToolUse hook that logged its whole input) called the tool once from the main conversation and once from a
+subagent started with the Agent tool. The hook input of both calls carried `tool_use_id`, `session_id`, the tool name
+and its input; only the subagent call also carried `agent_id` and `agent_type` (`general-purpose`). The server
+received the same id in `params._meta["claudecode/toolUseId"]` of each `tools/call`, next to a `progressToken`. So a
+call marker can be keyed by the tool-use id, and the marker says whether the call came from a subagent. The check
+used temporary files only.
+
 The two-parent acceptance run in the pi parent plan is still pending. A person
 must check a real compound-engineering review and local child on pi, including
 notices, Escape, `/subzero cancel`, `/new`, and the shell task listing. On Claude
@@ -162,3 +206,42 @@ Code, the remaining checks cover background delivery, Escape during `await`,
 stopping one task, the 120-second boundary, `/subzero:cancel`, and `/clear`.
 The 2.1.322 probe above did not select MCP tasks, so it does not establish that
 delegations appear as MCP tasks in Claude's `/tasks` view.
+
+## v0.2 live acceptance (2026-11-24)
+
+A person ran the four live checks of the v0.2 plan on both parents: Claude Code
+2.1.331 with this branch loaded through `--plugin-dir`, and pi with the staged
+extension. The child model was `qoherent/qwen-flash-iq4` on the `small` and
+`medium` tiers, with `models.parallel: { qoherent/qwen-flash-iq4: 1 }` in the
+global file. Each check was confirmed against the task store and the plugin
+data folder, not only the parent's text.
+
+| Check | pi | Claude Code |
+|---|---|---|
+| Steer a running task | Pass: `sz-l5m3xg`, `follow_up_message … steered` after `prompt_sent`; the one result covered only the narrowed scope | Pass: `sz-prpifr`, two messages steered into turn 1; its result covered both |
+| Continue a finished task | Pass: `sz-2nvkku` turn 2, `new_turn`, same pi session file, no re-read of the file turn 1 read | Pass: `sz-prpifr` turn 2, `new_turn`, same session file; the answer cited turn 1's findings |
+| Typing ends a waited call | Pass: `subzero_await` returned the "you sent a message" note; the child kept running | Pass from the main conversation (`await` ended, wake marker armed, later cleared). Pass from a subagent: its call marker held an agent id and its `await` ran the full 300 s through a typed message |
+| One child at a time under `parallel: 1` | Pass: `sz-2nvkku` (medium) queued at 11:37:39 and started at 11:37:47, when `sz-m772qb` (small) finished | Pass: `sz-hhqu7v` queued at 11:33:13 and started at 11:33:25, when `sz-s54sr6` finished |
+
+Observations from the run:
+- Claude Code 2.1.331 steers its own background subagents with SendMessage, and
+  it moves a running tool call into the background when the user types. It then
+  reports that call as "MCP task … completed"; this is its own label, not
+  subzero's MCP tasks, which the server no longer offers (decision 61).
+- A slash command such as `/subzero:tasks` goes through the prompt hook, so it
+  ends a waited main-conversation call like a typed message does.
+- `/clear` stopped the previous conversation's running task, as designed.
+- A plain "run a subagent" spawn has no model, maps to the `large` tier and
+  stays on Claude when `large` is not configured.
+- A Claude Code session opened inside this repository also loads the plugin's
+  root `.mcp.json` as a project server named `subzero`, which fails because
+  `${CLAUDE_PLUGIN_ROOT}` is unset there. A subagent misreported that startup
+  failure as the plugin server dropping. Fixed afterwards: the server is now
+  declared inline in `.claude-plugin/plugin.json`, and the root `.mcp.json` is
+  gone.
+- On pi, a completion notice still arrived for a turn that a later
+  `subzero_await` had already returned (`sz-l5m3xg`, `sz-2nvkku`). The parent's
+  next `subzero_await` answered "already reached you", so nothing was lost, but
+  the notice cost a parent turn. Fixed afterwards: the notice now waits for
+  every running `subzero_await` of the task and is skipped for a turn one of
+  them returned.

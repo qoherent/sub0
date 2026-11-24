@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, uti
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { decideAgentSpawn, type HookContext, type SpawnInput } from '../../src/routing/routing.js';
-import { removeReadinessMarker, writeReadinessMarker } from '../../src/mcp/parent-session.js';
+import { readCallMarker, removeReadinessMarker, writeCallMarker, writeReadinessMarker } from '../../src/mcp/parent-session.js';
 import { GLOBAL_MEDIUM_YAML, isAlive, tempDir, until, useGlobalConfig } from '../helpers.js';
 
 const REPO = path.resolve(import.meta.dirname, '..', '..');
@@ -37,35 +37,24 @@ function setup(yaml: string | undefined, marker = true) {
 const spawnOf = (prompt: string, extra: Partial<SpawnInput> = {}): SpawnInput => ({ prompt, description: 'review things', ...extra });
 
 describe('decideAgentSpawn', () => {
-  it('uses a mode-neutral deny reason for a live marker without a task mode', () => {
+  it('ignores the task mode an older server wrote into its readiness marker: the deny reason is the same', () => {
     const { root, data, ctx } = setup(config(['medium']));
     const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
     const file = path.join(data, 'ready', key, `${process.pid}.json`);
-    const marker = JSON.parse(readFileSync(file, 'utf8'));
-    delete marker.taskMode;
-    writeFileSync(file, JSON.stringify(marker));
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), taskMode: true }));
     const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
     expect(out.decision).toBe('deny');
-    if (out.decision === 'deny') {
-      expect(out.reason).toMatch(/if it returns a task id, collect it/i);
-      expect(out.reason).not.toContain('wait: false');
-    }
+    if (out.decision === 'deny') expect(out.reason).toMatch(/prompt unchanged, then collect it with the await tool/);
   });
-  it('omits the await choreography when the matching server has task mode on', () => {
-    const { root, data, ctx } = setup(config(['medium']), false);
-    writeReadinessMarker(data, root, process.pid, process.ppid, true);
-    const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
-    expect(out.decision).toBe('deny');
-    if (out.decision === 'deny') expect(out.reason).not.toMatch(/wait: false|collect it with the await tool/);
-  });
-  it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and wait false', () => {
+  it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and the await tool', () => {
     const { ctx } = setup(config(['medium']));
     const out = decideAgentSpawn(spawnOf('do the review', { model: 'sonnet', subagent_type: 'general-purpose' }), ctx());
     expect(out.decision).toBe('deny');
     if (out.decision !== 'deny') return;
     expect(out.reason).toContain(DELEGATE);
     expect(out.reason).toContain('tier: "medium"');
-    expect(out.reason).toContain('wait: false');
+    expect(out.reason).toContain('collect it with the await tool');
+    expect(out.reason).not.toContain('wait: false');
     expect(out.reason).toContain('do the review');
     expect(out.reason).toMatch(/routing rule, not an error/);
     expect(out.reason).toMatch(/do not call Agent again/);
@@ -518,12 +507,12 @@ describe('built PreToolUse hook', () => {
 });
 
 describe('hooks.json and the server readiness marker', () => {
-  it('registers PreToolUse with matcher Agent|Task, pointing at a file that the build emits', () => {
+  it('registers PreToolUse with matcher Agent|Task and subzero tools, pointing at a file that the build emits', () => {
     const hooks = JSON.parse(execFileSync('cat', [path.join(REPO, 'hooks', 'hooks.json')]).toString()) as {
       hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
     };
     const entry = hooks.hooks.PreToolUse[0]!;
-    expect(entry.matcher).toBe('Agent|Task');
+    expect(entry.matcher.split('|')).toEqual(['Agent', 'Task', ...['delegate', 'continue', 'await'].map((t) => `mcp__plugin_subzero_subzero__${t}`)]);
     expect(entry.hooks[0]!.command).toContain('bin/subzero\" --bundle agent-hook');
     expect(existsSync(HOOK)).toBe(true);
   });
@@ -561,5 +550,76 @@ describe('hooks.json and the server readiness marker', () => {
     await exited;
     expect(markerDir()).toEqual([]);
     rmSync(data, { recursive: true, force: true });
+  });
+});
+
+describe('PreToolUse call markers for subzero tools', () => {
+  const AWAIT = 'mcp__plugin_subzero_subzero__await';
+
+  beforeAll(() => {
+    execFileSync(process.execPath, ['build.mjs'], { cwd: REPO });
+  });
+
+  function run(root: string, data: string, stdin: string): string {
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_PROJECT_DIR: root, CLAUDE_PLUGIN_DATA: data };
+    delete env.SUBZERO_DATA;
+    return execFileSync(process.execPath, [HOOK], { input: stdin, env }).toString();
+  }
+  const call = (extra: Record<string, unknown>) =>
+    JSON.stringify({ hook_event_name: 'PreToolUse', session_id: 's-1', tool_name: AWAIT, tool_input: { ids: ['sz-1'] }, ...extra });
+  const callsFolder = (data: string, root: string) =>
+    path.join(data, 'sessions', createHash('sha256').update(root).digest('hex').slice(0, 16), 'calls');
+
+  it('writes a call marker naming the subagent for an await call with an agent id, and allows the call', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    expect(run(root, data, call({ tool_use_id: 'toolu_01abc', agent_id: 'agent-7', agent_type: 'general-purpose' }))).toBe('');
+    expect(readCallMarker(data, root, 'toolu_01abc')).toEqual({ agentId: 'agent-7' });
+  });
+
+  it('writes a call marker with no agent for the same call from the main conversation, keyed by the tool-use id', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    expect(run(root, data, call({ tool_use_id: 'toolu_01main' }))).toBe('');
+    expect(readCallMarker(data, root, 'toolu_01main')).toEqual({});
+    expect(readdirSync(callsFolder(data, root))).toEqual(['toolu_01main.json']);
+    expect(readCallMarker(data, root, 'toolu_other')).toBeUndefined();
+  });
+
+  it('marks delegate and continue calls too', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    for (const tool of ['delegate', 'continue']) {
+      expect(run(root, data, call({ tool_name: `mcp__plugin_subzero_subzero__${tool}`, tool_use_id: `toolu_${tool}`, agent_id: 'a' }))).toBe('');
+      expect(readCallMarker(data, root, `toolu_${tool}`)).toEqual({ agentId: 'a' });
+    }
+  });
+
+  it('writes no marker and allows for an unrelated MCP tool or a call with no tool-use id', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    expect(run(root, data, call({ tool_name: 'mcp__other__await', tool_use_id: 'toolu_x' }))).toBe('');
+    expect(run(root, data, call({ tool_name: 'mcp__plugin_subzero_subzero__tasks', tool_use_id: 'toolu_y' }))).toBe('');
+    expect(run(root, data, call({}))).toBe('');
+    expect(run(root, data, call({ tool_use_id: '../escape' }))).toBe('');
+    expect(existsSync(path.join(data, 'sessions'))).toBe(false);
+  });
+
+  it('allows the call when the data folder cannot be written', () => {
+    const root = project(config(['medium']));
+    const blocked = tempDir();
+    writeFileSync(path.join(blocked, 'sessions'), 'a file where a folder should be');
+    expect(run(root, blocked, call({ tool_use_id: 'toolu_z' }))).toBe('');
+  });
+
+  it('removes call markers older than an hour when a new one is written', () => {
+    const root = project(config(['medium']));
+    const data = tempDir();
+    writeCallMarker(data, root, 'toolu_old');
+    writeCallMarker(data, root, 'toolu_recent');
+    const old = new Date(Date.now() - 2 * 3600 * 1000);
+    utimesSync(path.join(callsFolder(data, root), 'toolu_old.json'), old, old);
+    writeCallMarker(data, root, 'toolu_new', 'a');
+    expect(readdirSync(callsFolder(data, root)).sort()).toEqual(['toolu_new.json', 'toolu_recent.json']);
   });
 });

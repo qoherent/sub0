@@ -23,7 +23,7 @@ describe('SigilWiring', () => {
     expect(tiers.get('low')).toEqual({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low' });
     expect(tiers.get('control')).toEqual({ host: 'pi', model: 'anthropic/claude-sonnet-5-5', thinking: 'high' });
     const qwen = getAgent(EXAMPLE, 'sigil-interpreter');
-    expect(qwen).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'high', endpoint: 'r9700', parallel: 1 });
+    expect(qwen).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'high', parallel: 1 });
     expect(qwen.tools).toEqual(['read', 'grep', 'find', 'ls', 'write']);
     expect(qwen.skills.map((s) => s.folder)).toEqual([path.join(EXAMPLE, 'skills', 'sigil-understand'), path.join(EXAMPLE, 'skills', 'sigil-egglog')]);
     expect(getAgent(EXAMPLE, 'sigil-interpreter-low')).toMatchObject({ host: 'pi', model: 'r9700/Qwen3.8', thinking: 'low', parallel: 1 });
@@ -135,8 +135,8 @@ agents:
     expect(out.hookSpecificOutput.hookEventName).toBe('SessionStart');
     expect(out.hookSpecificOutput.additionalContext).toContain('mcp__plugin_subzero_subzero__delegate');
     expect(out.hookSpecificOutput.additionalContext).toContain('tier: "medium"');
-    expect(out.hookSpecificOutput.additionalContext).toMatch(/if it returns a task id, collect it/i);
-    expect(out.hookSpecificOutput.additionalContext).not.toContain('wait: false');
+    expect(out.hookSpecificOutput.additionalContext).toMatch(/delegate\(tier, brief\) in one message; it runs in the background/);
+    expect(out.hookSpecificOutput.additionalContext).not.toMatch(/if it returns a task id, collect it/i);
     expect(out.hookSpecificOutput.additionalContext.length).toBeLessThan(3000);
     expect(readParentSessionId(data, project, process.pid)).toBe('s-1');
   });
@@ -158,7 +158,7 @@ agents:
 
   it('warns when the required tier is missing and still records the session id', () => {
     const project = tempDir();
-    const { stdout, data } = runHook(project, 'endpoints: {}\n');
+    const { stdout, data } = runHook(project, 'skills: {}\n');
     expect(JSON.parse(stdout).hookSpecificOutput.additionalContext).toMatch(/medium.*required/);
     expect(readParentSessionId(data, project, process.pid)).toBe('s-1');
   });

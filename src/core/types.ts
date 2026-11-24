@@ -59,9 +59,26 @@ export interface LaunchSpec {
   thinkingLevel: string | Unavailable;
 }
 
+/**
+ * What became of one follow-up message: held for a run that is not Live yet, delivered into the
+ * running turn, opened a new turn, or reached no child.
+ */
+export type DeliveryOutcome = 'queued' | 'steered' | 'new_turn' | 'not_delivered';
+
 export type DomainEvent =
+  | { kind: 'brief'; text: string }
   | { kind: 'run_started'; launchSpec: LaunchSpec }
   | { kind: 'skills_verified'; skills: string[] }
+  /** The child has been sent its prompt: the run is Live from here on. */
+  | { kind: 'prompt_sent' }
+  /** A follow-up message of the caller, whole, with its delivery outcome and the turn it joined or opened. */
+  | { kind: 'follow_up_message'; text: string; outcome: DeliveryOutcome; turn?: number }
+  /**
+   * A held message of a turn whose steering answered: delivered into the run, or settled, which means it
+   * reached the next turn. Without this record a held message of a turn that sent its prompt counts as
+   * not delivered, because its answer would live only in memory.
+   */
+  | { kind: 'held_message_handled'; text: string; answer: 'delivered' | 'settled'; turn?: number }
   | { kind: 'tool_activity'; phase: 'start' | 'end'; tool: string; path?: string; isError?: boolean }
   | { kind: 'agent_message'; text: string }
   | { kind: 'turn_settled' }
@@ -75,6 +92,8 @@ export type DomainEventKind = DomainEvent['kind'];
 /** The one answer a task returns. The task id always comes first. */
 export interface Result {
   taskId: string;
+  /** The turn number, set from turn 2 on. */
+  turn?: number;
   agent: string;
   status: ResultStatus;
   summary?: string;
@@ -82,6 +101,8 @@ export interface Result {
   failureKind?: FailureKind;
   message?: string;
   durationMs?: number;
+  /** How many held follow-up messages never reached the child, because its run ended before its prompt. */
+  heldNotDelivered?: number;
 }
 
 /** What a child driver reports when a child run ends. */
@@ -93,6 +114,8 @@ export interface ChildOutcome {
   usage: SessionUsage;
   /** Where the driver keeps the child session, when it knows. */
   sessionFile?: string;
+  /** Steering messages the child accepted but had not read when its run settled, in order. */
+  unreadSteers?: string[];
 }
 
 /**
@@ -118,14 +141,44 @@ export interface ChildRunRequest {
   childHostOptions?: ChildHostOptions;
 }
 
+/** What a live run answers a steering message: it took it, had settled already, or is being stopped. */
+export type SteerAnswer = 'delivered' | 'settled' | 'stopping';
+
 export interface ChildRun {
   outcome: Promise<ChildOutcome>;
   cancel(): void;
+  /**
+   * Turn steering: deliver a steering message into the running turn. A driver that offers it also
+   * restarts the timeout of the run for each delivered message.
+   */
+  steer?(message: string): Promise<SteerAnswer>;
+}
+
+/**
+ * What `resume` throws, before it starts anything, when the child session of the task is gone.
+ * TaskCore then opens the turn by releasing the task with its brief, and holds the message.
+ */
+export class SessionMissingError extends Error {
+  readonly code = 'session_missing';
+  constructor(taskId: string) {
+    super(`the child session of ${taskId} is gone`);
+    this.name = 'SessionMissingError';
+  }
 }
 
 /** The child port: the only way TaskCore reaches a child. */
 export interface ChildPort {
   start(request: ChildRunRequest, onEvent: (event: DomainEvent) => void): ChildRun;
+  /**
+   * Session resume: start a run on the existing child session of the task with the follow-up
+   * message as its prompt. Absent when the driver cannot resume a session.
+   */
+  resume?(request: ChildRunRequest, message: string, onEvent: (event: DomainEvent) => void): ChildRun;
+  /**
+   * True when the runs of this port accept steering messages. It is static, because TaskCore
+   * decides to hold a message for a run that has not started before any run exists.
+   */
+  steers?: boolean;
 }
 
 /** Builds the command that reopens a child session in its program's terminal interface. */

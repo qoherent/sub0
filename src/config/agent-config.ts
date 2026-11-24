@@ -55,6 +55,19 @@ export interface AgentEntry {
   overrides: Map<string, Partial<ModelTier>>;
 }
 
+/** One limit of an `endpoints:` map, which `models.parallel` replaced, with the models it covered. */
+export interface LegacyEndpointLimit {
+  /** The file that holds the map. */
+  file: string;
+  endpoint: string;
+  /** The old limit; null for a removal entry or a value that is not a number. */
+  parallel: number | null;
+  /** The models of the configuration that the old limit covered, in tier order. */
+  models: string[];
+  /** The file holds the key with no entry in it (`endpoints: {}` or a bare `endpoints:`): nothing to convert, but the key still goes. */
+  empty?: true;
+}
+
 /** One agent entry resolved at one model tier. */
 export interface AgentDefinition {
   /** The entry's name, or `<entry>:<tier>` when the request named a tier. */
@@ -68,9 +81,7 @@ export interface AgentDefinition {
   tools: string[];
   /** Seconds from spawn to settlement; time spent Pending does not count. */
   timeout: number;
-  /** The part of the model before its first slash. */
-  endpoint: string;
-  /** Most child runs one process runs at once on the endpoint, or null for no limit. */
+  /** Most child runs one process runs at once on this model, or null for no limit. */
   parallel: number | null;
 }
 
@@ -86,7 +97,13 @@ export interface AgentCatalog {
   entries: Map<string, AgentEntry>;
   tiers: Map<string, ModelTier>;
   routing: RoutingSettings;
+  /** The most child runs one process runs at once, by full model id. */
   limits: Map<string, number>;
+  /**
+   * Each `endpoints:` limit a loaded file still holds, which only a load that allows it keeps.
+   * The merged configuration of a normal load never has one.
+   */
+  legacyEndpoints: LegacyEndpointLimit[];
   /**
    * The child host options of the global file, by child host: the maps under `hosts`, opaque to
    * the config. Only the driver of that host reads its entry and checks it.
@@ -134,8 +151,8 @@ export class ProjectDisabledError extends MissingAgentFileError {
 
 /** The one load error that `init` repairs by adding the medium tier. */
 export class MissingDefaultTierError extends LoadError {
-  constructor() {
-    super(`the medium tier is required in models.tiers${RUN_INIT}`);
+  constructor(agentFile?: string) {
+    super(`the medium tier is required in models.tiers${RUN_INIT}${agentFile !== undefined ? ` (agent file ${agentFile})` : ''}`);
     this.name = 'MissingDefaultTierError';
   }
 }
@@ -255,8 +272,9 @@ export function isSameFile(a: string, b: string): boolean {
   }
 }
 
-/** Why a project-scope write is refused when the project file is the global file. */
-export const PROJECT_IS_GLOBAL = "this project's file is the global file; run guided init with the every-project choice, or open the tool in a project folder";
+/** Why a project-scope write is refused when the project file is the global file; it names the shared file. */
+export const projectIsGlobal = (file: string): string =>
+  `this project's file is the global file (${file}); run guided init with the every-project choice, or open the tool in a project folder`;
 
 /** The starter tools of a child host, or undefined when its driver offers none. */
 export type StarterAgents = (host: string) => StarterTools | undefined;
@@ -270,6 +288,8 @@ export const BUILT_IN_TIMEOUT = 1200;
 export interface LoadOptions {
   /** Fills each missing `general` and `fallback` agent; none given means they are required entries. */
   starterAgents?: StarterAgents;
+  /** Keep an `endpoints:` map instead of failing the load, and report it in the catalog (what guided init repairs). */
+  allowLegacyEndpoints?: boolean;
 }
 
 /** Read both files, layer the agent file over the global file and validate the merge. */
@@ -291,7 +311,7 @@ export function loadChildHostOptions(projectRoot: string, host: string): ChildHo
   const global = globalFile();
   const projectText = isSameFile(agentFile, global) ? null : readTextOrNull(agentFile);
   const globalText = readGlobalText(global);
-  const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true };
+  const options = { agentFile, globalFile: global, allowMissingStarter: true, allowUnusedLimits: true, allowLegacyEndpoints: true };
   try {
     return buildCatalog(globalText, projectText, options).childHostOptions[host] ?? {};
   } catch (err) {
@@ -340,8 +360,10 @@ export function readGlobalText(file: string): string | null {
 export interface ParseOptions {
   /** Load a file without the medium tier, general or fallback (what init repairs). */
   allowMissingStarter?: boolean;
-  /** Load a file whose endpoint limit no model belongs to (what guided init drops). */
+  /** Load a file whose model limit no tier or override uses (what guided init drops). */
   allowUnusedLimits?: boolean;
+  /** Load a file that still holds `endpoints:`, and report its limits in the catalog (what guided init repairs). */
+  allowLegacyEndpoints?: boolean;
 }
 
 export interface BuildOptions extends ParseOptions, LoadOptions {
@@ -369,6 +391,10 @@ interface Layer {
   enabled: boolean;
   tiers: Map<string, ModelTier | null>;
   limits: Map<string, number | null>;
+  /** The old `endpoints:` map: endpoint to its limit, null when it is not a number. */
+  legacyEndpoints: Map<string, number | null>;
+  /** The file holds the `endpoints:` key with no entry in it. */
+  emptyEndpoints: boolean;
   routing: Partial<RoutingSettings>;
   skillFolders: Map<string, string>;
   agents: Record<string, unknown>;
@@ -377,7 +403,7 @@ interface Layer {
 }
 
 const GLOBAL_LAYER_KEYS = ['models', 'endpoints', 'routing', 'hosts'];
-const GLOBAL_KEYS_TEXT = 'models.tiers, endpoints, routing and hosts';
+const GLOBAL_KEYS_TEXT = 'models.tiers, models.parallel, routing and hosts';
 
 /** Run a step on one file's content; a load error that does not name the file gets it. */
 function inFile<T>(file: string, step: () => T): T {
@@ -406,11 +432,11 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
       if (tier === null) tiers.delete(name);
       else tiers.set(name, tier);
     }
-    for (const [endpoint, parallel] of layer.limits) {
-      if (parallel === null) limits.delete(endpoint);
-      else limits.set(endpoint, parallel);
-      if (layer === global) inherited.add(endpoint);
-      else inherited.delete(endpoint);
+    for (const [model, parallel] of layer.limits) {
+      if (parallel === null) limits.delete(model);
+      else limits.set(model, parallel);
+      if (layer === global) inherited.add(model);
+      else inherited.delete(model);
     }
   }
   const routing = { ...global?.routing, ...project?.routing };
@@ -422,29 +448,32 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
     }
   });
 
+  const legacyEndpoints = legacyLimits(global, globalPath, project, agentFile, tiers, entries);
+  if (legacyEndpoints.length > 0 && options.allowLegacyEndpoints !== true) throw legacyEndpointsError(legacyEndpoints, globalPath);
+
   const used = new Set<string>();
-  for (const tier of tiers.values()) used.add(modelEndpoint(tier.model));
+  for (const tier of tiers.values()) used.add(tier.model);
   for (const entry of entries.values()) {
     for (const override of entry.overrides.values()) {
-      if (override.model !== undefined) used.add(modelEndpoint(override.model));
+      if (override.model !== undefined) used.add(override.model);
     }
   }
-  for (const endpoint of [...limits.keys()]) {
-    if (used.has(endpoint)) continue;
-    if (inherited.has(endpoint)) limits.delete(endpoint);
+  for (const model of [...limits.keys()]) {
+    if (used.has(model)) continue;
+    if (inherited.has(model)) limits.delete(model);
     else if (options.allowUnusedLimits !== true) {
-      throw new LoadError(`endpoint "${endpoint}": no model of a tier or of a tier override belongs to it in ${agentFile}`);
+      throw new LoadError(`model "${model}": no tier or tier override uses it, so it cannot have a parallel limit in ${agentFile}`);
     }
   }
 
   const medium = tiers.get(DEFAULT_TIER);
   if (options.allowMissingStarter !== true && medium === undefined) {
-    throw project === null ? new MissingAgentFileError(agentFile) : new MissingDefaultTierError();
+    throw project === null ? new MissingAgentFileError(agentFile) : new MissingDefaultTierError(agentFile);
   }
   if (medium !== undefined && options.starterAgents !== undefined) fillBuiltInAgents(entries, medium.host, options.starterAgents);
   if (options.allowMissingStarter !== true) {
-    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT}`);
-    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT}`);
+    if (!entries.has(GENERAL_AGENT)) throw new LoadError(`the general agent is required${RUN_INIT} (agent file ${agentFile})`);
+    if (!entries.has(FALLBACK_AGENT)) throw new LoadError(`the fallback agent is required${RUN_INIT} (agent file ${agentFile})`);
   }
 
   return {
@@ -453,8 +482,57 @@ function build(readGlobal: () => string | null, projectText: string | null, opti
     tiers,
     routing: { hook: routing.hook ?? true, ...(routing.genericAgents !== undefined ? { genericAgents: routing.genericAgents } : {}) },
     limits,
+    legacyEndpoints,
     childHostOptions: global?.childHostOptions ?? {},
   };
+}
+
+/** The `endpoints:` limits that the loaded files hold, global file first, each with the models it covered. */
+function legacyLimits(
+  global: Layer | null,
+  globalPath: string,
+  project: Layer | null,
+  agentFile: string,
+  tiers: Map<string, ModelTier>,
+  entries: Map<string, AgentEntry>,
+): LegacyEndpointLimit[] {
+  const out: LegacyEndpointLimit[] = [];
+  if (global !== null) {
+    // The global file covers its own tiers' models only: another project's tiers are not its business.
+    const own = [...global.tiers.values()].filter((t): t is ModelTier => t !== null).map((t) => t.model);
+    for (const [endpoint, parallel] of global.legacyEndpoints) out.push({ file: globalPath, endpoint, parallel, models: coveredBy(endpoint, own) });
+    if (global.emptyEndpoints) out.push({ file: globalPath, endpoint: '', parallel: null, models: [], empty: true });
+  }
+  if (project !== null) {
+    const merged = new Set<string>([...tiers.values()].map((t) => t.model));
+    for (const entry of entries.values()) for (const override of entry.overrides.values()) if (override.model !== undefined) merged.add(override.model);
+    for (const [endpoint, parallel] of project.legacyEndpoints) out.push({ file: agentFile, endpoint, parallel, models: coveredBy(endpoint, [...merged]) });
+    if (project.emptyEndpoints) out.push({ file: agentFile, endpoint: '', parallel: null, models: [], empty: true });
+  }
+  return out;
+}
+
+function coveredBy(endpoint: string, models: string[]): string[] {
+  return [...new Set(models.filter((m) => modelEndpoint(m) === endpoint))];
+}
+
+/** The load error for a file that still holds `endpoints:`: its file, the replacement and each old limit with its models. */
+function legacyEndpointsError(limits: LegacyEndpointLimit[], globalPath: string): LoadError {
+  const file = limits[0]!.file;
+  const kind = file === globalPath ? 'global file' : 'agent file';
+  const own = limits.filter((l) => l.file === file);
+  const lines = own.map((l) => {
+    if (l.empty === true) return '  the map is empty, so there is no limit to keep: remove the key';
+    const was = l.parallel === null ? 'no limit' : `limit ${l.parallel}`;
+    return l.models.length === 0
+      ? `  endpoint ${l.endpoint} (${was}): no model of this configuration uses it, so drop it`
+      : `  endpoint ${l.endpoint} (${was}) covered ${l.models.join(', ')}: give each model its own limit under models.parallel`;
+  });
+  return new LoadError(
+    // The first sentence carries the file, the replacement and the repair command: a warning that cuts the message short still names the fix.
+    `the ${kind} holds "endpoints:", which "models.parallel" replaced, in ${file}${RUN_INIT}, which repairs it and pre-fills the old values. ` +
+      `A limit now belongs to one whole model, shared by every tier that names it:\n${lines.join('\n')}`,
+  );
 }
 
 /** Add each of `general` and `fallback` that the project does not define, from the starter tools of the medium host. */
@@ -504,10 +582,11 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
   const modelsMap = (doc.models ?? {}) as Record<string, unknown>;
   if (global) {
     for (const key of Object.keys(modelsMap)) {
-      if (key !== 'tiers') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "models.${key}": ${file}`);
+      if (key !== 'tiers' && key !== 'parallel') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "models.${key}": ${file}`);
     }
   }
   if (modelsMap.tiers !== undefined && !(allowMissingStarter && modelsMap.tiers === null) && !isRecord(modelsMap.tiers)) throw malformed('"models.tiers" must be a map');
+  if (modelsMap.parallel !== undefined && !isRecord(modelsMap.parallel)) throw malformed('"models.parallel" must be a map');
 
   const baseDir = path.dirname(file);
   const skillFolders = new Map<string, string>();
@@ -520,23 +599,24 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
 
   const removal = (what: string) => new LoadError(`${what}: a removal entry is only accepted in the agent file`);
   const limits = new Map<string, number | null>();
-  for (const [endpoint, entry] of Object.entries(endpointsMap)) {
+  for (const [model, entry] of Object.entries((modelsMap.parallel ?? {}) as Record<string, unknown>)) {
     if (entry === null) {
-      if (global) throw removal(`endpoint "${endpoint}"`);
-      limits.set(endpoint, null);
+      if (global) throw removal(`model "${model}"`);
+      limits.set(model, null);
       continue;
     }
-    if (global && isRecord(entry)) {
-      for (const key of Object.keys(entry)) {
-        if (key !== 'parallel') throw new LoadError(`the global file holds only ${GLOBAL_KEYS_TEXT}, not "endpoints.${endpoint}.${key}": ${file}`);
-      }
+    if (typeof entry !== 'number' || !Number.isInteger(entry) || entry < 1) {
+      throw new LoadError(`model "${model}": parallel must be a positive whole number`);
     }
-    const parallel = isRecord(entry) ? entry.parallel : undefined;
-    if (typeof parallel !== 'number' || !Number.isInteger(parallel) || parallel < 1) {
-      throw new LoadError(`endpoint "${endpoint}": parallel must be a positive whole number`);
-    }
-    limits.set(endpoint, parallel);
+    limits.set(model, entry);
   }
+  const legacyEndpoints = new Map<string, number | null>();
+  for (const [endpoint, entry] of Object.entries(endpointsMap)) {
+    const parallel = isRecord(entry) ? entry.parallel : undefined;
+    legacyEndpoints.set(endpoint, typeof parallel === 'number' ? parallel : null);
+  }
+  // The key is what the contract rejects, so an empty one counts too.
+  const emptyEndpoints = 'endpoints' in doc && legacyEndpoints.size === 0;
 
   const tiers = new Map<string, ModelTier | null>();
   for (const [name, raw] of Object.entries((modelsMap.tiers ?? {}) as Record<string, unknown>)) {
@@ -552,6 +632,8 @@ function parseLayer(text: string, file: string, kind: 'global' | 'project', opti
     enabled: doc.enabled !== false,
     tiers,
     limits,
+    legacyEndpoints,
+    emptyEndpoints,
     routing: validateRouting(doc.routing),
     skillFolders,
     agents: agentsMap,
@@ -715,7 +797,6 @@ export function resolveAgent(catalog: AgentCatalog, name: string | undefined, op
     throw new TierError(tierName, configured, resolved.host, supported);
   }
 
-  const endpoint = modelEndpoint(resolved.model);
   return {
     name: options.tier !== undefined ? `${entryName}:${options.tier}` : entryName,
     ...(entry.description !== undefined ? { description: entry.description } : {}),
@@ -725,8 +806,7 @@ export function resolveAgent(catalog: AgentCatalog, name: string | undefined, op
     skills: entry.skills,
     tools: entry.tools,
     timeout: entry.timeout,
-    endpoint,
-    parallel: catalog.limits.get(endpoint) ?? null,
+    parallel: catalog.limits.get(resolved.model) ?? null,
   };
 }
 
@@ -791,7 +871,7 @@ export interface StarterResult {
  */
 export function addStarterEntries(projectRoot: string, spec: StarterSpec): StarterResult {
   const agentFile = path.join(projectRoot, AGENT_FILE);
-  if (isSameFile(agentFile, globalFile())) throw new LoadError(PROJECT_IS_GLOBAL);
+  if (isSameFile(agentFile, globalFile())) throw new LoadError(projectIsGlobal(globalFile()));
   const text = readTextOrNull(agentFile);
 
   // Parsed as the layer it is, so a file guided init wrote (a lone tier, a null removal) is never refused by a single-file rule.

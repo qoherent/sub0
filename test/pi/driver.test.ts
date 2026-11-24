@@ -2,7 +2,7 @@ import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { getAgent, type AgentDefinition } from '../../src/config/agent-config.js';
-import type { ChildOutcome, DomainEvent } from '../../src/core/types.js';
+import { SessionMissingError, type ChildOutcome, type DomainEvent } from '../../src/core/types.js';
 import { PiDriver, type PiDriverOptions } from '../../src/pi/driver.js';
 import { childRpcArgs } from '../../src/pi/launch.js';
 import type { ChildRunRequest } from '../../src/core/types.js';
@@ -58,7 +58,7 @@ describe('PiDriver', () => {
     expect(outcome.usage.totalTokens).toBe(1500);
     expect(commandsSent(fake.log())).toEqual(['get_state', 'get_commands', 'prompt', 'get_last_assistant_text', 'get_session_stats']);
     expect(fake.log().find((l) => l.command === 'prompt').message).toBe('the brief');
-    expect(events.map((e) => e.kind)).toEqual(['run_started', 'skills_verified', 'agent_message', 'turn_settled', 'run_exited']);
+    expect(events.map((e) => e.kind)).toEqual(['run_started', 'skills_verified', 'prompt_sent', 'agent_message', 'turn_settled', 'run_exited']);
     const spec = (events[0] as Extract<DomainEvent, { kind: 'run_started' }>).launchSpec;
     expect(spec.cwd).toBe(root);
     expect(spec.envNames).toEqual(['PI_OFFLINE', 'PI_TELEMETRY']);
@@ -378,8 +378,132 @@ describe('PiDriver', () => {
       fallback: ['read', 'grep', 'find', 'ls'],
     });
     expect(typeof driver.port.start).toBe('function');
+    expect(typeof driver.port.resume).toBe('function');
+    expect(driver.port.steers).toBe(true);
     expect(driver.attachCommand({ command: ['pi', '--mode', 'rpc', '--session-id', 'sz-abcdef'], cwd: '/p', envNames: [], version: '1', skillFolders: [], thinkingLevel: 'low' })).toEqual(['pi', '--session-id', 'sz-abcdef']);
     expect(typeof driver.sessionExport).toBe('function');
+  });
+
+  describe('steering, resume and per-turn usage', () => {
+    const settle = [{ emit: { type: 'turn_end', message: {}, toolResults: [] } }, { emit: { type: 'agent_end', messages: [], willRetry: false } }, { emit: { type: 'agent_settled' } }];
+    const promptSent = (fake: { log(): any[] }) => commandsSent(fake.log()).includes('prompt');
+    const steersSent = (fake: { log(): any[] }) => fake.log().filter((l) => l.command === 'steer').map((l) => l.message);
+    const usageOf = (stats: { input: number; output: number; total: number }, cost: number, context: number) => ({
+      tokens: { input: stats.input, output: stats.output, cacheRead: 0, cacheWrite: 0, total: stats.total },
+      cost,
+      contextUsage: { tokens: context, contextWindow: 131072, percent: 1 },
+    });
+
+    it('answers delivered to a steer during an awaitSteer step, echoes it in the final text and settles once', async () => {
+      const { start, fake, events } = setup({ turn: [{ awaitSteer: true }, ...settle] });
+      const run = start();
+      await until(() => promptSent(fake));
+      expect(await run.steer!('use tabs')).toBe('delivered');
+      const outcome = await run.outcome;
+      expect(outcome).toMatchObject({ status: 'completed', lastAssistantText: 'Steered: use tabs' });
+      expect(outcome.unreadSteers).toBeUndefined();
+      expect(steersSent(fake)).toEqual(['use tabs']);
+      expect(events.filter((e) => e.kind === 'turn_settled')).toHaveLength(1);
+      expect(exits(events)).toHaveLength(1);
+    });
+
+    it('counts a steer that pi handled at once as delivered, and reports no unread steer', async () => {
+      const { start, fake } = setup({ steerDisposition: 'handled', turn: [{ sleep: 400 }, { emit: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop' } } }, ...settle] });
+      const run = start();
+      await until(() => promptSent(fake));
+      expect(await run.steer!('now')).toBe('delivered');
+      const outcome = await run.outcome;
+      expect(outcome.status).toBe('completed');
+      expect(outcome.unreadSteers).toBeUndefined();
+      expect(steersSent(fake)).toEqual(['now']);
+    });
+
+    it('answers settled to a steer after agent_settled and sends nothing to pi', async () => {
+      const { start, fake } = setup();
+      const run = start();
+      await run.outcome;
+      expect(await run.steer!('too late')).toBe('settled');
+      expect(steersSent(fake)).toEqual([]);
+    });
+
+    it('reports the steers pi accepted after its last queue check and settled without reading as unread, in order', async () => {
+      const { start, fake } = setup({ turn: [{ acceptSteerUnread: true }, { emit: { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }], stopReason: 'stop' } } }, ...settle] });
+      const run = start();
+      await until(() => promptSent(fake));
+      expect(await Promise.all([run.steer!('first'), run.steer!('second')])).toEqual(['delivered', 'delivered']);
+      const outcome = await run.outcome;
+      expect(outcome).toMatchObject({ status: 'completed', unreadSteers: ['first', 'second'] });
+    });
+
+    it('answers stopping to a steer while a cancel is in progress and sends nothing to pi', async () => {
+      const { start, fake } = setup({ turn: [{ hang: true }], ignoreAbort: true });
+      const run = start();
+      await until(() => promptSent(fake));
+      run.cancel();
+      expect(await run.steer!('too late')).toBe('stopping');
+      expect((await run.outcome).status).toBe('cancelled');
+      expect(steersSent(fake)).toEqual([]);
+    });
+
+    it('restarts the timeout for a delivered steer: at 1 of 1.5 seconds, the run does not time out at 1.5', async () => {
+      const { start, fake } = setup({ turn: [{ awaitSteer: true }, { sleep: 900 }, ...settle] }, 'helper', { timeout: 1.5 });
+      const run = start();
+      await until(() => promptSent(fake));
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      expect(await run.steer!('keep going')).toBe('delivered');
+      const outcome = await run.outcome;
+      expect(outcome.status).toBe('completed');
+      expect(commandsSent(fake.log())).not.toContain('abort');
+    });
+
+    it('resumes a session with the same flags and no --session, and the child recalls turn 1', async () => {
+      const { driver, agent, root, fake, events } = setup({ turn: [{ echoSession: true }, ...settle] });
+      const first = await driver.start(request(root, agent, 'first brief'), () => {}).outcome;
+      expect(first).toMatchObject({ status: 'completed', lastAssistantText: 'Session: empty; now: first brief' });
+      const run = driver.port.resume!(request(root, agent, 'first brief'), 'second message', (e) => events.push(e));
+      const outcome = await run.outcome;
+      const launches = fake.log().filter((l) => l.argv);
+      expect(launches).toHaveLength(2);
+      expect(launches[1].argv).toEqual(launches[0].argv);
+      expect(launches[1].argv).toContain('--session-id');
+      expect(launches[1].argv).toContain(path.join(root, '.agents', 'subzero', 'sessions'));
+      expect(launches[1].argv).not.toContain('--session');
+      const prompts = fake.log().filter((l) => l.command === 'prompt').map((l) => l.message);
+      expect(prompts).toEqual(['first brief', 'second message']);
+      expect(outcome).toMatchObject({ status: 'completed', lastAssistantText: 'Session: prompt first brief; now: second message' });
+      expect(events.map((e) => e.kind)).toContain('prompt_sent');
+    });
+
+    it('throws SessionMissingError synchronously from a resume with no session file, and starts no process', () => {
+      const { driver, agent, root, fake } = setup();
+      expect(() => driver.port.resume!(request(root, agent, 'brief'), 'message', () => {})).toThrow(SessionMissingError);
+      expect(fake.log()).toEqual([]);
+    });
+
+    it('reports a resumed turn usage as the cumulative stats minus the baseline read before its prompt, and context as read', async () => {
+      const turn1 = usageOf({ input: 1000, output: 200, total: 1200 }, 0.5, 1200);
+      const turn2 = usageOf({ input: 1500, output: 300, total: 1800 }, 0.25, 3000);
+      const { driver, agent, root, fake } = setup({ turn: settle, launches: [{ stats: turn1 }, { stats: turn2 }] });
+      const first = await driver.start(request(root, agent, 'brief'), () => {}).outcome;
+      expect(first.usage).toMatchObject({ inputTokens: 1000, outputTokens: 200, totalTokens: 1200, cost: 0.5, contextTokens: 1200 });
+      const second = await driver.port.resume!(request(root, agent, 'brief'), 'again', () => {}).outcome;
+      expect(second.usage).toMatchObject({ inputTokens: 1500, outputTokens: 300, totalTokens: 1800, cost: 0.25, contextTokens: 3000, contextWindow: 131072 });
+      const log = fake.log();
+      const resumed = commandsSent(log.slice(log.findLastIndex((l) => l.argv)));
+      expect(resumed).toEqual(['get_state', 'get_commands', 'get_session_stats', 'prompt', 'get_last_assistant_text', 'get_session_stats']);
+    });
+
+    it('reports prompt_sent after skill verification and never for a skill-mismatch run', async () => {
+      const ok = setup();
+      await ok.start().outcome;
+      expect(ok.events.map((e) => e.kind).slice(0, 3)).toEqual(['run_started', 'skills_verified', 'prompt_sent']);
+      const mismatch = setup({ extraSkills: ['brave-search'] });
+      await mismatch.start().outcome;
+      expect(mismatch.events.map((e) => e.kind)).not.toContain('prompt_sent');
+      const refused = setup({ refusePrompt: true });
+      await refused.start().outcome;
+      expect(refused.events.map((e) => e.kind)).not.toContain('prompt_sent');
+    });
   });
 
   describe('prerequisites', () => {

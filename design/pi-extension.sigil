@@ -1,7 +1,7 @@
 @design/delegation-service.sigil from DelegationService import {
   delegation, brief text, session cancel, completion notice, stop notice,
   status line, result text, queued task, collect tool, guided setup,
-  setup operations, guide text, setup refusal,
+  setup operations, guide text, setup refusal, continuation, notice sink,
 }
 @design/agent-config.sigil from AgentConfig import {
   tier word, tier text, unmatched tier text, agent alias, agent file,
@@ -18,7 +18,7 @@
 }
 @design/task-core.sigil from TaskCore import {
   task id, attach command, child driver, transcript, starter tools,
-  prerequisites check,
+  prerequisites check, follow-up message, delivery outcome,
 }
 @design/task-store.sigil from TaskStore import { parent session id, task record }
 
@@ -48,8 +48,9 @@ component PiExtension {
     an
     optional expected output.
 
-    The *subzero tools* are the tools subzero_await, subzero_tasks and
-    subzero_cancel. The tool subzero_await is the collect tool that the
+    The *subzero tools* are the tools subzero_await, subzero_tasks,
+    subzero_continue and subzero_cancel. The tool subzero_await is the collect tool
+    that the
     completion notice names, and it collects the result of tasks started without
     waiting,
     waits up to an *await timeout* that defaults to 30 seconds and never exceeds
@@ -58,7 +59,21 @@ component PiExtension {
     and answers a task that has not settled with its status line. The tool
     subzero_tasks lists the tasks of the session core, and the tool
     subzero_cancel
-    cancels one task by its task id or every task of the session core.
+    cancels one task by its task id or every task of the session core. The
+    tool subzero_continue sends a follow-up message to a task by its task id,
+    with an optional async flag that works as the async flag of the
+    subagent tool does.
+
+    A *mid-turn user message* is a message that the user sends while a turn of
+    the pi session runs, which pi hands to the extension as input with the
+    streaming behavior steer.
+
+    A *reload report* is the one notice that PiExtension sends into a pi
+    session that follows a reload or a resume. It lists each turn that a
+    session end stopped, or that the death of its owner process left
+    abandoned, and that no earlier notice reported, with the follow-up
+    messages that did not reach it. It is neither a completion notice nor a
+    stop notice.
 
     A *session core* is the DelegationService that the entry point of the
     extension
@@ -132,7 +147,10 @@ component PiExtension {
     model tier is not configured should omit its model, and says to await
     background
     tasks
-    with subzero_await before using their results. The flow ends there.
+    with subzero_await before using their results and that, when the user
+    gives information that a running or settled task needs, subzero_continue
+    sends that task a follow-up message written self-contained like a
+    brief text. The flow ends there.
 
     On a subagent tool call, refuse it with the isolation error when it asks
     for a
@@ -152,13 +170,36 @@ component PiExtension {
     returns the task id at once, or the result text when the call sets async to
     false, and it ends there.
 
+    On a subzero_continue call, make a continuation with its task id, its
+    follow-up message and the parent session id of the session core, and send
+    it to the session core. Return the delivery outcome with the status line
+    at once, or, when the call sets async to false or pi runs in a print mode,
+    wait and return the result text of the new turn that the
+    delivery outcome new turn opened, which ends the flow.
+
+    When a mid-turn user message arrives while a subagent tool call or a
+    subzero_continue call with async set to false, or a subzero_await call,
+    waits, end that wait without cancelling any task, so that the parent model
+    reads the message at once: the subagent tool call and the
+    subzero_continue call return the task id with its status line and say
+    that the user sent a message, and the subzero_await call returns the
+    status line of each task it waited for that has not settled, which ends
+    that flow. A task whose waited call ended this way is then a
+    background task.
+
     When a task that the call did not wait for settles, send its
     completion notice
     into the pi session with a turn trigger as a steering message, so that it
     starts
     a turn when pi is idle and joins the turn that is running otherwise, which
     ends
-    that flow. A task that ended by a session cancel after an abort, or by a
+    that flow. Send no completion notice for a turn that a subzero_await call
+    returned, waiting for every subzero_await call of that task to return
+    first, so that a turn the parent model already read never starts another
+    turn. At the start of a pi session PiExtension registers its notice sink
+    with the session core, and sends the completion notice that the notice sink
+    receives for a turn that no call opened in the same way, which ends that flow.
+    A task that ended by a session cancel after an abort, or by a
     cancel
     through the subzero tools or the /subzero command, sends no turn trigger:
     its
@@ -169,6 +210,15 @@ component PiExtension {
     the pi session sends no stop notice to the parent model, and the user sees
     only
     the count of cancelled tasks.
+
+    At the start of a pi session that follows a reload or a resume, read the
+    task records of the parent session id of the session core and send one
+    reload report into the pi session as a steering message with no turn
+    trigger, so that the next turn of the parent model carries it. Then ask
+    TaskCore to record each listed turn as reported, so that a later reload
+    lists none of them again. A turn that the user or the subzero tools
+    cancelled is never listed, and nothing is sent when no turn is listed,
+    which ends the flow.
 
     On the /subzero command with init and a model, with the optional named
     options thinking and timeout, ask Kernel for the prerequisites check and
@@ -274,17 +324,27 @@ component PiExtension {
     in one message start their children at the same time, up to each
     parallel limit.
 
-    In a print mode, every subagent tool call must wait for its result,
+    In a print mode, every subagent tool call and every subzero_continue call
+    that opens a new turn must wait for its result,
     whatever its
     async flag says, and the reply must say so when async was set, because a
     child
     left running in the background would be killed when pi exits.
+
+    A mid-turn user message must never cancel a task or end a turn of the
+    pi session, and a wait that it ends must leave every child running.
 
     A completion notice and a stop notice must never be sent after the end of
     the pi
     session that started their task, so that no notice crosses into another
     session.
     Neither may carry the transcript of a child run.
+
+    The reload report must list a turn at most once and only a turn that a
+    session end stopped or that the death of its owner process left
+    abandoned. It is the one notice that reaches the next session of the
+    same parent session id, and it must never be sent to a session of
+    another parent session id.
 
     The session widget must be shown only when the pi parent host has a user
     interface. The clash warning must always be shown: as a notification when
@@ -342,6 +402,11 @@ component PiExtension {
     the parent model gets three stop notices on its next turn, one for each
     task.
 
+    After a reload that cancelled a task with a held follow-up message, the
+    next pi session sends one reload report that names the task and the
+    message, a second reload sends none for it, and a task that the user
+    cancelled earlier is never listed.
+
     With pi idle and two background tasks running, the /subzero command with
     cancel
     ends both as cancelled and reports 2, and no turn starts.
@@ -352,6 +417,17 @@ component PiExtension {
 
     In a print mode, a subagent tool call that sets async waits and returns the
     result text.
+
+    With a subagent tool call with async set to false waiting on a live task, a
+    mid-turn user message ends that call with the task id and its status line,
+    the child keeps running, the parent model reads the message, and when the
+    task settles its completion notice starts or joins a turn.
+
+    With one background task running, a subzero_continue call for it returns
+    steered at once. With one task that settled, a subzero_continue call
+    returns new turn at once, and when that turn settles its
+    completion notice names turn 2. A subzero_continue call for a task of
+    another pi session returns not delivered and repeats no result.
 
     With pi-subagents installed, the start of a pi session shows the
     clash warning
@@ -383,15 +459,17 @@ component PiExtension {
     returns
     a task id at once or, with async set to false, the result text.
 
-    Give the pi parent host the subzero tools to collect, list and cancel the
-    tasks of
+    Give the pi parent host the subzero tools to collect, list, continue and
+    cancel the tasks of
     its session core, each reply about a task with no result giving its
     status line
     and never calling a queued task started.
 
     Deliver the completion notice of each background task into the pi session,
     and the
-    stop notice of each task that was stopped, under the rules of the logic.
+    stop notice of each task that was stopped, under the rules of the logic. Send
+    the reload report of a reload or a resume once, and register the notice sink of
+    the session core.
 
     Run a session cancel when the user aborts a turn, when the /subzero command
     asks
@@ -452,6 +530,10 @@ component PiExtension {
     every
     child only during a turn, and the /subzero command stops them while pi is
     idle.
+
+    A mid-turn user message ends a subzero wait early because a child that
+    the message concerns could otherwise settle before the parent model reads
+    it, and steering it would come too late.
 
     A project is refused until a medium tier exists in the agent file or the
     global file, so that no subagent runs on a model that no file names. The

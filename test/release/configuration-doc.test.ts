@@ -84,7 +84,9 @@ describe('docs/configuration.md', () => {
     const catalog = loadAgentFile(root);
     expect([...catalog.tiers.keys()]).toEqual(['small', 'medium']);
     expect([...catalog.entries.keys()]).toEqual(['general', 'fallback', 'file-facts']);
-    expect(catalog.limits.get('local')).toBe(1);
+    // The limit belongs to one whole model id, not to its provider.
+    expect(catalog.limits.get('local/qwen3-coder-30b')).toBe(1);
+    expect(catalog.limits.has('local')).toBe(false);
     expect(catalog.routing).toEqual({ hook: true, genericAgents: ['general-purpose', 'claude'] });
     // The agent's own tier is medium, with its thinking overridden to high.
     const facts = resolveAgent(catalog, 'file-facts');
@@ -104,8 +106,8 @@ describe('docs/configuration.md', () => {
       // The project's medium replaces model and thinking together, and its `small:` removes the inherited tier.
       expect([...catalog.tiers.keys()]).toEqual(['medium']);
       expect(catalog.tiers.get('medium')).toEqual({ host: 'pi', model: 'local/qwen3-coder-30b', thinking: 'high' });
-      // The limit of local is inherited, and the routing key too.
-      expect(catalog.limits.get('local')).toBe(1);
+      // The limit of the model is inherited, and the routing key too.
+      expect(catalog.limits.get('local/qwen3-coder-30b')).toBe(1);
       expect(catalog.routing.hook).toBe(true);
       // Built-in agents fill general and fallback: 1200 seconds, no skills, the host's starter tools.
       expect(BUILT_IN_TIMEOUT).toBe(1200);
@@ -139,11 +141,11 @@ describe('docs/configuration.md', () => {
       expect(() => loadCatalog(projectWith(projectYaml!), { starterAgents: STARTER })).toThrow(`global file is malformed: ${path_}`);
       // A project file with no medium tier anywhere is still a load error.
       useGlobalConfig('routing:\n  hook: true\n');
-      expect(() => loadCatalog(projectWith('endpoints: {}\n'), { starterAgents: STARTER })).toThrow(LoadError);
+      expect(() => loadCatalog(projectWith('routing: { hook: true }\n'), { starterAgents: STARTER })).toThrow(LoadError);
     });
 
-    it('holds only models.tiers, endpoints, routing and hosts.pi.extensions, and an error names the file and the key', () => {
-      for (const key of ['models.tiers', 'endpoints', 'routing', 'hosts.pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key.split('.')[0]);
+    it('holds only models.tiers, models.parallel, routing and hosts.pi.extensions, and an error names the file and the key', () => {
+      for (const key of ['models.tiers', 'models.parallel', 'routing', 'hosts.pi.extensions']) expect(sectionOfDoc(GLOBAL_SECTION)).toContain(key);
       const file = useGlobalConfig('agents:\n  a: { tools: [read], timeout: 5 }\n');
       expect(() => loadCatalog(projectWith(MINIMAL), { starterAgents: STARTER })).toThrow(`not "agents": ${file}`);
       for (const [yaml, fragment] of [
@@ -195,24 +197,36 @@ describe('docs/configuration.md', () => {
       expect(text).toMatch(/Whether the file exists is not checked when the config loads/);
       expect(text).toMatch(/Subzero\s+trusts the process environment as a whole/);
       expect(text).toMatch(/no sandbox against an extension/);
-      expect(DOC).toMatch(/Only `models.tiers`, `endpoints.<endpoint>.parallel`, `routing` and `hosts.pi.extensions`/);
+      expect(DOC).toMatch(/Only `models.tiers`, `models.parallel`, `routing` and `hosts.pi.extensions`/);
       expect(CHANGELOG).toContain('`hosts.pi.extensions`');
       expect(flat(read('docs/target-claude-pi.md'))).toContain('`hosts.pi.extensions` of the global file');
     });
 
-    it('merges limits by endpoint, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {
-      useGlobalConfig('models:\n  tiers:\n    medium: { host: pi, model: local/x, thinking: low }\nendpoints:\n  local: { parallel: 2 }\n');
+    it('merges limits by model, ignores an inherited limit nothing uses, and keeps an own unused limit an error', () => {
+      useGlobalConfig('models:\n  tiers:\n    medium: { host: pi, model: local/x, thinking: low }\n  parallel:\n    local/x: 2\n');
+      // The project keeps the model: the limit is inherited.
+      const kept = projectWith('models:\n  tiers:\n    small: { host: pi, model: local/x, thinking: off }\n');
+      expect(loadCatalog(kept, { starterAgents: STARTER }).limits.get('local/x')).toBe(2);
+      // The project moves to another model: the inherited limit is ignored there.
       const moved = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\n');
       expect(loadCatalog(moved, { starterAgents: STARTER }).limits.size).toBe(0);
-      const removed = projectWith('endpoints:\n  local:\n');
+      // A limit belongs to the whole id: another model of the same provider does not share it.
+      const sibling = projectWith('models:\n  tiers:\n    medium: { host: pi, model: local/z, thinking: low }\n');
+      expect(loadCatalog(sibling, { starterAgents: STARTER }).limits.size).toBe(0);
+      // The project's own entry replaces the global one, and an empty value removes it.
+      const replaced = projectWith('models:\n  parallel:\n    local/x: 5\n');
+      expect(loadCatalog(replaced, { starterAgents: STARTER }).limits.get('local/x')).toBe(5);
+      const removed = projectWith('models:\n  parallel:\n    local/x:\n');
       expect(loadCatalog(removed, { starterAgents: STARTER }).limits.size).toBe(0);
-      const own = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\nendpoints:\n  local: { parallel: 1 }\n');
-      expect(() => loadCatalog(own, { starterAgents: STARTER })).toThrow(/no model of a tier/);
+      // A limit the project writes itself for a model nothing uses is a load error naming the model, with the text the page quotes.
+      const own = projectWith('models:\n  tiers:\n    medium: { host: pi, model: other/y, thinking: low }\n  parallel:\n    local/x: 1\n');
+      expect(() => loadCatalog(own, { starterAgents: STARTER })).toThrow('model "local/x": no tier or tier override uses it, so it cannot have a parallel limit');
+      expect(DOC).toContain('model "<id>": no tier or tier override uses it, so it cannot have a parallel limit');
       // The removal entry is refused in the global file.
       useGlobalConfig('models:\n  tiers:\n    large:\n');
       expect(() => loadCatalog(moved, { starterAgents: STARTER })).toThrow(/removal entry is only accepted in the agent file/);
       expect(DOC).toMatch(/Only the project file accepts this; in the global file it is an error/);
-      expect(DOC).toMatch(/`large:` under `models.tiers`, or `local:` under `endpoints`/);
+      expect(DOC).toMatch(/`large:` under `models.tiers`, or `local\/qwen3-coder-30b:` under `models.parallel`/);
     });
 
     it('fails delegation, naming the host, when the child driver has no starter tools', () => {
@@ -278,9 +292,80 @@ describe('docs/configuration.md', () => {
       expect(notSupported).not.toMatch(/no `enabled: false`/i);
     });
 
-    it('an endpoint entry holds only parallel: base_url is not read as a field', () => {
-      const root = projectWith(`endpoints:\n  local: { base_url: http://x }\n${MINIMAL}`);
-      expect(() => loadAgentFile(root)).toThrow(/parallel must be a positive whole number/);
+    it('an entry of models.parallel is a positive whole number and nothing else', () => {
+      for (const value of ['0', '1.5', '"2"', '{ parallel: 1 }']) {
+        const root = projectWith(MINIMAL.replace('agents:', `  parallel:\n    local/x: ${value}\nagents:`));
+        expect(() => loadAgentFile(root), value).toThrow('model "local/x": parallel must be a positive whole number');
+      }
+      expect(DOC).toContain('An entry under `models.parallel` is a number and nothing else');
+      expect(DOC).toContain('`model "<id>": parallel must be a positive whole number`');
+    });
+  });
+
+  describe('models.parallel and the removed endpoints key', () => {
+    const LIMITS = '## `models.parallel`: limits per model';
+    const OLD_KEY = 'endpoints:';
+
+    it('documents models.parallel with an example that loads, and the limit is shared by the tiers that name the model', () => {
+      expect(DOC_RAW).toContain(LIMITS);
+      const example = yamlAfter(LIMITS);
+      expect(example).toContain('parallel:');
+      const catalog = loadAgentFile(projectWith(`${example}${MINIMAL.replace(/^[\s\S]*?agents:/, 'agents:')}`));
+      expect([...catalog.tiers.keys()]).toEqual(['small', 'medium']);
+      // Both tiers name the model, and the one limit belongs to the whole id.
+      expect([...catalog.limits]).toEqual([['r9700/Qwen3.8', 1]]);
+      const section = flat(sectionOfDoc('`models.parallel`: limits per model'));
+      expect(section).toMatch(/every tier that names it shares the limit/);
+      expect(section).toMatch(/A model with no entry has no limit\. That includes the model of a continued task/);
+      expect(section).toMatch(/The count is per process/);
+      expect(section).toMatch(/A limit in the global file that no tier of the project uses is ignored in that project/);
+    });
+
+    it('documents endpoints only as removed, and its example fails with the error text the page quotes', () => {
+      const example = yamlAfter('### `endpoints:` is a load error');
+      expect(example).toBe('endpoints:\n  local:\n    parallel: 1\n');
+      // The agent file: the merged configuration's models are listed with each old limit.
+      const root = projectWith(`${example}${MINIMAL}`);
+      const file = path.join(root, '.agents', 'subzero.yaml');
+      let message = '';
+      try {
+        loadAgentFile(root);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain(`the agent file holds "endpoints:", which "models.parallel" replaced, in ${file}`);
+      expect(message).toContain('endpoint local (limit 1) covered local/x');
+      expect(message).toContain('/subzero:init in Claude Code or /subzero init in pi');
+      const section = flat(sectionOfDoc('`models.parallel`: limits per model'));
+      expect(section).toMatch(/The error names the file, says that `models.parallel` replaced it, lists each old limit with the models it covered, and points to guided init/);
+      expect(section).toMatch(/Guided init repairs the file\. It pre-fills each listed model's limit with the old value, shows the diff, and writes only after you confirm/);
+      expect(section).toMatch(/repairs that one first, in its own confirmed step/);
+      expect(section).toMatch(/`init <model>` does not repair it/);
+      // The global file: only the global file's own tiers' models are listed.
+      const global = useGlobalConfig(`models:\n  tiers:\n    medium: { host: pi, model: local/g, thinking: low }\n${example}`);
+      const own = projectWith('models:\n  tiers:\n    small: { host: pi, model: local/p, thinking: off }\n');
+      let globalMessage = '';
+      try {
+        loadCatalog(own, { starterAgents: STARTER });
+      } catch (err) {
+        globalMessage = (err as Error).message;
+      }
+      expect(globalMessage).toContain(`the global file holds "endpoints:", which "models.parallel" replaced, in ${global}`);
+      expect(globalMessage).toContain('covered local/g');
+      expect(globalMessage).not.toContain('local/p');
+      // No page text presents the key as accepted: every mention of it is in the removed-key section, the error table or the init text.
+      const outside = DOC_RAW.replace(sectionOfDoc('`models.parallel`: limits per model'), '');
+      for (const line of outside.split('\n').filter((l) => l.includes(OLD_KEY) || l.includes('`endpoints`'))) {
+        expect(line, line).toMatch(/load error|fails to load|holds|replaced|old|repair|init|still|every|If you|message|error/i);
+      }
+      expect(DOC).toContain('`the agent file holds "endpoints:"` (or `the global file holds ...`)');
+      expect(CHANGELOG).toMatch(/Behavior change: the `endpoints:` key is removed\. A file that holds it fails to load until guided init repairs it/);
+      expect(README).toContain('the `endpoints:` key of earlier previews is gone');
+    });
+
+    it('names the command flags guided init uses for limits', () => {
+      expect(DOC).toContain('`--limit <model>=<n>` and `--no-limit <model>`');
+      expect(CHANGELOG).toContain('`--limit <model>=<n>` and `--no-limit <model>`');
     });
   });
 
@@ -293,7 +378,8 @@ describe('docs/configuration.md', () => {
       ['unknown key "color"', `${MINIMAL}  a:\n    description: d\n    tools: [read]\n    timeout: 5\n    color: red\n`],
       ['timeout is required (seconds)', `${MINIMAL}  a:\n    description: d\n    tools: [read]\n`],
       ['skill "nope" is not in the skills map', `${MINIMAL}  a:\n    description: d\n    tools: [read]\n    timeout: 5\n    skills: [nope]\n`],
-      ['no model of a tier', `endpoints:\n  zzz: { parallel: 1 }\n${MINIMAL}`],
+      ['no tier or tier override uses it', MINIMAL.replace('agents:', '  parallel:\n    zzz/y: 1\nagents:')],
+      ['the agent file holds "endpoints:"', `endpoints:\n  zzz: { parallel: 1 }\n${MINIMAL}`],
     ];
     it.each(cases)('the message "%s" is what the loader says', (fragment, yaml) => {
       expect(() => loadAgentFile(projectWith(yaml))).toThrow(fragment);
@@ -333,7 +419,7 @@ describe('docs/configuration.md', () => {
     expect(init).toMatch(/`config show` marks each tier and limit as coming from the global file or from the project/);
     expect(init).toMatch(/`init <model>` is unchanged by the global file. It writes the project file/);
     expect(init).toMatch(/add `small` or `large` afterwards, run guided init/i);
-    expect(init).toMatch(/checked against this project only: another project whose agents use a tier you remove, or whose own limit uses an endpoint you move away from, may fail to load until it is fixed/);
+    expect(init).toMatch(/checked against this project only: another project whose agents use a tier you remove, or whose own limit belongs to a model you move away from, may fail to load until it is fixed/);
     expect(init).toMatch(/defaults it offers are the tiers and limits that come from the global file/);
     expect(init).toMatch(/A write of the global file also needs a new session in every other open project/);
     expect(init).toMatch(/It writes the project file only, never the global file/);

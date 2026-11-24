@@ -5,7 +5,7 @@
 }
 @design/claude-mcp-server.sigil from ClaudeMcpServer import {
   readiness marker, plugin data folder, SessionStart hook, delegate tool,
-  await tool, tasks tool, deferred line, task mode, MCP task,
+  await tool, tasks tool, deferred line, continue tool,
 }
 @design/kernel.sigil from Kernel import { parent adapter, parent host, child host }
 @design/delegation-service.sigil from DelegationService import {
@@ -74,11 +74,38 @@ component ClaudeRoutingHooks {
     Agent spawn.
 
     A *wake marker* is a plugin data folder entry for one background task of a
-    parent session id. The *wake hook* is an asyncRewake Stop hook that watches
-    only those entries, never the store folder.
+    parent session id, or for one turn of such a task that opened without a
+    call to wait for it. The *wake hook* is an asyncRewake Stop hook that watches
+    only those entries and never reads the store folder. A wake marker names the
+    path of the collected marker of its turn, which the wake hook creates, as an
+    empty file by exclusive create, once it has delivered the turn's result, so
+    that no other path delivers that result again; an error there is ignored.
+
+    The *prompt hook* is a UserPromptSubmit hook, which Claude Code runs when
+    the user submits a message, also while a tool call blocks. A
+    *prompt marker* is a plugin data folder entry for one parent session id
+    that holds the time the user last submitted a message there.
+
+    A *call marker* is a plugin data folder entry for one call of the
+    delegate tool, the continue tool or the await tool, keyed by the
+    *tool-use id* of its hook input alone, with no other key. It holds the
+    *agent id* of the hook input when the hook input carries one, which it
+    does only for a call made inside a subagent. The tool-use id of a call
+    is the one that Claude Code also gives the MCP server in the metadata of
+    its request.
   }
 
   logic {
+    When the user submits a message, the prompt hook writes the prompt marker
+    of its parent session id with the time of that submit and lets the message
+    through unchanged, which ends the flow.
+
+    When a call of the delegate tool, the continue tool or the await tool is
+    about to run, the PreToolUse hook writes the call marker of its tool-use
+    id with the agent id of its hook input when there is one, allows the
+    call and prints nothing. It writes no call marker when the hook input
+    carries no tool-use id, which ends the flow.
+
     When a Stop event starts the wake hook, it waits while a wake marker of
     that parent session id is pending. When a marker records a result text and
     completion notice, the hook atomically claims it and exits with both, waking
@@ -93,7 +120,11 @@ component ClaudeRoutingHooks {
     nothing and end the flow. When a file fails with a load error, add a
     one-line warning that names that file and says routing is off as the
     routing text, which ends the flow. When it loads with no routable tier
-    that a tier word maps to, add nothing and end the flow. Otherwise build
+    that a tier word maps to, add nothing and end the flow. When the
+    *lock utility* that the deny memory runs, lockf on macOS and flock on
+    Linux, cannot be started, add a one-line warning that names it and says
+    routing is off instead of the routing text, because the PreToolUse hook
+    then allows every Agent spawn, which ends the flow. Otherwise build
     the routing text from each routable tier that a tier word maps to and add
     it to Claude's context, which ends the flow.
 
@@ -122,6 +153,21 @@ component ClaudeRoutingHooks {
   }
 
   constraints {
+    The prompt hook must never block, delay or change a message, must write no
+    text of the message into the prompt marker, and must exit 0 with no output
+    on any error, so that a broken prompt hook only loses the early end of a
+    wait. It must also print nothing when it succeeds, because the standard output
+    of a UserPromptSubmit hook that exits 0 becomes the context of Claude.
+
+    The call marker must be keyed by the tool-use id alone and must record
+    the agent id as the hook input gives it, so that the MCP server, which
+    finds it by the tool-use id of its request, tells the call of a subagent
+    from the call of the main conversation. The PreToolUse hook must allow
+    every call of the delegate tool, the continue tool and the await tool
+    whatever its call marker holds, write a call marker for no other tool,
+    and exit 0 with no output on any error, so that a broken hook only loses
+    the early end of a wait.
+
     The routing text must name each routable tier that a tier word maps to
     against
     its tier word, say
@@ -130,24 +176,13 @@ component ClaudeRoutingHooks {
     Agent tool, and list every other tier word as
     staying on Claude. It must say that a subagent spawn that asks for a fork
     or for worktree isolation stays on the Agent tool and is never sent to the
-    delegate tool. While the task mode in the readiness marker is off, it must
-    tell
+    delegate tool. It must tell
     Claude to dispatch every routed subagent
-    with wait false in one message and then call the await tool with every
-    task id
+    in one message, where each runs in the background, and then call the
+    await tool with every task id
     and up to 600 seconds until every task is done. A non-interactive server
-    waits even for wait false and returns the result in that delegate call.
-    While the task mode is on,
-    it
-    must tell Claude to dispatch every routed subagent in one message without
-    asking to wait, so that each becomes an MCP task, and to wait for every
-    completion notice before it uses the results together. While the
-    readiness marker is absent or holds no task mode, it must tell Claude to
-    dispatch every
-    routed subagent in one message without asking to wait, and to collect a
-    task id
-    that comes back with the await tool, so that the wording works in both
-    modes. It must say that a
+    waits and returns the result in that delegate call.
+    It must say that a
     queued task has not launched yet and that a task's launch time is its
     start time, and that when the delegate tool is refused or returns a
     tool error
@@ -168,9 +203,7 @@ component ClaudeRoutingHooks {
 
     The deny reason must name the delegate tool by its full name
     mcp__plugin_subzero_subzero__delegate, the model tier as tier, the prompt
-    unchanged as the brief text, and wait false while the task mode is off, the
-    same neutral wording as the routing text while the readiness marker holds
-    no task mode,
+    unchanged as the brief text, and the await tool to collect it,
     and it must say that this is a routing rule and not an error, and that
     Claude
     must not call Agent again for this subagent or change its model, except
@@ -266,7 +299,8 @@ component ClaudeRoutingHooks {
     entry
     scripts. The SessionStart hook runs the recording of the parent session id
     that ClaudeMcpServer owns, and the *PreToolUse hook* matches Agent|Task so
-    that older Claude Code builds are covered.
+    that older Claude Code builds are covered. It also matches the delegate tool,
+    the continue tool and the await tool, for the call marker.
 
     ClaudeRoutingHooks must route by the tier word through the routing text and
     the
@@ -281,6 +315,15 @@ component ClaudeRoutingHooks {
   }
 
   cases {
+    A message that the user types 10 seconds into a blocking MCP tool call runs
+    the prompt hook during the call, and the prompt marker of its parent
+    session id holds that time before the call returns.
+
+    A PreToolUse input for the await tool that carries an agent id writes a
+    call marker with that agent id under its tool-use id and allows the
+    call, and the same input with no agent id writes a call marker with
+    none. A call marker is never written for the Agent tool.
+
     In every case here the merged configuration also holds the medium tier,
     and a case that names the model tiers configured names only
     the
@@ -288,11 +331,8 @@ component ClaudeRoutingHooks {
     that carry a tier word.
 
     At a SessionStart with no readiness marker, the routing text tells Claude
-    to
-    dispatch without asking to wait and to collect any task id with the
-    await tool,
-    and the next SessionStart after the server wrote its task mode uses the
-    wording of that task mode.
+    to dispatch in the background and collect every task id with the await tool,
+    the same wording as when a readiness marker is found.
 
     With only the model tier medium configured, the routing text sends mid-tier
     work to delegate with the model tier medium and says that cheapest capable
@@ -317,7 +357,7 @@ component ClaudeRoutingHooks {
 
     With medium configured and a live readiness marker, a generic spawn with
     the alias sonnet is denied with a deny reason that names the delegate tool,
-    the model tier medium and wait false.
+    the model tier medium and the await tool.
 
     With the model tier medium configured, an Agent spawn of the named
     specialist agent Explore with sonnet is allowed.
@@ -361,16 +401,26 @@ component ClaudeRoutingHooks {
     The wake hook reads each wake marker of the current parent session id and
     delivers its result text and completion notice when it is complete.
 
+    Run the prompt hook for each message the user submits and record its
+    prompt marker, so that the MCP server can end a waited call early when the
+    user types.
+
     Add the routing text to Claude's context at each session start, resume,
     /clear and compaction, built from the merged configuration under the
     project root that CLAUDE_PROJECT_DIR names, read at that moment, or a
-    one-line warning when a file that exists fails to load, or nothing when
-    the project is off or no routable tier that a tier word maps to.
+    one-line warning when a file that exists fails to load or the
+    lock utility cannot be started, or nothing when the project is off or no
+    routable tier that a tier word maps to.
 
     Answer each Agent spawn of the Agent tool through the PreToolUse hook with
     allow, or with deny and the deny reason that Claude sees, as its logic
     gives,
     and allow the pass-back that its logic names.
+
+    Write a call marker for each call of the delegate tool, the continue tool and
+    the await tool, keyed by its tool-use id and holding the agent id of the
+    hook input when it carries one, so that the MCP server can tell the call of a
+    subagent from the call of the main conversation.
   }
 
   decisions {
@@ -399,9 +449,7 @@ component ClaudeRoutingHooks {
     The general agent runs with write and shell tools inside its child host,
     outside the permission prompts of the Claude Code parent host, which the
     user
-    accepted so that compound-engineering reviewers keep full fidelity. The
-    routing text reads the task mode from the readiness marker because a hook
-    process cannot see what Claude Code advertised to the server.
+    accepted so that compound-engineering reviewers keep full fidelity.
 
     Two limits are known and left open. The hook input carries the permission
     mode of the session, which the hook does not read, so a generic spawn made

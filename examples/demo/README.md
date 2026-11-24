@@ -102,7 +102,7 @@ Known limits:
   them only after you trust the folder.
 - `--setting-sources project,local` keeps your own Claude Code plugins out of the
   demo; your login is unaffected.
-- The endpoint serves one request at a time (`parallel: 1` in
+- The model serves one request at a time (`models.parallel` in
   `.agents/subzero.yaml`), so the reviewers run one after another.
 - Keep reviewer output small: the model server caps one reply at 4096 tokens.
   subzero passes a reply back to Claude whole, never cut, and tells the child

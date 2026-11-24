@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { registerPiExtension } from '../../src/pi-parent/extension.js';
 import { DelegationService } from '../../src/service/delegation-service.js';
 import { fakePi } from './fake-pi-api.js';
-import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, GLOBAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, TIERED_YAML, useGlobalConfig } from '../helpers.js';
+import { FAKE_PI_COMMAND, fakePiEnv, kernelWithPort, GLOBAL_MEDIUM_YAML, makeProject, manualPort, piKernel, tempDir, TIERED_YAML, until, useGlobalConfig } from '../helpers.js';
 
 describe('pi extension', () => {
   it('registers subagent and starts a background child on the requested tier', async () => {
@@ -13,7 +13,7 @@ describe('pi extension', () => {
     const fake = fakePi(root);
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
     await fake.emit('session_start');
-    expect([...fake.tools.keys()].sort()).toEqual(['subagent', 'subzero_await', 'subzero_cancel', 'subzero_tasks']);
+    expect([...fake.tools.keys()].sort()).toEqual(['subagent', 'subzero_await', 'subzero_cancel', 'subzero_continue', 'subzero_tasks']);
     const subagent = fake.tools.get('subagent')!;
     expect(subagent.executionMode).toBe('parallel');
     expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toMatch(/cheapest capable \(small\).*model: "small"/);
@@ -50,7 +50,7 @@ describe('pi extension with a global file', () => {
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port, STARTER), warn: () => {} }));
     await fake.emit('session_start');
     const subagent = fake.tools.get('subagent')!;
-    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toBe('Delegate an isolated task. Await background tasks before using their results.');
+    expect(subagent.prepareLoadout?.({} as any)?.descriptions?.subagent).toMatch(/^Delegate an isolated task\. Await background tasks with subzero_await before using their results\. When the user gives information/);
     expect(await subagent.execute('call', { task: 'x' }, undefined, undefined, fake.context as any)).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/enabled: false/) }] });
     expect(started).toHaveLength(0);
   });
@@ -72,7 +72,7 @@ describe('pi extension requests', () => {
     const collected = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
     expect(collected.content[0]).toMatchObject({ text: expect.stringMatching(/status: completed/) });
     const argv = child.log()[0].argv as string[];
-    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen-small');
+    expect(argv[argv.indexOf('--model') + 1]).toBe('local/qwen');
     const listed = await fake.tools.get('subzero_tasks')!.execute('tasks', {}, undefined, undefined, fake.context as any);
     expect(listed.content[0]).toMatchObject({ text: expect.stringContaining(taskId!) });
   });
@@ -127,7 +127,7 @@ describe('pi extension requests', () => {
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel, warn: () => {} }));
     await fake.emit('session_start');
     await fake.tools.get('subagent')!.execute('call', { task: 'x', agent: 'reviewer' }, undefined, undefined, fake.context as any);
-    expect(models).toEqual(['local/qwen-small']);
+    expect(models).toEqual(['local/qwen']);
     started[0]!.settle();
   });
 
@@ -184,8 +184,8 @@ describe('pi extension requests', () => {
     expect(reply.content[0]).toMatchObject({ text: expect.stringMatching(/status: cancelled/) });
   });
 
-  it('queues simultaneous calls at the endpoint limit', async () => {
-    const root = makeProject(TIERED_YAML.replace('endpoints:\n', 'endpoints:\n  r9700:\n    parallel: 2\n'));
+  it('queues simultaneous calls at the model limit', async () => {
+    const root = makeProject(TIERED_YAML.replace('  parallel:\n', '  parallel:\n    r9700/Qwen3.8: 2\n'));
     const { port, started } = manualPort();
     const fake = fakePi(root);
     registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
@@ -217,5 +217,266 @@ describe('pi extension requests', () => {
     started[1]!.settle({ lastAssistantText: 'second result' });
     const reply = await awaited;
     expect(reply.content[0]).toMatchObject({ text: expect.stringMatching(/first result[\s\S]*second result/) });
+  });
+});
+
+describe('pi await of a collected turn', () => {
+  it('names subzero_tasks, not subzero_await, as the tool that reads a turn that already reached the parent', async () => {
+    const root = makeProject(TIERED_YAML);
+    const { port, started } = manualPort();
+    const fake = fakePi(root);
+    registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
+    await fake.emit('session_start');
+    const reply = await fake.tools.get('subagent')!.execute('call', { task: 'one' }, undefined, undefined, fake.context as any);
+    const taskId = /sz-[a-z2-7]{6}/.exec(JSON.stringify(reply))![0];
+    started[0]!.settle({ lastAssistantText: 'first result' });
+    const first = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
+    expect(first.content[0]).toMatchObject({ text: expect.stringContaining('first result') });
+    const again = await fake.tools.get('subzero_await')!.execute('await', { tasks: [taskId], timeout_s: 10 }, undefined, undefined, fake.context as any);
+    expect(again.content[0]).toMatchObject({ text: expect.stringMatching(/already reached you.*read it again with subzero_tasks/) });
+  });
+});
+
+describe('pi subzero_continue and early end of a wait', () => {
+  const STEER = { type: 'input', text: 'x', source: 'interactive', streamingBehavior: 'steer' };
+  const textOf = (reply: { content: { type: string; text?: string }[] }) => {
+    const content = reply.content[0];
+    if (!content || content.type !== 'text') throw new Error('expected text');
+    return content.text!;
+  };
+  const idOf = (text: string) => /sz-[a-z2-7]{6}/.exec(text)![0];
+  const completions = (fake: ReturnType<typeof fakePi>) =>
+    (fake.messages as [{ customType: string; content: string }, unknown][]).filter(([message]) => message.customType === 'subzero-completion').map(([message]) => message.content);
+
+  async function session(mode: 'tui' | 'print' = 'tui', yaml = TIERED_YAML) {
+    const root = makeProject(yaml);
+    const { port, runs } = manualPort({ steers: true, resume: true });
+    const fake = fakePi(root, mode);
+    registerPiExtension(fake.api, () => new DelegationService({ env: { SUBZERO_PROJECT_DIR: root }, kernel: kernelWithPort(port), warn: () => {} }));
+    await fake.emit('session_start');
+    const run = (name: string, args: Record<string, unknown>, signal?: AbortSignal) =>
+      fake.tools.get(name)!.execute('call', args, signal, undefined, fake.context as any);
+    /** A background task, answered and settled, with nobody left to collect its notice. */
+    const settledTask = async () => {
+      const pending = run('subagent', { task: 'first', async: false });
+      await until(() => runs.length === 1);
+      runs[0]!.emit({ kind: 'prompt_sent' });
+      runs[0]!.settle({ lastAssistantText: 'turn one answer' });
+      return idOf(textOf(await pending));
+    };
+    return { root, runs, fake, run, settledTask };
+  }
+
+  it('covers R13: a subagent call with async false ends when a steering message is typed, and the child keeps running', async () => {
+    const { runs, fake, run } = await session();
+    const pending = run('subagent', { task: 'long job', async: false });
+    await until(() => runs.length === 1);
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    await fake.emit('input', STEER);
+    const text = textOf(await pending);
+    expect(text).toMatch(/task: sz-[a-z2-7]{6}/);
+    expect(text).toMatch(/running/);
+    expect(text).toMatch(/you sent a message, so this call stopped waiting/);
+    expect(runs[0]!.cancelled).toBe(false);
+    runs[0]!.settle();
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R13: a subzero_continue call with async false on a settled task ends when a steering message is typed, and the new turn keeps running', async () => {
+    const { runs, fake, run, settledTask } = await session();
+    const id = await settledTask();
+    const pending = run('subzero_continue', { task: id, message: 'more please', async: false });
+    await until(() => runs.length === 2);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    await fake.emit('input', STEER);
+    const text = textOf(await pending);
+    expect(text).toContain(id);
+    expect(text).toMatch(/new turn: turn 2/);
+    expect(text).toMatch(/you sent a message, so this call stopped waiting/);
+    expect(runs[1]).toMatchObject({ kind: 'resume', prompt: 'more please', cancelled: false });
+    runs[1]!.settle();
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R13: a subzero_await over two running tasks ends when a steering message is typed, and both keep running', async () => {
+    const { runs, fake, run } = await session();
+    const ids = (await Promise.all(['one', 'two'].map((task) => run('subagent', { task })))).map((reply) => idOf(textOf(reply)));
+    await until(() => runs.length === 2);
+    const pending = run('subzero_await', { tasks: ids, timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await fake.emit('input', STEER);
+    const text = textOf(await pending);
+    for (const id of ids) expect(text).toContain(id);
+    expect(text).toMatch(/running/);
+    expect(text).toMatch(/you sent a message, so this call stopped waiting/);
+    expect(runs.map((r) => r.cancelled)).toEqual([false, false]);
+    for (const r of runs) r.settle();
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R13: a wait ended early later yields exactly one completion notice for its turn', async () => {
+    const { runs, fake, run } = await session();
+    const pending = run('subagent', { task: 'long job', async: false });
+    await until(() => runs.length === 1);
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    await fake.emit('input', STEER);
+    const id = idOf(textOf(await pending));
+    expect(completions(fake)).toEqual([]);
+    runs[0]!.settle({ lastAssistantText: 'finished late' });
+    await until(() => completions(fake).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(completions(fake)).toHaveLength(1);
+    expect(completions(fake)[0]).toContain(id);
+    expect(fake.messages[0]).toMatchObject([{ customType: 'subzero-completion' }, { triggerTurn: true, deliverAs: 'steer' }]);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R13: a subzero_await ended early yields exactly one completion notice for each task it left running', async () => {
+    const { runs, fake, run } = await session();
+    const ids = (await Promise.all(['one', 'two'].map((task) => run('subagent', { task })))).map((reply) => idOf(textOf(reply)));
+    await until(() => runs.length === 2);
+    const pending = run('subzero_await', { tasks: ids, timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await fake.emit('input', STEER);
+    await pending;
+    for (const r of runs) r.settle();
+    await until(() => completions(fake).length >= 2);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    // A task started in the background already reports itself; ending the await early must not add a second notice.
+    for (const id of ids) expect(completions(fake).filter((notice) => notice.startsWith(`task ${id} `))).toHaveLength(1);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('sends no completion notice for a turn that a later subzero_await returned, after an earlier await ended early', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    const first = run('subzero_await', { tasks: [id], timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await fake.emit('input', STEER);
+    expect(textOf(await first)).toMatch(/running/);
+    const second = run('subzero_await', { tasks: [id], timeout_s: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    runs[0]!.settle({ lastAssistantText: 'the answer' });
+    expect(textOf(await second)).toContain('the answer');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(completions(fake)).toEqual([]);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('still sends the completion notice when a subzero_await timed out before the turn settled', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    expect(textOf(await run('subzero_await', { tasks: [id], timeout_s: 0 }))).toMatch(/running/);
+    runs[0]!.settle();
+    await until(() => completions(fake).length === 1);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: subzero_continue on a running background task replies steered with the task id', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    const text = textOf(await run('subzero_continue', { task: id, message: 'one more thing' }));
+    expect(text).toContain(id);
+    expect(text).toMatch(/steered/);
+    expect(runs[0]!.steers).toEqual(['one more thing']);
+    runs[0]!.settle();
+    await until(() => completions(fake).length === 1);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: subzero_continue on a settled task with async true replies new turn 2, and turn 2 settles with one completion notice naming turn 2', async () => {
+    const { runs, fake, run, settledTask } = await session();
+    const id = await settledTask();
+    const text = textOf(await run('subzero_continue', { task: id, message: 'again', async: true }));
+    expect(text).toContain(id);
+    expect(text).toMatch(/new turn: turn 2/);
+    await until(() => runs.length === 2);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle({ lastAssistantText: 'turn two answer' });
+    await until(() => completions(fake).length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(completions(fake)).toHaveLength(1);
+    expect(completions(fake)[0]).toContain(id);
+    expect(completions(fake)[0]).toMatch(/turn 2/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it.each([
+    ['no streaming behavior', undefined],
+    ['followUp', 'followUp'],
+  ])('covers R13: an input event with %s ends nothing', async (_name, streamingBehavior) => {
+    const { runs, fake, run } = await session();
+    let settled = false;
+    const pending = run('subagent', { task: 'long job', async: false }).then((reply) => { settled = true; return reply; });
+    await until(() => runs.length === 1);
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    expect(await fake.emit('input', { type: 'input', text: 'x', source: 'interactive', ...(streamingBehavior !== undefined ? { streamingBehavior } : {}) })).toEqual({ action: 'continue' });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(settled).toBe(false);
+    runs[0]!.settle({ lastAssistantText: 'the real result' });
+    const text = textOf(await pending);
+    expect(text).toMatch(/the real result/);
+    expect(text).not.toMatch(/stopped waiting/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R8: a turn opened by a message held for a task that settles first reports one completion notice through the sink', async () => {
+    const { runs, fake, run } = await session();
+    const id = idOf(textOf(await run('subagent', { task: 'long job' })));
+    await until(() => runs.length === 1);
+    expect(textOf(await run('subzero_continue', { task: id, message: 'late word' }))).toMatch(/queued/);
+    runs[0]!.steerAnswer = 'settled';
+    runs[0]!.emit({ kind: 'prompt_sent' });
+    runs[0]!.settle({ lastAssistantText: 'turn one answer' });
+    await until(() => runs.length === 2);
+    expect(runs[1]).toMatchObject({ kind: 'resume', prompt: 'late word' });
+    await until(() => completions(fake).length === 1);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle({ lastAssistantText: 'turn two answer' });
+    await until(() => completions(fake).length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const notices = completions(fake);
+    expect(notices).toHaveLength(2);
+    expect(notices.filter((notice) => /turn 2/.test(notice))).toHaveLength(1);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: in print mode subzero_continue forces a wait and returns the result of turn 2', async () => {
+    const { runs, fake, run, settledTask } = await session('print');
+    const id = await settledTask();
+    const pending = run('subzero_continue', { task: id, message: 'go on' });
+    await until(() => runs.length === 2);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle({ lastAssistantText: 'turn two answer' });
+    const text = textOf(await pending);
+    expect(text).toMatch(/new turn: turn 2/);
+    expect(text).toMatch(/turn two answer/);
+    expect(text).not.toMatch(/this mode waits/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: in print mode a subzero_continue that sets async and opens a new turn says that this mode waits', async () => {
+    const { runs, fake, run, settledTask } = await session('print');
+    const id = await settledTask();
+    const pending = run('subzero_continue', { task: id, message: 'go on', async: true });
+    await until(() => runs.length === 2);
+    runs[1]!.emit({ kind: 'prompt_sent' });
+    runs[1]!.settle({ lastAssistantText: 'turn two answer' });
+    const text = textOf(await pending);
+    expect(text).toMatch(/turn two answer/);
+    expect(text).toMatch(/notice: this mode waits for the result/);
+    await fake.emit('session_shutdown', { reason: 'quit' });
+  });
+
+  it('covers R1: the subagent description tells the parent model when subzero_continue sends a follow-up message', async () => {
+    const { fake } = await session();
+    const description = fake.tools.get('subagent')!.prepareLoadout?.({} as any)?.descriptions?.subagent ?? '';
+    expect(description).toMatch(/subzero_await/);
+    expect(description).toMatch(/when the user gives information that a running or finished task needs, subzero_continue sends that task a follow-up message, written self-contained/i);
+    await fake.emit('session_shutdown', { reason: 'quit' });
   });
 });

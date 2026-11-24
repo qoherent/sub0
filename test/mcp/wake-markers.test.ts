@@ -30,6 +30,19 @@ describe('background wake markers', () => {
     expect(markers.read('session-a')).toEqual({ pending: false, notice: undefined });
   });
 
+  it('keeps a task\'s marker for turn 1 and its marker for turn 2 apart, and clears one without the other', () => {
+    const markers = new WakeMarkers(mkdtempSync(path.join(tmpdir(), 'subzero-wake-')), '/project');
+    markers.start('session-a', 'sz-one');
+    markers.start('session-a', 'sz-one#2');
+    expect(() => markers.start('session-a', 'sz-one#2')).toThrow();
+    markers.finish('session-a', 'sz-one', JSON.stringify({ notice: 'turn one', collectedMarker: '/store/turns/1.collected' }));
+    markers.finish('session-a', 'sz-one#2', JSON.stringify({ notice: 'turn two', collectedMarker: '/store/turns/2.collected' }));
+    markers.clear('session-a', 'sz-one');
+    const read = markers.read('session-a');
+    expect(JSON.parse(read.notice!)).toEqual({ notice: 'turn two', collectedMarker: '/store/turns/2.collected' });
+    expect(read.pending).toBe(false);
+  });
+
   it('wakes on a completed result after the Stop hook starts', async () => {
     const data = mkdtempSync(path.join(tmpdir(), 'subzero-wake-data-'));
     const project = realpathSync(mkdtempSync(path.join(tmpdir(), 'subzero-wake-project-')));

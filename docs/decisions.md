@@ -138,15 +138,19 @@ make each choice explicitly.
    detailed plan is in [target-claude-pi.md](target-claude-pi.md) §6.
 2. **v0.1 (the preview release, `0.1.0-preview.N`):** the spike's core, pi child driver and MCP server,
    tiered subagent routing for compound-engineering, and the Claude Code plugin with its `qoherent`
-   marketplace. Built; see [status.md](status.md).
-3. **v0.2:** YAML schema + `validate`/`lock`, the rest of the task model (`continue`, `ask`, `fork`,
-   `rerun`, `report`), nested delegation (D14), `record: none` runs, read-only and workspace-write,
-   proxy skills, generated `host: native` subagents (D12), skill manifests (`agents/subzero.yaml`,
-   D17), `result.report_file`, sigil-write as the second workload (writer → evaluator → interpreters),
-   Codex child driver.
-4. **v0.3:** Claude child driver (bare and non-bare auth paths), pi parent extension, Codex parent
-   plugin. (Child sessions are already kept, since v0.1; follow-ups through `continue` and a kept-alive
-   process, `process: keep`, are v0.2.)
+   marketplace. Built; see [status.md](status.md). Built since, ahead of the old phasing: the pi parent
+   extension (planned for v0.3), guided `init` in both parents, and the global config file
+   `~/.agents/subzero.yaml` with `enabled: false` (part of the old v0.2 config layering).
+3. **v0.2 (narrowed 2026-11-23, decisions 35–57):** `continue` with steering on both parents (Claude
+   Code and pi), and parallel limits per model (`models.parallel`) in place of limits per endpoint.
+   Nothing else.
+4. **v0.3:** the rest of the former v0.2: YAML schema + `validate`/`lock`, the rest of the task model
+   (`ask`, `fork`, `rerun`, `report`), nested delegation (D14), `record: none` runs, read-only and
+   workspace-write, proxy skills, generated `host: native` subagents (D12), skill manifests
+   (`agents/subzero.yaml`, D17), `subzero.local.yaml`, `result.report_file`, `process: keep`, sigil-write
+   as the second workload (writer → evaluator → interpreters); plus the Codex child driver, the Claude
+   child driver (bare and non-bare auth paths) and the Codex parent plugin. This is too much for one
+   release and will be split when v0.2 ships.
 5. **v0.4:** generic ACP driver, worktree mode, structured outputs everywhere, plus D12 (compile to
    native) if it is worth it.
 
@@ -292,3 +296,169 @@ and the revised `design/*.sigil`; the plan is `plans/2026-11-11-1012-feat-pi-par
 34. **The approval boundary.** A pi child gets the tools its agent entry lists. The starter `general` entry may
     write files and run shell commands, children run isolated from pi's own extensions, and installing the package
     is the opt-in. Capping a child to the parent's active tools is left for later.
+
+## Decisions for v0.2: continue, steering and limits per model (2026-11-23)
+
+These were decided one at a time with the user. They supersede TaskCore's one-brief rule ("continue, ask, fork
+and rerun are not offered"), the "a task request produces exactly one result" constraint (now one result per
+turn), the rule of design.md §3.1 that a `continue` arriving during a turn is queued as pi `follow_up` or
+refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil contracts are revised next.
+
+35. **v0.2 is narrowed** to `continue` with steering on both parents and parallel limits per model. The rest of the
+    former v0.2 moves to v0.3 (see "Suggested phasing"). Why: the former v0.2 held about twenty independent items,
+    and none of them is needed to ship these.
+36. **One tool, `continue`** (`subzero_continue` on pi), takes a task id and a message, and the task's state decides
+    what it does. On a Pending or Starting task it holds the message (39); on a running task it steers the current
+    turn (37); on a settled task it starts a new turn in the same child session. The reply says which happened, so
+    the parent knows whether to expect the current turn's result or a new one. Why: with separate `steer` and
+    `continue` tools, a child that settles just before a steer arrives forces a second call with the same text,
+    and the parent would have to know a task's state, which it sees only through status lines. The one thing
+    lost is queueing a separate next turn while a turn runs (pi `follow_up`); the parent waits for the result
+    and continues instead.
+37. **The parent model steers.** The intended flow is: the user tells the parent something while a child works,
+    and the parent decides whether a child needs it and writes it a self-contained message, under the same rule
+    as the brief. Steering uses pi `steer`, not `follow_up`, so a steered turn still settles once with one
+    result. There is no user command to steer or continue (no `/subzero continue`, no CLI command).
+38. **Waits end early on pi.** When the user types while the parent is blocked in a subzero wait (`subagent` with
+    `async: false`, or `subzero_await`), the pi extension sees the `input` event with `streamingBehavior: "steer"`
+    and ends the wait with the status lines of the tasks still running; the children keep running and the parent
+    reads the message at once. A `subagent` call ended that way returns its task id, and its result comes as a
+    completion notice. On Claude Code, waits are unchanged: the MCP server cannot see a message typed during a
+    blocking call, and cancelling such a call within 120 seconds runs a session cancel. A probe must show whether
+    a Claude Code hook sees a message typed mid-turn; until then this is a documented limit there.
+39. **A message for a task that has not started is held.** For a Pending or Starting task, TaskCore keeps the
+    messages in order and sends them as steering right after the brief. The brief stays as written, so the
+    task record and the one-brief check do not change. The reply says the message is queued.
+40. **A task that never started can be continued.** `continue` on a settled task with no child session (cancelled
+    while Pending, or failed before the brief: skill_mismatch, a host-option check, a crash during start-up)
+    releases it with its original brief and sends the message right after it.
+41. **Only the current parent session's tasks.** `continue` reaches the tasks of the current parent session id.
+    A task of another parent session gets "not delivered" with its status line, and its result is not repeated.
+    pi `/reload` and `/resume` keep or restore the session id, so their tasks stay reachable; tasks from before
+    a Claude Code `/clear`, a new pi session or a fork do not. Continuing any settled task of the project, with
+    ownership taken over, is left for later; it needs no change to the tool.
+42. **No overrides.** A continued turn runs on the task's frozen agent definition, model and thinking level, even
+    if the agent file has changed, and the reply does not mention a change. Escalating to a larger tier is a new
+    delegation; an optional tier on `continue` can be added later.
+43. **Timeouts.** Each new turn gets the agent's full timeout, and each delivered steering message restarts the
+    timeout clock of the current turn. There is no ceiling on a task's total run time: the user and the cancel
+    tool are the limit, and the pi session widget shows elapsed time.
+44. **Results.** Every turn returns exactly one result, task id first. From turn 2 on, the result names its turn.
+    It carries no count of steering messages. `await` on a task id returns its latest turn; earlier turns stay in
+    the task record. The completion notice and the stop notice work per turn as they do per task today.
+45. **The record.** Every message a child receives, the brief and each later one, is written whole as a domain
+    event, and the task record keeps each turn with its message and result. Cancelling stops the current turn;
+    the task can still be continued.
+46. **Running a new turn.** `continue` on a settled task waits or runs in the background by the same rules as
+    `delegate` on each parent, and its result arrives the same way. A new turn goes through its model's parallel
+    queue like a new task; steering does not queue. The child exits after each turn, and a new turn starts pi
+    again on the same session; `process: keep` stays out.
+47. **Optional per child host.** Steering and new turns are optional offerings of a child driver, like the attach
+    command. The pi driver offers both; a parent asking a child host without them gets a refusal. On Claude Code
+    the `continue` tool is loaded on demand like `tasks` and `cancel`, and only `delegate` and `await` stay
+    always loaded.
+48. **Parallel limits per model.** `models.parallel` maps a full model id (`local/qwen3-coder-30b`) to its limit, a
+    positive whole number; tiers that name the same model share one counter, and a model with no entry has no
+    limit. The count stays per parent session, first come first served. It merges by model id like the old
+    endpoint entries: the agent file's entry wins; a global entry that no tier of the project uses is ignored,
+    and an agent-file entry that no tier uses is a load error (52). `endpoints:` is removed
+    and is now a load error that names the file, says `endpoints` was replaced by `models.parallel` and lists the
+    models of that endpoint its old limit covered (53). Guided init repairs such a file: it pre-fills each model's
+    limit with the old endpoint value, shows the change in its diff and writes only after the user confirms, in
+    the file of the scope chosen. `init <model>` does not repair. Why per model: it fits cloud providers with
+    limits per model and servers that run each model in its own process. What is lost: one limit shared by
+    several models on one server (the one-GPU case) can no longer be written; such a setup gives each model
+    its own limit, which the diff makes visible.
+
+49. **Held messages whose turn ends first.** A follow-up message held for a child run that sent its prompt and then
+    settled, or that pi refused because the run had settled, opens a new turn as for a settled task. Held
+    messages of a child run that failed or was cancelled before its prompt are not delivered, and that turn's
+    result says so in one line. Why: a message the caller was told is queued must not vanish, and a task that
+    fails at every start (skill_mismatch) must not loop.
+50. **Abandoned tasks.** A task of the current parent session whose owner died mid-turn is continued like a settled
+    one: a new turn on its child session, or a release with its brief when it never sent its prompt. Why: the
+    partial work is kept, and every task that is not running can be continued.
+51. **Taking a task over.** A process that continues a task of the same parent session takes ownership of it. Only a
+    turn that is running in a live owner blocks this, because only that owner holds the child's stdin; a settled
+    or abandoned task can be taken over even while its owner lives. The rule is in DelegationService and holds on
+    both parents, because no core service names a parent host. This refines 41, which deferred only continuing
+    tasks of other parent sessions.
+52. **An unused limit in the agent file is a load error.** A `models.parallel` entry in the agent file that no tier or
+    tier override uses fails the load; in the global file it is ignored. Why: a model id is easy to mistype, and a
+    silently ignored limit would flood a one-GPU server. This corrects the wording of 48.
+53. **What the `endpoints:` error lists.** For each endpoint it lists the models its old limit covered: for the agent
+    file, the models of this project's merged configuration; for the global file, the models of its own tiers.
+    Guided setup pre-fills from the same list.
+
+54. **A turn that opens on its own reaches Claude Code by a wake marker.** When held messages open a turn with no
+    call waiting for it, the MCP server records a wake marker for that turn whatever the task mode, and the wake
+    hook wakes Claude with its result. A wake marker therefore names a turn, not only a task. Why: no MCP task
+    exists for such a turn, and a parent told only "queued" would otherwise never be prompted to collect it.
+
+55. **The Claude Code `continue` tool never answers with an MCP task.** It always replies at once with the delivery
+    outcome, whatever the task mode; its `wait` defaults to true, as `delegate`'s does while task mode is off, and a
+    new turn it does not wait for reports back through a wake marker for that turn. Why: "steered" needs no
+    follow-up and the parent should know it at once, and `continue` then behaves the same whether task mode is on
+    or off.
+
+56. **Guided init repairs `endpoints:` in the other file first.** When `endpoints:` is in the file the chosen scope does
+    not write (the global file for "only this project", or the agent file for "every project"), guided init first
+    offers to repair that file in its own step, with its own preview and confirmation, writing per-model limits
+    pre-filled from the old value and removing `endpoints:`, and then goes on with the chosen scope. Why: otherwise
+    the load error stays in every project, and each write still has exactly one preview and one confirm.
+
+57. **Waits end early on Claude Code too.** This replaces the Claude Code half of 38. A UserPromptSubmit hook (the
+    prompt hook) writes a prompt marker for its parent session id each time the user submits a message. While a
+    waited `delegate`, `continue` or `await` call blocks, the MCP server watches that marker, and when the user
+    has typed since the call started it ends the wait without cancelling anything: `delegate` and `continue`
+    return the task id with its status line and say the user sent a message, `await` returns the status lines of
+    the tasks still running, and each task left running reports back by wake marker. Why: Claude Code calls wait
+    by default, so without this a message reaches the parent only after the child settles. A probe on Claude Code
+    2.1.322 (spike-results.md) showed the hook fires at submit time during a blocking MCP call.
+
+58. **Every uncollected turn reaches the parent.** When a later turn opens before an earlier turn's result was
+    collected, collecting the task (a collect, an `await`, or the notice's collect hint) returns every uncollected
+    turn's result, oldest first, then the latest turn's status line. A result whose held messages opened a new turn
+    says so in one line, and a notice never lists its own task as running. A turn counts as collected once any path
+    has delivered its result to the parent, and that mark is durable, so a restarted or taking-over process
+    neither repeats nor skips a turn. Why: a message held for a task that settles first opens a turn of its own,
+    and returning only the latest turn would hide the answer to the brief behind it.
+59. **On Claude Code, only the main conversation's waits end early.** The prompt marker of 57 is per parent session,
+    and a subagent shares its parent's session id yet cannot see the user's message, so ending its wait would only
+    break its work. The PreToolUse hook therefore also matches subzero's tools and records each call's agent id,
+    keyed by the tool-use id that Claude Code gives both the hook and the MCP request (probe below). The server
+    ends a wait early only for a call whose marker is found and records no agent id; a call with an agent id, or
+    with no marker found, keeps waiting. Why: this decides between breaking subagents and not ending waits at all,
+    and the probe shows the safe trigger exists.
+60. **Messages that did not reach a child are replayed, and a reload reports what stopped.** When a turn is abandoned
+    before its child sent its prompt, its messages are replayed in order before the next turn's own message, and the
+    reply says so. After a pi reload or resume, the parent's next turn carries one notice that lists the tasks a
+    session end stopped and the messages that did not reach them, once. Why: a message the parent wrote must not
+    vanish silently with a stopped child, and a parent that is not told cannot repeat it.
+61. **The Claude Code server offers no MCP tasks.** This replaces the MCP-task part of 30 (decided 2026-11-24). The
+    server no longer advertises the tasks capability or marks `delegate` as task-capable, and the SDK refuses a
+    task-augmented call without starting a child. `wait` defaults to true, the readiness marker holds no task mode,
+    and the routing text and deny reason always ask for `wait: false` and then `await`. A background result reaches
+    Claude only through a wake marker, so the "whatever the task mode" clauses of 54 and 55 no longer qualify
+    anything. Why: Claude Code 2.1.322 never sent the task parameter, interactive or under `claude -p`, so the branch
+    was never used. It still had to be accounted for in every v0.2 rule, and it left a waited task-mode `delegate`
+    that could not end early when the user typed. If a later Claude Code selects MCP tasks, the branch is rebuilt
+    against what that version actually does.
+62. **On Claude Code, `delegate` and `continue` run in the background unless asked to wait.** This replaces the
+    `wait` default of 30 and of 55 (decided 2026-11-24). `wait` defaults to false on both tools; `wait: true` returns
+    the result inline. A non-interactive or unidentified session still always waits, because a background result
+    there is lost when Claude exits. The routing text and deny reason no longer spell out `wait: false`. Why: the wake
+    hook delivered and cleared background results correctly in the live checks, waiting by default dated from before
+    that was known, and pi's `subagent` and `subzero_continue` already run in the background by default.
+
+Checked on pi 1.5.2 on 2026-11-23, with subzero's child flags and a real model: relaunching with
+`--session-id <task id>` and the same `--session-dir`, without `--session`, reopens the existing session (the child
+recalled a word from turn 1); a `steer` sent during the turn's last model call, with no tools, is answered
+`disposition: "queued"` and read before `agent_settled`, in the same turn; `/reload` (through `ctx.reload()`, the
+same flow) keeps the pi session id. pi's `steer` reply does not promise the message stays queued (`clear_queue`
+drops it), so "delivered" means accepted before `agent_settled`, as PiDriver says.
+
+Checked on Claude Code 2.1.330 on 2026-11-23 (spike-results.md): a PreToolUse hook for an MCP tool call carries
+`tool_use_id`, and `agent_id` and `agent_type` only when a subagent made the call; the MCP server receives the same id
+as `params._meta["claudecode/toolUseId"]`. So the call marker of 59 is keyed by the tool-use id alone, and no
+input-hash fallback is needed.

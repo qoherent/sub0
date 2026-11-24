@@ -89,7 +89,7 @@ describe('README.md', () => {
     expect(README).toMatch(/plan mode is not respected/i);
     expect(README).toMatch(/pi is the only (child )?host/i);
     expect(README).toMatch(/general agent[^.]*write files[^.]*run shell commands[^.]*outside Claude Code's permission prompts/is);
-    expect(README).toMatch(/queue is per (Claude Code )?session/i);
+    expect(README).toMatch(/queue is per (Claude Code )?(session|process)/i);
   });
 
   it('lists the two limits of the demo README and the hook on every Agent call', () => {
