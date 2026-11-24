@@ -444,6 +444,12 @@ refused as `busy`, and the per-endpoint parallel limit of 11 and 29. The Sigil c
     was never used. It still had to be accounted for in every v0.2 rule, and it left a waited task-mode `delegate`
     that could not end early when the user typed. If a later Claude Code selects MCP tasks, the branch is rebuilt
     against what that version actually does.
+62. **On Claude Code, `delegate` and `continue` run in the background unless asked to wait.** This replaces the
+    `wait` default of 30 and of 55 (decided 2026-11-24). `wait` defaults to false on both tools; `wait: true` returns
+    the result inline. A non-interactive or unidentified session still always waits, because a background result
+    there is lost when Claude exits. The routing text and deny reason no longer spell out `wait: false`. Why: the wake
+    hook delivered and cleared background results correctly in the live checks, waiting by default dated from before
+    that was known, and pi's `subagent` and `subzero_continue` already run in the background by default.
 
 Checked on pi 1.5.2 on 2026-11-23, with subzero's child flags and a real model: relaunching with
 `--session-id <task id>` and the same `--session-dir`, without `--session`, reopens the existing session (the child

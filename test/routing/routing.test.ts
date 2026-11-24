@@ -56,9 +56,10 @@ describe('generic spawn test', () => {
 describe('routing text', () => {
   const textFor = (root: string) => buildRoutingText(wordTiers(routableTiers(root)));
 
-  it('always asks for wait false and the await loop, whether or not a readiness marker is known', () => {
+  it('always dispatches in the background and collects with the await loop, whether or not a readiness marker is known', () => {
     const text = buildRoutingText(wordTiers(routableTiers(project(config('medium')))));
-    expect(text).toMatch(/wait: false\) in one message/);
+    expect(text).toMatch(/\(tier, brief\) in one message; it runs in the background/);
+    expect(text).not.toMatch(/wait: false/);
     expect(text).toMatch(/timeout_s: 600/);
     expect(text).toMatch(/await reply[^\n]*not show[^\n]*tasks/i);
     expect(text).not.toMatch(/completed tasks deliver their results|if it returns a task id/i);
@@ -74,11 +75,11 @@ describe('routing text', () => {
     expect(text).not.toContain('tier: "large"');
   });
 
-  it('names the full tool id, the wait false then await batch pattern and the launch-equals-start rule', () => {
+  it('names the full tool id, the background then await batch pattern and the launch-equals-start rule', () => {
     const text = textFor(project(config('medium')));
     expect(DELEGATE_TOOL).toBe('mcp__plugin_subzero_subzero__delegate');
     expect(text).toContain('mcp__plugin_subzero_subzero__delegate');
-    expect(text).toMatch(/wait: false/);
+    expect(text).toMatch(/runs in the background/);
     expect(text).toMatch(/one message/);
     expect(text).toMatch(/await[^\n]*tasks[^\n]*timeout_s: 600/);
     expect(text).toMatch(/until (every|all)/);

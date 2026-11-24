@@ -206,7 +206,7 @@ component ClaudeMcpServer {
 
     On a continue call, make a continuation with its task id, its
     follow-up message, the parent session id of the caller and its wait, which
-    defaults to true and is forced to true where the wait of a delegate call
+    defaults to false and is forced to true where the wait of a delegate call
     is. Return the delivery outcome with the status line at once, or
     the result text of the new turn when the call waits for it, which ends the
     flow. A new turn that the call does not wait for is followed through a
@@ -464,7 +464,7 @@ component ClaudeMcpServer {
     running ends as cancelled.
 
     In a non-interactive Claude Code session, a delegate call waits and returns
-    the result even when it sets wait false.
+    the result even when it sets no wait or wait false.
 
     With a waited delegate call on a live task, a message that the user types
     writes the prompt marker, the call returns the task id with its status line
@@ -497,9 +497,11 @@ component ClaudeMcpServer {
     Let the *delegate tool*, mcp__plugin_subzero_subzero__delegate, accept a
     call with an optional agent name, an optional model tier written as medium
     or tier:medium, a brief text, optional files, an optional expected output
-    and an optional wait that defaults to true. In a non-interactive or
+    and an optional wait that defaults to false, so that the delegation runs
+    in the background and the call returns its task id. In a non-interactive or
     unknown mode it
-    waits even when wait is false. Return the result with the task id first.
+    waits even when wait is false. A call that waits returns the result with
+    the task id first.
 
     Record the parent session id of each conversation through the
     SessionStart hook at each session start.

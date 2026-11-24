@@ -26,7 +26,7 @@ export const SERVER_INSTRUCTIONS = [
 export const MAX_AWAIT_SECONDS = 600;
 
 const DELEGATE_DESCRIPTION =
-  'Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Returns the result with the task id first, or the task id when running in the background.';
+  'Delegate a task to a subzero agent running on another model. With no agent it runs the general agent. A tier picks the model the agent runs on. Runs in the background by default and returns the task id; with wait: true it returns the result with the task id first.';
 
 const TOOLS = [
   {
@@ -40,7 +40,7 @@ const TOOLS = [
         brief: { type: 'string', description: 'A self-contained brief; the child cannot see this conversation' },
         files: { type: 'array', items: { type: 'string' }, description: 'Paths the child should read' },
         expected_output: { type: 'string', description: 'What the result should contain' },
-        wait: { type: 'boolean', description: 'Wait for the result; defaults to true' },
+        wait: { type: 'boolean', description: 'Wait for the result; defaults to false, which runs it in the background' },
       },
       required: ['brief'],
     },
@@ -75,7 +75,7 @@ const TOOLS = [
       properties: {
         task: { type: 'string', description: 'The task id' },
         message: { type: 'string', description: 'A self-contained message for the child' },
-        wait: { type: 'boolean', description: 'For a new turn: wait for its result; defaults to true' },
+        wait: { type: 'boolean', description: 'For a new turn: wait for its result; defaults to false, which runs it in the background' },
       },
       required: ['task', 'message'],
     },
@@ -234,7 +234,7 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           const tier = stringArg(args, 'tier');
           const files = Array.isArray(args.files) ? args.files.filter((f): f is string => typeof f === 'string') : undefined;
           const expectedOutput = stringArg(args, 'expected_output');
-          const wait = options.nonInteractive === true || args.wait !== false ||
+          const wait = options.nonInteractive === true || args.wait === true ||
             (options.wakeDataDir !== undefined && currentSession === undefined);
           // Connect first, so the parent session id is read for the resolved root.
           await service.start();
@@ -373,10 +373,10 @@ export function createSubzeroServer(options: SubzeroServerOptions): Server {
           if (task === undefined || !isTaskId(task)) return text(`"${task ?? ''}" is not a task id`, true);
           if (message === undefined || message.trim() === '') return text('continue needs a message', true);
           await service.start();
-          // A new turn waits unless asked not to; a steered or queued message always replies at once.
+          // A new turn waits only when asked to; a steered or queued message always replies at once.
           // Forced to true where the wait of a delegate call is: a non-interactive or unknown mode, or
           // no known parent session id while wake markers are in use.
-          const wait = options.nonInteractive === true || args.wait !== false ||
+          const wait = options.nonInteractive === true || args.wait === true ||
             (options.wakeDataDir !== undefined && currentSession === undefined);
           let ownTask: string | undefined = task;
           const onAbort = () => {

@@ -37,23 +37,24 @@ function setup(yaml: string | undefined, marker = true) {
 const spawnOf = (prompt: string, extra: Partial<SpawnInput> = {}): SpawnInput => ({ prompt, description: 'review things', ...extra });
 
 describe('decideAgentSpawn', () => {
-  it('ignores the task mode an older server wrote into its readiness marker: the deny reason still asks for wait false', () => {
+  it('ignores the task mode an older server wrote into its readiness marker: the deny reason is the same', () => {
     const { root, data, ctx } = setup(config(['medium']));
     const key = createHash('sha256').update(root).digest('hex').slice(0, 16);
     const file = path.join(data, 'ready', key, `${process.pid}.json`);
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), taskMode: true }));
     const out = decideAgentSpawn(spawnOf('review', { model: 'sonnet' }), ctx());
     expect(out.decision).toBe('deny');
-    if (out.decision === 'deny') expect(out.reason).toMatch(/wait: false, then collect it with the await tool/);
+    if (out.decision === 'deny') expect(out.reason).toMatch(/prompt unchanged, then collect it with the await tool/);
   });
-  it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and wait false', () => {
+  it('AE5: denies a generic sonnet spawn toward medium, naming delegate, tier and the await tool', () => {
     const { ctx } = setup(config(['medium']));
     const out = decideAgentSpawn(spawnOf('do the review', { model: 'sonnet', subagent_type: 'general-purpose' }), ctx());
     expect(out.decision).toBe('deny');
     if (out.decision !== 'deny') return;
     expect(out.reason).toContain(DELEGATE);
     expect(out.reason).toContain('tier: "medium"');
-    expect(out.reason).toContain('wait: false');
+    expect(out.reason).toContain('collect it with the await tool');
+    expect(out.reason).not.toContain('wait: false');
     expect(out.reason).toContain('do the review');
     expect(out.reason).toMatch(/routing rule, not an error/);
     expect(out.reason).toMatch(/do not call Agent again/);

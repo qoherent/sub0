@@ -72,9 +72,9 @@ export function buildRoutingText(tiers: RoutableTier[]): string {
   }
   lines.push(
     'Pass the subagent prompt unchanged as brief. A subagent spawn that asks for a fork or for worktree isolation stays on the Agent tool and is never sent to subzero.',
-    `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief, wait: false) in one message. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
+    `Dispatch every routed subagent with ${DELEGATE_TOOL}(tier, brief) in one message; it runs in the background. Then call ${AWAIT_TOOL} with tasks (every task id) and timeout_s: ${AWAIT_SECONDS}, and repeat it until every task is done.`,
     `A task whose result an await reply does not show must be read with ${TASKS_TOOL}(task) before it is used.`,
-    'In a non-interactive or unidentified session, delegate waits and returns the result even when asked not to wait.',
+    'In a non-interactive or unidentified session, delegate waits and returns the result in that call.',
     'A queued task has not launched yet: no child is running and it starts when its model has room. A task\'s launch time is its `started` time; the time it waited does not count.',
     `If ${DELEGATE_TOOL} is refused or returns a tool error and made no task, pass that subagent back: call Agent with the same prompt and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails; never pass it back.`,
   );
@@ -224,7 +224,7 @@ function sweepDenyMemory(dataDir: string, now: number, keep: string): void {
 /** The deny reason Claude sees (KTD8, KTD17). */
 export function buildDenyReason(tier: string, prompt: string): string {
   return [
-    `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}", brief set to this Agent call's prompt unchanged, and wait: false, then collect it with the await tool.`,
+    `Send this subagent to subzero instead of the Agent tool: call ${DELEGATE_TOOL} with tier: "${tier}" and brief set to this Agent call's prompt unchanged, then collect it with the await tool.`,
     'This is a routing rule, not an error; do not call Agent again for this subagent and do not change its model.',
     `Only if ${DELEGATE_TOOL} is refused or returns a tool error and made no task, call Agent again with the prompt unchanged and a short description that begins with \`${PASSBACK_WORD}\`. Once a task id came back the work stays with subzero, even if its result fails.`,
     `brief:\n${prompt}`,

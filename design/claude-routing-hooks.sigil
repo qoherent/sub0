@@ -178,10 +178,10 @@ component ClaudeRoutingHooks {
     or for worktree isolation stays on the Agent tool and is never sent to the
     delegate tool. It must tell
     Claude to dispatch every routed subagent
-    with wait false in one message and then call the await tool with every
-    task id
+    in one message, where each runs in the background, and then call the
+    await tool with every task id
     and up to 600 seconds until every task is done. A non-interactive server
-    waits even for wait false and returns the result in that delegate call.
+    waits and returns the result in that delegate call.
     It must say that a
     queued task has not launched yet and that a task's launch time is its
     start time, and that when the delegate tool is refused or returns a
@@ -203,7 +203,7 @@ component ClaudeRoutingHooks {
 
     The deny reason must name the delegate tool by its full name
     mcp__plugin_subzero_subzero__delegate, the model tier as tier, the prompt
-    unchanged as the brief text, and wait false,
+    unchanged as the brief text, and the await tool to collect it,
     and it must say that this is a routing rule and not an error, and that
     Claude
     must not call Agent again for this subagent or change its model, except
@@ -331,7 +331,7 @@ component ClaudeRoutingHooks {
     that carry a tier word.
 
     At a SessionStart with no readiness marker, the routing text tells Claude
-    to dispatch with wait false and collect every task id with the await tool,
+    to dispatch in the background and collect every task id with the await tool,
     the same wording as when a readiness marker is found.
 
     With only the model tier medium configured, the routing text sends mid-tier
@@ -357,7 +357,7 @@ component ClaudeRoutingHooks {
 
     With medium configured and a live readiness marker, a generic spawn with
     the alias sonnet is denied with a deny reason that names the delegate tool,
-    the model tier medium and wait false.
+    the model tier medium and the await tool.
 
     With the model tier medium configured, an Agent spawn of the named
     specialist agent Explore with sonnet is allowed.

@@ -620,7 +620,7 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/claud
 - **Session start.** The SessionStart hook records the session id and prints the routing text, built
   from the current agent file: each compound-engineering tier word (`small`, `medium`, `large`) whose tier
   is configured goes to `delegate` with that tier; the others stay on the Agent tool. The text also gives
-  the batch pattern (`delegate` with `wait: false` in one message, then `await` up to 600 seconds), says a
+  the batch pattern (`delegate` in one message, each running in the background, then `await` up to 600 seconds), says a
   queued task has not launched, keeps fork and worktree spawns on the Agent tool, and explains the
   pass-back. No routable tier word means no text; an agent file that fails to load gives a one-line warning.
 - **The redirect hook.** A PreToolUse hook on `Agent|Task` denies a generic spawn (no agent type,
@@ -642,9 +642,8 @@ its probes, [spike-results.md](spike-results.md)). The contract is `design/claud
   processes, and the server takes the newest entry whose ancestors include its own parent process, so two
   Claude sessions in one project never mix their listings.
 - **Background and completion.** The server offers no MCP tasks (decision 61): Claude Code 2.1.322 did not
-  select them in the platform probe. For `wait: false` calls, an `asyncRewake` Stop hook watches per-session completion markers and wakes Claude with the result. It renews its watch
-  for long-running work. A result already collected, or a cancelled task, does not produce a wake. Calls
-  wait by default. Non-interactive and unidentifiable parent processes always wait, as
+  select them in the platform probe. `delegate` and `continue` run in the background unless a call sets `wait: true` (decision 62). For background calls, an `asyncRewake` Stop hook watches per-session completion markers and wakes Claude with the result. It renews its watch
+  for long-running work. A result already collected, or a cancelled task, does not produce a wake. Non-interactive and unidentifiable parent processes always wait, as
   does the fallback when the session ID is unknown. This conservative check also makes terminal-less IDE
   and SDK sessions wait. The full live checks remain to be run.
 - **Cancel.** Escape does not stop a background task in Claude Code. The `/subzero:cancel` plugin skill (a

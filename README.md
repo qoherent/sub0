@@ -348,8 +348,8 @@ every turn you have not seen yet, oldest first, then the latest status line.
 
 Claude uses it on its own when you tell it something a running child needs, and
 you can ask for it: "tell the reviewer task also to check the tests". On Claude
-Code, `wait` defaults to true for a new turn. On pi, `subzero_continue` runs in the background unless you pass
-`async: false`.
+Code, a new turn runs in the background unless the call sets `wait: true`; on
+pi, `subzero_continue` does the same unless you pass `async: false`.
 
 Limits:
 - **Only tasks of the current conversation can be continued.** A task that

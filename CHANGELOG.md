@@ -37,10 +37,12 @@
   the old value, show the diff and write only after you confirm, repairing first
   the file that the chosen scope does not write. `init <model>` does not repair.
 - Behavior change: the Claude Code MCP server no longer offers MCP tasks.
-  Claude Code never selected them, so the branch was never used. `delegate`'s
-  `wait` defaults to true, and a background result always arrives through the
-  wake hook. The routing text and the deny reason always ask for `wait: false`
-  and then `await`.
+  Claude Code never selected them, so the branch was never used. A background
+  result always arrives through the wake hook.
+- Behavior change: on Claude Code, `delegate` and `continue` run in the
+  background unless the call sets `wait: true`, as `subagent` and
+  `subzero_continue` already do on pi. A non-interactive or unidentified
+  session still always waits.
 
 ## 0.1.0-preview.1
 

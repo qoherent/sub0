@@ -121,7 +121,7 @@ describe('ClaudeMcpServer', () => {
   it('passes back a delegation when the agent file is missing', async () => {
     const { root, call, textOf, service } = await connect();
     rmSync(path.join(root, '.agents', 'subzero.yaml'));
-    const result: any = await call('delegate', { brief: 'go' });
+    const result: any = await call('delegate', { brief: 'go', wait: true });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/missing.*subzero init.*Agent tool.*passback/s);
     expect(await service.list()).toEqual([]);
@@ -146,7 +146,7 @@ describe('ClaudeMcpServer', () => {
     ];
     const { call, textOf } = await connect({ turn, lastText: 'summary here' });
     const messages: string[] = [];
-    const result = await call('delegate', { agent: 'helper', brief: 'go' }, { onprogress: (p) => messages.push(p.message ?? '') });
+    const result = await call('delegate', { agent: 'helper', brief: 'go', wait: true }, { onprogress: (p) => messages.push(p.message ?? '') });
     const text = textOf(result);
     expect(text.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · helper · status: completed/);
     expect(text).toContain('summary here');
@@ -167,7 +167,7 @@ describe('ClaudeMcpServer', () => {
   it('cancels the task of a waited call on notifications/cancelled', async () => {
     const { call, fake, service } = await connect({ turn: [{ hang: true }] });
     const abort = new AbortController();
-    const pending = call('delegate', { agent: 'helper', brief: 'go' }, { signal: abort.signal }).catch(() => 'aborted');
+    const pending = call('delegate', { agent: 'helper', brief: 'go', wait: true }, { signal: abort.signal }).catch(() => 'aborted');
     await until(() => fake.log().some((l) => l.command === 'prompt'));
     abort.abort();
     expect(await pending).toBe('aborted');
@@ -184,7 +184,7 @@ describe('ClaudeMcpServer', () => {
     clock.mockReturnValue(initial);
     try {
       const abort = new AbortController();
-      const pending = call('delegate', { agent: 'free', brief: 'waited' }, { signal: abort.signal }).catch(() => undefined);
+      const pending = call('delegate', { agent: 'free', brief: 'waited', wait: true }, { signal: abort.signal }).catch(() => undefined);
       await until(() => started.length === 2);
       if (late) clock.mockReturnValue(initial + 120_001);
       abort.abort();
@@ -222,7 +222,7 @@ describe('ClaudeMcpServer', () => {
 
   it('returns the unresolved root error as a tool error that says not to retry', async () => {
     const { call } = await connect({}, {});
-    const result: any = await call('delegate', { agent: 'helper', brief: 'go' });
+    const result: any = await call('delegate', { agent: 'helper', brief: 'go', wait: true });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/SUBZERO_PROJECT_DIR/);
     expect(result.content[0].text).toMatch(/do not retry/);
@@ -230,14 +230,14 @@ describe('ClaudeMcpServer', () => {
 
   it('lists only the tasks of the current parent session id, and every task when it is unknown', async () => {
     const known = await connect({}, null, 'session-1');
-    await known.call('delegate', { agent: 'helper', brief: 'go' });
+    await known.call('delegate', { agent: 'helper', brief: 'go', wait: true });
     await known.service.delegate({ agent: 'free', briefText: 'x', parentSessionId: 'session-2' }, { wait: true });
     const listing = known.textOf(await known.call('tasks', {}));
     expect(listing.split('\n').filter((l) => l.startsWith('sz-')).length).toBe(1);
     expect(listing).not.toMatch(/could not identify/);
 
     const unknown = await connect();
-    await unknown.call('delegate', { agent: 'helper', brief: 'go' });
+    await unknown.call('delegate', { agent: 'helper', brief: 'go', wait: true });
     expect(unknown.textOf(await unknown.call('tasks', {}))).toMatch(/could not identify this conversation/);
   });
 
@@ -305,7 +305,7 @@ describe('ClaudeMcpServer', () => {
     const { call, textOf, idIn, started } = await connectManual();
     await call('delegate', { agent: 'helper', brief: 'one', wait: false });
     const messages: string[] = [];
-    const pending = call('delegate', { agent: 'other', brief: 'two' }, { onprogress: (p) => messages.push(p.message ?? '') });
+    const pending = call('delegate', { agent: 'other', brief: 'two', wait: true }, { onprogress: (p) => messages.push(p.message ?? '') });
     await until(() => messages.some((m) => m.includes('waiting')));
     started[0]!.settle();
     await until(() => started.length === 2);
@@ -339,7 +339,7 @@ describe('ClaudeMcpServer', () => {
 describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   it('maps the delegate alias and tier phrase to the general agent on small', async () => {
     const { call, textOf, fake } = await connect({}, null, undefined, TIERED_YAML);
-    const reply: any = await call('delegate', { agent: 'delegate', tier: 'cheapest capable', brief: 'go' });
+    const reply: any = await call('delegate', { agent: 'delegate', tier: 'cheapest capable', brief: 'go', wait: true });
     expect(reply.isError).not.toBe(true);
     expect(textOf(reply)).toMatch(/general:small.*status: completed/);
     const argv = fake.log()[0].argv;
@@ -348,7 +348,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('passes an unmatched tier value back to Claude without creating a task', async () => {
     const { call, textOf, service } = await connect({}, null, undefined, TIERED_YAML);
-    const reply: any = await call('delegate', { tier: 'other/model', brief: 'go' });
+    const reply: any = await call('delegate', { tier: 'other/model', brief: 'go', wait: true });
     expect(reply.isError).toBe(true);
     expect(textOf(reply)).toMatch(/other\/model.*Agent tool.*passback/s);
     expect(await service.list()).toEqual([]);
@@ -357,7 +357,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   it('passes back a tier phrase whose tier is not configured', async () => {
     const yaml = TIERED_YAML.replace('    large: { host: pi, model: cloud/large, thinking: high }\n', '').replace('    tiers:\n      large: { model: cloud/reviewer-large }\n', '');
     const { call, textOf, service } = await connect({}, null, undefined, yaml);
-    const reply: any = await call('delegate', { tier: 'session model', brief: 'go' });
+    const reply: any = await call('delegate', { tier: 'session model', brief: 'go', wait: true });
     expect(reply.isError).toBe(true);
     expect(textOf(reply)).toMatch(/unknown tier "large".*Agent tool.*passback/s);
     expect(await service.list()).toEqual([]);
@@ -375,7 +375,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   it('runs general on the tier model and records general:<tier>, for medium and tier:medium alike', async () => {
     const { call, textOf, fake } = await connect({}, null, undefined, TIERED_YAML);
     for (const tier of ['medium', 'tier:medium']) {
-      const text = textOf(await call('delegate', { brief: 'go', tier }));
+      const text = textOf(await call('delegate', { brief: 'go', tier, wait: true }));
       expect(text.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · general:medium · status: completed/);
     }
     const launches = fake.log().filter((l) => l.argv);
@@ -388,19 +388,19 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('covers AE11: no agent and no tier runs general on its default model and records general', async () => {
     const { call, textOf, fake } = await connect({}, null, undefined, TIERED_YAML);
-    const text = textOf(await call('delegate', { brief: 'go' }));
+    const text = textOf(await call('delegate', { brief: 'go', wait: true }));
     expect(text.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · general · status: completed/);
     const argv = fake.log()[0].argv;
     expect(argv[argv.indexOf('--model') + 1]).toBe('r9700/Qwen3.8');
-    const named = textOf(await call('delegate', { agent: 'general', brief: 'go' }));
+    const named = textOf(await call('delegate', { agent: 'general', brief: 'go', wait: true }));
     expect(named.split('\n')[0]).toMatch(/· general · status: completed/);
   });
 
   it('runs a named agent at a tier with its override, and as today without one', async () => {
     const { call, textOf, fake } = await connect({}, null, undefined, TIERED_YAML);
-    const tiered = textOf(await call('delegate', { agent: 'reviewer', tier: 'large', brief: 'go' }));
+    const tiered = textOf(await call('delegate', { agent: 'reviewer', tier: 'large', brief: 'go', wait: true }));
     expect(tiered.split('\n')[0]).toMatch(/· reviewer:large · status: completed/);
-    const plain = textOf(await call('delegate', { agent: 'reviewer', brief: 'go' }));
+    const plain = textOf(await call('delegate', { agent: 'reviewer', brief: 'go', wait: true }));
     expect(plain.split('\n')[0]).toMatch(/· reviewer · status: completed/);
     const models = fake.log().filter((l) => l.argv).map((l) => l.argv[l.argv.indexOf('--model') + 1]);
     expect(models).toEqual(['cloud/reviewer-large', 'r9700/Qwen3.8']);
@@ -408,7 +408,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('returns an unknown tier as a tool error that lists the tiers and points to a pass-back, and launches nothing', async () => {
     const { call, textOf, fake, service } = await connect({}, null, undefined, TIERED_YAML);
-    const result: any = await call('delegate', { brief: 'go', tier: 'huge' });
+    const result: any = await call('delegate', { brief: 'go', tier: 'huge', wait: true });
     expect(result.isError).toBe(true);
     const text = textOf(result);
     expect(text).toMatch(/unknown tier "huge"; configured tiers: default, medium, small, cloud, large, far/);
@@ -420,7 +420,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('returns a tier whose host has no driver as a tool error naming the host and the supported hosts, and launches nothing', async () => {
     const { call, textOf, fake, service } = await connect({}, null, undefined, TIERED_YAML);
-    const result: any = await call('delegate', { agent: 'reviewer', brief: 'go', tier: 'far' });
+    const result: any = await call('delegate', { agent: 'reviewer', brief: 'go', tier: 'far', wait: true });
     expect(result.isError).toBe(true);
     const text = textOf(result);
     expect(text).toMatch(/"claude".*supported hosts: pi/s);
@@ -433,7 +433,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('covers AE10: an unknown name runs fallback with its tools and says it is not configured, waiting or not', async () => {
     const { call, textOf, fake, service } = await connect({}, null, undefined, TIERED_YAML);
-    const waited = textOf(await call('delegate', { agent: 'reviewr', brief: 'go' }));
+    const waited = textOf(await call('delegate', { agent: 'reviewr', brief: 'go', wait: true }));
     expect(waited.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · fallback · status: completed/);
     expect(waited).toMatch(/reviewr.*not configured/);
     const noWait = textOf(await call('delegate', { agent: 'reviewr', brief: 'go', wait: false }));
@@ -442,7 +442,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     const argv = fake.log()[0].argv;
     expect(argv[argv.indexOf('--tools') + 1]).toBe('read,grep');
     // Naming fallback itself gives no notice.
-    const named = textOf(await call('delegate', { agent: 'fallback', brief: 'go' }));
+    const named = textOf(await call('delegate', { agent: 'fallback', brief: 'go', wait: true }));
     expect(named).toMatch(/· fallback · status: completed/);
     expect(named).not.toMatch(/not configured/);
     expect((await service.list()).map((v) => v.agent)).toEqual(['fallback', 'fallback', 'fallback']);
@@ -450,10 +450,10 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it('runs the built-in fallback and general when the file has neither, with the starter tools of the pi driver', async () => {
     const bare = await connect({}, null, undefined, makeProjectYamlWithoutGeneral().replace(/  fallback:\n    tools: \[read, grep\]\n    timeout: 8\n/, ''));
-    const unknown = bare.textOf(await bare.call('delegate', { agent: 'reviewr', brief: 'go' }));
+    const unknown = bare.textOf(await bare.call('delegate', { agent: 'reviewr', brief: 'go', wait: true }));
     expect(unknown.split('\n')[0]).toMatch(/^task: sz-[a-z2-7]{6} · fallback · status: completed/);
     expect(unknown).toMatch(/reviewr.*not configured/);
-    const general = bare.textOf(await bare.call('delegate', { brief: 'go' }));
+    const general = bare.textOf(await bare.call('delegate', { brief: 'go', wait: true }));
     expect(general.split('\n')[0]).toMatch(/· general · status: completed/);
     const tools = bare.fake.log().filter((l) => l.argv).map((l) => l.argv[l.argv.indexOf('--tools') + 1]);
     expect(tools).toEqual(['read,grep,find,ls', 'read,bash,edit,write,grep,find,ls']);
@@ -465,7 +465,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
     rmSync(path.join(root, '.agents', 'subzero.yaml'));
     const { tools } = await client.listTools();
     expect(tools.find((t) => t.name === 'delegate')!.description).toContain('medium → local/global-medium (host pi)');
-    const reply = textOf(await call('delegate', { tier: 'medium', brief: 'go' }));
+    const reply = textOf(await call('delegate', { tier: 'medium', brief: 'go', wait: true }));
     expect(reply.split('\n')[0]).toMatch(/· general:medium · status: completed/);
     const argv = fake.log()[0].argv;
     expect(argv[argv.indexOf('--model') + 1]).toBe('local/global-medium');
@@ -487,7 +487,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   it('passes back a delegation when there is no project file and no global medium', async () => {
     const { root, call, textOf } = await connect();
     rmSync(path.join(root, '.agents', 'subzero.yaml'));
-    const result: any = await call('delegate', { brief: 'go', tier: 'medium' });
+    const result: any = await call('delegate', { brief: 'go', tier: 'medium', wait: true });
     expect(result.isError).toBe(true);
     expect(textOf(result)).toMatch(/missing.*Agent tool.*passback/s);
   });
@@ -548,7 +548,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
   it('returns a 20,000-character final message whole from delegate, tasks and await', async () => {
     const long = 'FINDING-'.repeat(2500);
     const { call, textOf } = await connect({ lastText: long }, null, undefined, TIERED_YAML);
-    const waited = textOf(await call('delegate', { agent: 'free', brief: 'go' }));
+    const waited = textOf(await call('delegate', { agent: 'free', brief: 'go', wait: true }));
     expect(waited).toContain(`summary:\n${long}\nusage:`);
     const id = taskIdOf(waited);
     expect(textOf(await call('tasks', { task: id }))).toContain(`summary:\n${long}\nusage:`);
@@ -589,7 +589,7 @@ describe('ClaudeMcpServer tiers, general, fallback and await bounds', () => {
 
   it("tells the child the reply budget in the brief of the server's delegations", async () => {
     const { call, textOf, service } = await connect({}, null, undefined, TIERED_YAML);
-    const id = taskIdOf(textOf(await call('delegate', { agent: 'free', brief: 'go', expected_output: 'A list.' })));
+    const id = taskIdOf(textOf(await call('delegate', { agent: 'free', brief: 'go', expected_output: 'A list.', wait: true })));
     expect(service.store.readTask(id)!.task!.brief).toBe(
       'go\n\n## Expected output\n\nA list.\n\n' +
         '## Reply size\n\nKeep your final reply under 48,000 characters. It is returned to the parent whole, never cut.',
@@ -692,7 +692,7 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
   it('covers R16: continue on a task of another conversation answers not delivered and names that', async () => {
     const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
     const id = await directTask(h, 'theirs', 'session-b');
-    const text = h.textOf(await h.call('continue', { task: id, message: 'hello' }));
+    const text = h.textOf(await h.call('continue', { task: id, message: 'hello', wait: true }));
     expect(text).toMatch(new RegExp(`^task: ${id} · not delivered: .*belongs to another conversation`));
     expect(h.started[0]!.steers).toEqual([]);
     h.started[0]!.settle();
@@ -701,7 +701,7 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
   it('covers R16: continue from a conversation that could not be identified answers not delivered and says so', async () => {
     const h = await connectManual(TIERED_YAML, undefined, { steers: true, resume: true, wake: true });
     const id = await directTask(h);
-    const text = h.textOf(await h.call('continue', { task: id, message: 'hello' }));
+    const text = h.textOf(await h.call('continue', { task: id, message: 'hello', wait: true }));
     expect(text).toMatch(new RegExp(`^task: ${id} · not delivered: this conversation could not be identified`));
     h.started[0]!.settle();
   });
@@ -724,12 +724,25 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
     expect(marker.collectedMarker).toMatch(/turns[\\/]2\.collected$/);
   });
 
-  it('covers R16: continue waits by default for the new turn and returns its result naming turn 2', async () => {
+  it('runs delegate and continue in the background when they set no wait: each returns at once and the new turn arms its wake marker', async () => {
+    const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
+    const started = h.textOf(await h.call('delegate', { agent: 'free', brief: 'first' }));
+    expect(started).toMatch(/^task: sz-[a-z2-7]{6} · running/);
+    const id = h.idIn(started);
+    await settled(h, 0, id);
+    const reply = h.textOf(await h.call('continue', { task: id, message: 'go on' }));
+    expect(reply).toMatch(new RegExp(`^task: ${id} · new turn: turn 2`));
+    expect(h.started).toHaveLength(2);
+    expect(h.started[1]!.cancelled).toBe(false);
+    h.started[1]!.settle();
+  });
+
+  it('covers R16: a continue with wait true waits for the new turn and returns its result naming turn 2', async () => {
     const h = await connectManual(TIERED_YAML, SESSION, { steers: true, resume: true, wake: true });
     const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
     await settled(h, 0, id);
     let returned = false;
-    const pending = h.call('continue', { task: id, message: 'go on' }).then((r) => { returned = true; return r; });
+    const pending = h.call('continue', { task: id, message: 'go on', wait: true }).then((r) => { returned = true; return r; });
     await until(() => h.started.length === 2);
     await sleep(60);
     expect(returned).toBe(false);
@@ -745,7 +758,7 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
     const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
     await settled(h, 0, id);
     const messages: string[] = [];
-    const pending = h.call('continue', { task: id, message: 'go on' }, { onprogress: (p) => messages.push(p.message ?? '') });
+    const pending = h.call('continue', { task: id, message: 'go on', wait: true }, { onprogress: (p) => messages.push(p.message ?? '') });
     await until(() => h.started.length === 2);
     await until(() => messages.length > 0);
     expect(messages[0]).toMatch(/free/);
@@ -873,7 +886,7 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
   it('covers R14: a waited delegate ended early returns the task id with its status line and the typed note, and the wake marker of turn 1 wakes with the result', async () => {
     const h = await connectManual(TIERED_YAML, SESSION, { wake: true });
     let returned = false;
-    const pending = h.callWithId('toolu_delegate', 'delegate', { agent: 'free', brief: 'long job' }).then((r) => { returned = true; return r; });
+    const pending = h.callWithId('toolu_delegate', 'delegate', { agent: 'free', brief: 'long job', wait: true }).then((r) => { returned = true; return r; });
     await until(() => h.started.length === 1);
     await sleep(60);
     expect(returned).toBe(false);
@@ -898,7 +911,7 @@ describe('ClaudeMcpServer continue, early end and wake markers by turn', () => {
     const id = h.idIn(h.textOf(await h.call('delegate', { agent: 'free', brief: 'first', wait: false })));
     await settled(h, 0, id);
     let returned = false;
-    const pending = h.callWithId('toolu_continue', 'continue', { task: id, message: 'go on' }).then((r) => { returned = true; return r; });
+    const pending = h.callWithId('toolu_continue', 'continue', { task: id, message: 'go on', wait: true }).then((r) => { returned = true; return r; });
     await until(() => h.started.length === 2);
     await sleep(60);
     expect(returned).toBe(false);
