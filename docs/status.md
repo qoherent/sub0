@@ -185,8 +185,6 @@ These are listed on the install page and are not fixed:
   a Claude Code subagent never ends early.
 - A model with no `models.parallel` entry has no limit, including the model of
   a continued task.
-- A session cancel that lands just after a turn settles cleanly with held
-  messages does not stop the follow-on turn those messages open.
 - A steer answer that arrives more than a second after its run ended is neither
   replayed nor counted in the result.
 - If the MCP server fails to start, the session-start text still says routing is

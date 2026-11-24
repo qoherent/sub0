@@ -207,6 +207,8 @@ export interface ManualPortOptions {
   steers?: boolean;
   /** The port offers session resume; or a function that throws, such as SessionMissingError, to refuse. */
   resume?: boolean | ((request: ChildRunRequest) => void);
+  /** A cancel only marks the run cancelled, so the test settles it, as a child whose turn ended first. */
+  lateCancel?: boolean;
 }
 
 /**
@@ -236,7 +238,7 @@ export function manualPort(options: ManualPortOptions = {}) {
       outcome,
       cancel: () => {
         run.cancelled = true;
-        run.settle({ status: 'cancelled' });
+        if (options.lateCancel !== true) run.settle({ status: 'cancelled' });
       },
       ...(options.steers === true
         ? {

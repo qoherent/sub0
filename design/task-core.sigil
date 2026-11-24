@@ -155,7 +155,11 @@ component TaskCore {
     its result reaches the caller as that of a turn opened for held follow-up
     messages, which ends that branch. When a child run fails or is cancelled before
     it sent its prompt, its held follow-up messages are not delivered and its
-    result says so, so that a task that fails at each start never loops. When
+    result says so, so that a task that fails at each start never loops. A
+    child run that settles after a cancel of its turn was asked for opens no
+    new turn, even when it completes: its held follow-up messages and unread
+    steering messages are not delivered and its result says so, so that a
+    cancel that loses the race to the settle still stops the task. When
     the child run settles, build the result with the
     task id
     first, the whole last assistant text as the summary and the session usage.

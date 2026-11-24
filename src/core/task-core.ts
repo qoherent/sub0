@@ -91,6 +91,8 @@ export class Turn {
   private leftover: string[] = [];
   /** Messages that no child received and none will. */
   private undelivered: string[] = [];
+  /** A cancel was asked for: a run that still settles cleanly opens no next turn. */
+  private cancelRequested = false;
   /** Steering messages are sent one at a time, so a late message never overtakes a held one. */
   private chain: Promise<unknown> = Promise.resolve();
 
@@ -217,6 +219,7 @@ export class Turn {
    * usage; a live run is cancelled through the child port. A reason is kept in the turn file.
    */
   cancel(reason?: StopReason): Promise<Result> {
+    if (this.finalResult === undefined) this.cancelRequested = true;
     if (reason !== undefined && this.finalResult === undefined) {
       try {
         this.task.core.store.writeStopReason(this.task.taskId, this.number, reason);
@@ -332,8 +335,9 @@ export class Turn {
   private finish(result: Result, sessionFile?: string, unreadSteers: string[] = []): void {
     if (this.finalResult !== undefined) return;
     const waiting = [...unreadSteers, ...this.leftover, ...this.held];
-    const clean = result.status === 'completed' || result.status === 'truncated';
-    const lost = clean ? this.undelivered.length : waiting.length + this.undelivered.length;
+    // A run that settles cleanly after a cancel was asked for opens no next turn: the cancel wins the race.
+    const opens = (result.status === 'completed' || result.status === 'truncated') && !this.cancelRequested;
+    const lost = opens ? this.undelivered.length : waiting.length + this.undelivered.length;
     const final: Result = lost > 0 ? { ...result, heldNotDelivered: lost } : result;
     this.finalResult = final;
     this.held = [];
@@ -342,7 +346,7 @@ export class Turn {
     } catch (err) {
       this.task.core.warn(`could not write the result of ${this.task.taskId}: ${(err as Error).message}`);
     }
-    if (clean && waiting.length > 0) this.task.openFollowOn(waiting);
+    if (opens && waiting.length > 0) this.task.openFollowOn(waiting);
     this.setState(stateOfResult(final));
     // The state is terminal: handleEvent returns once the result is set, so no listener hears more.
     this.eventListeners.clear();
